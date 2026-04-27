@@ -200,6 +200,7 @@ $envContent = @(
     "# ─── IMAP 默认配置 ───",
     "DEFAULT_IMAP_HOST=$(Get-UserVal 'DEFAULT_IMAP_HOST' 'imap.feishu.cn')",
     "DEFAULT_IMAP_PORT=$(Get-UserVal 'DEFAULT_IMAP_PORT' '993')",
+    "IMAP_SEARCH_FOLDERS=$(Get-UserVal 'IMAP_SEARCH_FOLDERS' 'INBOX,Junk,Spam')",
     "",
     "# ─── 代理（保留上次部署的值，如需修改请直接编辑此文件）───",
     $proxyLine,

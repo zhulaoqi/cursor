@@ -259,6 +259,7 @@ cat > "${TMP_ENV}" <<EOF
 # 自动生成于 $(date '+%Y-%m-%d %H:%M:%S') by deploy.sh
 DEFAULT_IMAP_HOST=imap.feishu.cn
 DEFAULT_IMAP_PORT=993
+IMAP_SEARCH_FOLDERS=INBOX,Junk,Spam
 
 PROXY=${PROXY_VAL}
 

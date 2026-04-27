@@ -119,23 +119,36 @@ class RunRequest(BaseModel):
 
 # ─── 辅助 ─────────────────────────────────────────────────────────
 
+def _normalize_email(email: str) -> str:
+    """统一邮箱：去空白/零宽字符并转小写，避免 CSV/Excel 导入更新不命中。"""
+    if not email:
+        return ""
+    s = str(email).strip().lower()
+    # 常见不可见字符：BOM / 零宽空格 / 零宽连接符
+    s = re.sub(r"[\u200b\u200c\u200d\ufeff\u2060]", "", s)
+    # 邮箱中不应包含空白，出现时直接移除
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
 def _parse_csv_bytes(data: bytes) -> List[AccountRow]:
     text = data.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
     rows: List[AccountRow] = []
     for r in reader:
-        email = (r.get("email") or r.get("Email") or "").strip()
+        # CSV 列名兼容：大小写/前后空白
+        d = {(str(k).strip().lower() if k is not None else ""): (v or "") for k, v in r.items()}
+        email = _normalize_email(d.get("email", ""))
         pw = (
-            r.get("imap_password")
-            or r.get("imap_pwd")
-            or r.get("password")
-            or r.get("Password")
+            d.get("imap_password")
+            or d.get("imap_pwd")
+            or d.get("password")
             or ""
         ).strip()
         if not email or not pw:
             continue
-        host = (r.get("imap_host") or "").strip() or None
-        port_raw = (r.get("imap_port") or "").strip()
+        host = (d.get("imap_host") or "").strip() or None
+        port_raw = (d.get("imap_port") or "").strip()
         port = int(port_raw) if port_raw.isdigit() else None
         rows.append(AccountRow(email=email, imap_password=pw, imap_host=host, imap_port=port))
     return rows
@@ -163,7 +176,7 @@ def _parse_excel_bytes(data: bytes) -> List[AccountRow]:
                     break
                 continue
             d = dict(zip(headers, row))
-            email = str(d.get("email") or "").strip()
+            email = _normalize_email(str(d.get("email") or ""))
             pw = str(
                 d.get("imap_password") or d.get("imap_pwd") or d.get("password") or ""
             ).strip()
@@ -604,22 +617,42 @@ async def save_accounts_api(req: SaveAccountsRequest):
     """
     from .token_store import get_default_store
     store = get_default_store()
-    existing = {a["email"] for a in store.list_accounts()}
+    existing_rows = store.list_accounts()
+    # lower(email) -> stored_email（保留原值用于 overwrite 时清理历史大小写记录）
+    existing_ci = {_normalize_email(a["email"]): a["email"] for a in existing_rows}
+
+    # 批次内去重：同邮箱（大小写不同）只保留最后一条，行为与 upsert 一致
+    latest_by_email: Dict[str, AccountRow] = {}
+    for acc in req.accounts:
+        norm = _normalize_email(acc.email)
+        if not norm:
+            continue
+        latest_by_email[norm] = AccountRow(
+            email=norm,
+            imap_password=acc.imap_password,
+            imap_host=acc.imap_host,
+            imap_port=acc.imap_port,
+        )
 
     saved: List[str] = []
     skipped: List[str] = []
-    for acc in req.accounts:
-        if acc.email in existing and not req.overwrite:
-            skipped.append(acc.email)
+    for norm_email, acc in latest_by_email.items():
+        existing_email = existing_ci.get(norm_email)
+        if existing_email and not req.overwrite:
+            skipped.append(norm_email)
             continue
+        # 兼容历史脏数据：若仅大小写不同，先删旧记录再写标准化邮箱
+        if existing_email and existing_email != norm_email:
+            store.delete_account(existing_email)
         store.upsert_account(
-            email=acc.email,
+            email=norm_email,
             imap_password=acc.imap_password,
             imap_host=acc.imap_host or IMAP_HOST_DEFAULT,
             imap_port=acc.imap_port or IMAP_PORT_DEFAULT,
             source=req.source,
         )
-        saved.append(acc.email)
+        saved.append(norm_email)
+        existing_ci[norm_email] = norm_email
 
     log.info(f"账号库更新：保存 {len(saved)} 个，跳过 {len(skipped)} 个")
     return {"saved": len(saved), "skipped": len(skipped),

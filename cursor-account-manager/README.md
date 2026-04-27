@@ -64,6 +64,8 @@ cursor184@eclicktech.com.cn,AnotherImapPwd,,
 ```ini
 DEFAULT_IMAP_HOST=imap.feishu.cn
 DEFAULT_IMAP_PORT=993
+# 不同邮箱服务商垃圾箱命名不同，可按需调整（逗号分隔）
+IMAP_SEARCH_FOLDERS=INBOX,Junk,Spam
 
 # 强烈建议配代理，降低 Cloudflare 阻断率
 PROXY=http://user:pass@host:port
@@ -79,6 +81,8 @@ TWOCAPTCHA_API_KEY=
 HEADLESS=true
 VERIFICATION_CODE_TIMEOUT=120
 ```
+
+> 非飞书类邮箱（如 awsapps / WorkMail）若未显式传 `timeout`，系统会自动延长等待窗口（至少 240s）以适配慢投递。
 
 ---
 

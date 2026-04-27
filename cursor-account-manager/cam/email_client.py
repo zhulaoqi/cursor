@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import email
 import imaplib
+import os
 import re
 import socket
 import time
@@ -110,6 +111,43 @@ def _message_date_ts(raw: bytes) -> float:
         return 0.0
 
 
+def _get_search_folders() -> list[str]:
+    """获取轮询文件夹列表，默认 INBOX + 垃圾箱，兼容不同服务商。"""
+    raw = os.environ.get("IMAP_SEARCH_FOLDERS", "INBOX,Junk,Spam")
+    items = [x.strip() for x in raw.split(",") if x and x.strip()]
+    if not items:
+        return ["INBOX"]
+    # 去重并保持顺序
+    out: list[str] = []
+    seen = set()
+    for x in items:
+        if x not in seen:
+            out.append(x)
+            seen.add(x)
+    if "INBOX" not in seen:
+        out.insert(0, "INBOX")
+    return out
+
+
+def _should_accept_by_cutoff(msg_ts: float, cutoff_ts: float, is_new_arrival: bool) -> bool:
+    """首轮基线邮件按 cutoff 过滤；新到达邮件放宽 Date 过滤以适配慢投递。"""
+    if is_new_arrival:
+        return True
+    if msg_ts and msg_ts < cutoff_ts:
+        return False
+    return True
+
+
+def _effective_timeout(timeout_sec: int | None, host: str) -> int:
+    """非飞书等跨区域邮件系统常有分钟级延迟，默认给更长等待窗口。"""
+    if timeout_sec is not None:
+        return timeout_sec
+    base = SETTINGS.verification_code_timeout
+    if "feishu" in (host or "").lower():
+        return base
+    return max(base, 240)
+
+
 def fetch_verification_code(
     email_addr: str,
     imap_password: str,
@@ -132,15 +170,17 @@ def fetch_verification_code(
     """
     host = host or SETTINGS.default_imap_host
     port = port or SETTINGS.default_imap_port
-    timeout = timeout_sec or SETTINGS.verification_code_timeout
+    timeout = _effective_timeout(timeout_sec, host)
     cutoff = since_ts if since_ts is not None else time.time() - 180
 
     log.info(f"[{email_addr}] 连接 IMAP {host}:{port} ...")
     conn = _connect(host, port, email_addr, imap_password)
     try:
         deadline = time.time() + timeout
-        seen_ids: set[bytes] = set()
+        seen_ids: set[tuple[str, bytes]] = set()
+        baseline_ids: dict[str, set[bytes]] = {}
         poll_count = 0
+        folders = _get_search_folders()
 
         # 搜索策略：兼容多种发件域名和邮箱服务商的 IMAP 搜索方言
         # Cursor 实际发件人可能是 no-reply@cursor.com 或 no-reply@cursor.sh
@@ -155,68 +195,86 @@ def fetch_verification_code(
 
         while time.time() < deadline:
             poll_count += 1
-            try:
-                conn.select("INBOX")
-            except imaplib.IMAP4.abort:
-                log.warning(f"[{email_addr}] IMAP 连接中断，重连...")
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
-                conn = _connect(host, port, email_addr, imap_password)
-                continue
+            total_candidates = 0
 
-            # 尝试每个搜索条件，取第一个有结果的
-            all_ids: list[bytes] = []
-            for q in search_queries:
+            for folder in folders:
                 try:
-                    status, data = conn.search(None, q)
-                    if status == "OK" and data and data[0]:
-                        all_ids = data[0].split()
-                        if poll_count == 1:
-                            log.debug(f"  搜索 {q} → {len(all_ids)} 封")
-                        if all_ids:
-                            break
-                except imaplib.IMAP4.error as e:
-                    log.debug(f"  搜索 {q} 失败: {e}")
+                    conn.select(folder)
+                except imaplib.IMAP4.abort:
+                    log.warning(f"[{email_addr}] IMAP 连接中断，重连...")
+                    try:
+                        conn.logout()
+                    except Exception:
+                        pass
+                    conn = _connect(host, port, email_addr, imap_password)
+                    break
+                except imaplib.IMAP4.error:
+                    # 不同服务商垃圾箱命名不同，选不到直接跳过
+                    continue
+
+                # 尝试每个搜索条件，聚合候选集（去重后按新到旧处理）
+                all_ids_set: set[bytes] = set()
+                for q in search_queries:
+                    try:
+                        status, data = conn.search(None, q)
+                        if status == "OK" and data and data[0]:
+                            mids = data[0].split()
+                            all_ids_set.update(mids)
+                            if poll_count == 1:
+                                log.debug(f"  [{folder}] 搜索 {q} → {len(mids)} 封")
+                    except imaplib.IMAP4.error as e:
+                        log.debug(f"  [{folder}] 搜索 {q} 失败: {e}")
+
+                if not all_ids_set:
+                    continue
+
+                all_ids = sorted(all_ids_set, key=lambda x: int(x), reverse=True)
+                total_candidates += len(all_ids)
+                if poll_count == 1:
+                    baseline_ids[folder] = set(all_ids)
+
+                for mid in all_ids:
+                    key = (folder, mid)
+                    if key in seen_ids:
+                        continue
+                    seen_ids.add(key)
+
+                    is_new_arrival = mid not in baseline_ids.get(folder, set())
+
+                    try:
+                        st, payload = conn.fetch(mid, "(RFC822)")
+                    except imaplib.IMAP4.error:
+                        continue
+                    if st != "OK" or not payload or not payload[0]:
+                        continue
+
+                    raw = payload[0][1]
+                    msg_ts = _message_date_ts(raw)
+                    if not _should_accept_by_cutoff(msg_ts, cutoff, is_new_arrival):
+                        continue
+
+                    # 验证真的是 Cursor 的
+                    try:
+                        msg_obj = email.message_from_bytes(raw)
+                        from_hdr = (msg_obj.get("From") or "").lower()
+                        subj_hdr = (msg_obj.get("Subject") or "").lower()
+                    except Exception:
+                        from_hdr, subj_hdr = "", ""
+
+                    if ("cursor" not in from_hdr) and ("cursor" not in subj_hdr):
+                        continue
+
+                    code = _extract_code(raw)
+                    if code:
+                        log.info(f"[{email_addr}] 拿到验证码: {code}（Folder={folder}, From={from_hdr[:60]}）")
+                        return code
 
             if poll_count == 1:
-                log.info(f"[{email_addr}] 轮询开始（间隔 {poll_interval_sec}s，共 {timeout}s 超时），初查 {len(all_ids)} 封候选")
-
-            for mid in reversed(all_ids):  # 新邮件在后，倒序先查
-                if mid in seen_ids:
-                    continue
-                seen_ids.add(mid)
-
-                try:
-                    st, payload = conn.fetch(mid, "(RFC822)")
-                except imaplib.IMAP4.error:
-                    continue
-                if st != "OK" or not payload or not payload[0]:
-                    continue
-
-                raw = payload[0][1]
-                msg_ts = _message_date_ts(raw)
-                if msg_ts and msg_ts < cutoff:
-                    continue  # 老邮件
-
-                # 验证真的是 Cursor 的
-                try:
-                    msg_obj = email.message_from_bytes(raw)
-                    from_hdr = (msg_obj.get("From") or "").lower()
-                    subj_hdr = (msg_obj.get("Subject") or "").lower()
-                except Exception:
-                    from_hdr, subj_hdr = "", ""
-
-                if ("cursor" not in from_hdr) and ("cursor" not in subj_hdr):
-                    continue
-
-                code = _extract_code(raw)
-                if code:
-                    log.info(f"[{email_addr}] 拿到验证码: {code}（From={from_hdr[:60]}）")
-                    return code
-
-            if poll_count % 3 == 0:
+                log.info(
+                    f"[{email_addr}] 轮询开始（文件夹={','.join(folders)}，间隔 {poll_interval_sec}s，超时 {timeout}s），"
+                    f"首轮候选 {total_candidates} 封"
+                )
+            elif poll_count % 3 == 0:
                 log.info(f"[{email_addr}] 已轮询 {poll_count} 次，暂无新验证邮件，继续等...")
             time.sleep(poll_interval_sec)
 
