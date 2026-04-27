@@ -1,0 +1,18 @@
+# Sensitive local configuration
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.secrets
+**/secrets.*
+
+# Keep shareable templates tracked
+!**/.env.example
+# Sensitive local configuration
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.secrets
+**/secrets.*
+
+# Keep shareable templates tracked
+!**/.env.example
