@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Turnstile Patch",
+  "version": "2.1",
+  "description": "Fix CDP MouseEvent screenX/screenY leak",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["./patch.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

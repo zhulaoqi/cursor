@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="app()" x-init="init()">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursor Account Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    :root {
+      --primary:  #2563EB;
+      --secondary:#3B82F6;
+      --cta:      #F97316;
+      --bg:       #F8FAFC;
+      --surface:  #FFFFFF;
+      --text:     #1E293B;
+      --muted:    #64748B;
+      --border:   #E2E8F0;
+      --success:  #16A34A;
+      --warn:     #D97706;
+      --danger:   #DC2626;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: 'Fira Sans', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0;
+    }
+    h1, h2, h3, .mono { font-family: 'Fira Code', monospace; }
+
+    /* ── 拖拽区域 ── */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 48px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, opacity 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--primary);
+      background: #EFF6FF;
+    }
+
+    /* ── 进度条 ── */
+    .progress-bar-bg { background: #E8EDF5; border-radius: 999px; height: 8px; overflow: hidden; }
+    @keyframes progress-shine {
+      0%   { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    .progress-bar-fill {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, var(--primary) 0%, #60A5FA 50%, var(--primary) 100%);
+      background-size: 200% auto;
+      transition: width 0.5s cubic-bezier(.4,0,.2,1);
+    }
+    .progress-bar-fill.animating { animation: progress-shine 2s linear infinite; }
+
+    /* ── 状态徽章 ── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      letter-spacing: .01em;
+    }
+    .badge-ok      { background: #DCFCE7; color: #15803D; }
+    .badge-warn    { background: #FEF9C3; color: #A16207; }
+    .badge-error   { background: #FEE2E2; color: #B91C1C; }
+    .badge-pending { background: #F1F5F9; color: #64748B; }
+    .badge-running { background: #DBEAFE; color: #1D4ED8; }
+
+    /* ── 自定义 Checkbox ── */
+    input[type="checkbox"] {
+      appearance: none; -webkit-appearance: none;
+      width: 16px; height: 16px; min-width: 16px;
+      border: 2px solid #CBD5E1; border-radius: 4px;
+      background: #fff; cursor: pointer; position: relative;
+      transition: border-color .15s, background .15s;
+      vertical-align: middle;
+    }
+    input[type="checkbox"]:hover:not(:disabled) { border-color: var(--primary); }
+    input[type="checkbox"]:checked {
+      background: var(--primary); border-color: var(--primary);
+    }
+    input[type="checkbox"]:checked::after {
+      content: ''; position: absolute;
+      left: 3.5px; top: 0.5px; width: 5px; height: 9px;
+      border: 2px solid #fff; border-top: none; border-left: none;
+      transform: rotate(45deg);
+    }
+    input[type="checkbox"]:indeterminate { background: var(--primary); border-color: var(--primary); }
+    input[type="checkbox"]:indeterminate::after {
+      content: ''; position: absolute;
+      left: 2px; top: 5px; width: 8px; height: 2px; background: #fff; border: none;
+    }
+
+    /* ── 表格 ── */
+    table { border-collapse: collapse; width: 100%; }
+    th {
+      background: #F8FAFC; color: #94A3B8; font-weight: 700;
+      font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid #F1F5F9; white-space: nowrap; }
+    thead th { border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background .12s; }
+    tbody tr:nth-child(even) { background: #FAFBFD; }
+    tbody tr:hover { background: #EEF5FF !important; }
+
+    /* ── 按钮 ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 20px; border-radius: 8px; font-weight: 600; font-size: 14px;
+      cursor: pointer; border: none; transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { opacity: .88; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    .btn:active:not(:disabled) { transform: scale(0.97); box-shadow: none; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary  { background: var(--primary); color: #fff; box-shadow: 0 1px 3px rgba(37,99,235,.3); }
+    .btn-cta      { background: var(--cta); color: #fff; box-shadow: 0 1px 3px rgba(249,115,22,.3); }
+    .btn-ghost    { background: transparent; color: var(--primary); border: 1.5px solid var(--primary); }
+    .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
+    .btn-sm       { padding: 6px 14px; font-size: 13px; }
+
+    /* ── 卡片 ── */
+    .card {
+      background: var(--surface); border-radius: 12px;
+      border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
+    }
+    /* ── 分区 label ── */
+    .field-label {
+      font-size: 11.5px; color: var(--muted); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
+    }
+
+    /* ── 输入框 ── */
+    select, input[type="text"], input[type="month"], input[type="date"] {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; font-size: 14px;
+      color: var(--text); outline: none;
+      transition: border-color 0.15s;
+    }
+    select:focus, input:focus { border-color: var(--primary); }
+
+    /* ── 开关 ── */
+    .toggle { position: relative; width: 40px; height: 22px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; cursor: pointer;
+      background: var(--border); border-radius: 999px;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; height: 16px; width: 16px;
+      left: 3px; top: 3px; background: white; border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--primary); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+    /* ── 日志 ── */
+    .log-item {
+      padding: 7px 4px; border-bottom: 1px solid #F1F5F9;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+    .log-time { font-family: 'Fira Code', monospace; font-size: 11.5px; color: #94A3B8; flex-shrink: 0; min-width: 60px; padding-top: 1px; }
+    .log-text { font-size: 12.5px; color: var(--text); line-height: 1.5; }
+
+    /* ── 骨架屏 ── */
+    @keyframes shimmer { 0%{background-position:-200px 0} 100%{background-position:200px 0} }
+    .skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 400px 100%; animation: shimmer 1.4s infinite;
+      border-radius: 4px;
+    }
+
+    /* ── 滚动 ── */
+    .overflow-x-auto { overflow-x: auto; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── 冲突行高亮 ── */
+    .row-conflict td { background: #FFFBEB !important; }
+    .row-new td { background: #F0FDF4 !important; }
+
+    /* ── 输入框 focus ring ── */
+    select:focus, input[type="text"]:focus, input[type="month"]:focus, input[type="date"]:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+    }
+
+    /* ── 完成状态下载区域 ── */
+    .download-ready {
+      background: #fff;
+      border: 1px solid #E2E8F0;
+      border-left: 4px solid var(--success);
+      border-radius: 10px;
+      padding: 20px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.04);
+    }
+
+    /* ── details/summary 箭头 ── */
+    details > summary { list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before {
+      content: '▶'; font-size: 9px; margin-right: 6px;
+      display: inline-block; transition: transform .2s;
+      color: var(--muted);
+    }
+    details[open] > summary::before { transform: rotate(90deg); }
+
+    /* ── 空状态图标 ── */
+    .empty-icon { opacity: .18; margin: 0 auto 20px; display: block; }
+
+    /* ── animate-spin ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin .8s linear infinite; display: inline-block; }
+  </style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ── 顶部导航 ─────────────────────────────────────────────── -->
+<header class="card" style="border-radius:0; border-left:none; border-right:none; border-top:none; position:sticky; top:0; z-index:100; backdrop-filter:blur(8px); background:rgba(255,255,255,.95);">
+  <div style="max-width:1280px; margin:0 auto; padding:0 32px; height:60px; display:flex; align-items:center; justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      <span class="mono" style="font-weight:600; font-size:16px; color:var(--text);">Cursor Account Manager</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <!-- 面包屑 -->
+      <div style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);">
+        <span style="cursor:pointer; color:var(--primary);" @click="goList()">账号库</span>
+        <template x-if="view !== 'list'">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            <span x-text="view === 'upload' ? '上传账号' : '拉取进度'"></span>
+          </span>
+        </template>
+      </div>
+      <span class="badge" :class="serverOk ? 'badge-ok' : 'badge-error'">
+        <span style="width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;"></span>
+        <span x-text="serverOk ? '服务正常' : '服务异常'"></span>
+      </span>
+    </div>
+  </div>
+</header>
+
+<main style="max-width:1280px; margin:0 auto; padding:36px 32px; display:flex; flex-direction:column; gap:28px; transition: opacity 0.15s ease;"
+      :style="{ opacity: _ready ? 1 : 0, pointerEvents: _ready ? 'auto' : 'none' }">
+
+  <!-- ══════════════════════════════════════════════════════════════
+       VIEW: 账号库列表
+  ═══════════════════════════════════════════════════════════════ -->
+  <div x-show="view === 'list'" x-cloak x-transition>
+
+    <!-- 页头 -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
+      <div>
+        <h2 style="margin:0 0 4px; font-size:22px; font-weight:700; letter-spacing:-.3px;">账号库</h2>
+        <p style="margin:0; color:var(--muted); font-size:13.5px;" x-text="`共 ${dbAccounts.length} 个账号`"></p>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="btn btn-ghost btn-sm" @click="loadAccounts()" title="刷新列表">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          刷新
+        </button>
+        <button class="btn btn-primary" @click="goUpload()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          上传账号
+        </button>
+      </div>
+    </div>
+
+    <!-- 操作栏：日期区间 + 月份 + 选项 -->
+    <div class="card" style="padding:20px 24px; margin-bottom:20px;">
+      <div style="display:flex; align-items:flex-start; gap:28px; flex-wrap:wrap;">
+
+        <!-- 使用明细时间范围 -->
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:280px;">
+          <label class="field-label">使用明细时间范围</label>
+          <div style="display:flex;gap:6px;">
+            <template x-for="p in [{v:'7d',l:'近7天'},{v:'30d',l:'近30天'},{v:'90d',l:'近90天'},{v:'custom',l:'自定义'}]" :key="p.v">
+              <button
+                @click="setDatePreset(p.v)"
+                :style="`padding:5px 12px;font-size:12.5px;border-radius:6px;cursor:pointer;border:1.5px solid ${datePreset===p.v?'var(--primary)':'var(--border)'};background:${datePreset===p.v?'#EFF6FF':'#fff'};color:${datePreset===p.v?'var(--primary)':'var(--muted)'};font-weight:${datePreset===p.v?'600':'400'};transition:all .15s;`"
+                x-text="p.l">
+              </button>
+            </template>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="date" x-model="dateFrom" :disabled="datePreset!=='custom'"
+              style="font-size:13px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;width:136px;" />
+            <span style="color:var(--muted);font-size:14px;font-weight:500;">—</span>
+            <input type="date" x-model="dateTo" :disabled="datePreset!=='custom'"
+              style="font-size:13px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;width:136px;" />
+          </div>
+        </div>
+
+        <!-- 竖分隔线 -->
+        <div style="width:1px;background:var(--border);align-self:stretch;margin:2px 0;"></div>
+
+        <!-- 账单月份 -->
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label class="field-label">账单月份（发票 / 文件命名）</label>
+          <input type="month" x-model="selectedMonth"
+            style="font-size:13px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;" />
+          <span style="font-size:12px;color:var(--muted);">仅筛选发票日期 &amp; 导出文件名</span>
+        </div>
+
+        <!-- 竖分隔线 -->
+        <div style="width:1px;background:var(--border);align-self:stretch;margin:2px 0;"></div>
+
+        <!-- 导出选项 -->
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <label class="field-label">导出选项</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
+            <label class="toggle"><input type="checkbox" x-model="withInvoices"/><span class="toggle-slider"></span></label>
+            下载发票 PDF
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
+            <label class="toggle"><input type="checkbox" x-model="withRaw"/><span class="toggle-slider"></span></label>
+            保存原始 JSON
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 账号表格 -->
+    <div class="card" style="overflow:hidden;">
+      <!-- 空状态 -->
+      <template x-if="dbAccounts.length === 0">
+        <div style="padding:72px 40px; text-align:center; color:var(--muted);">
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="empty-icon">
+            <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          <p style="margin:0 0 4px; font-size:15px; font-weight:500;">账号库为空</p>
+          <p style="margin:0; font-size:13px;">点击右上角「上传账号」添加账号</p>
+        </div>
+      </template>
+
+      <template x-if="dbAccounts.length > 0">
+        <div>
+          <!-- 批量操作工具栏 -->
+          <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:#FAFAFA; border-radius:12px 12px 0 0;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; width:32px; margin-right:-6px;">
+              <input type="checkbox" @change="toggleAll($event)" :checked="dbAccounts.length > 0 && selectedEmails.size === dbAccounts.length" />
+            </label>
+            <span style="font-size:13px; font-weight:500;">全选</span>
+            <span style="color:var(--muted); font-size:13px;" x-text="`已选 ${selectedEmails.size} / ${dbAccounts.length}`"></span>
+            <template x-if="Object.values(accountDbStatus).some(s => s.status === 'disabled')">
+              <button class="btn btn-ghost btn-sm" style="color:var(--warn); border-color:var(--warn);" @click="resetAllDisabled()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                重置所有锁定
+              </button>
+            </template>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:32px;"></th>
+                  <th>邮箱</th>
+                  <th>IMAP 密码</th>
+                  <th>IMAP Host</th>
+                  <th>Port</th>
+                  <th>来源</th>
+                  <th>添加时间</th>
+                  <th style="width:80px;">状态</th>
+                  <th style="width:80px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="a in dbAccounts" :key="a.email">
+                  <tr :class="accountDbStatus[a.email]?.status === 'disabled' ? 'opacity-60' : ''">
+                    <td>
+                      <input type="checkbox" :checked="selectedEmails.has(a.email)"
+                        @change="toggleOne(a.email, $event)" style="cursor:pointer;" />
+                    </td>
+                    <td class="mono" style="font-size:13px;" x-text="a.email"></td>
+                    <td>
+                      <span class="mono" style="font-size:12px; color:var(--muted);"
+                        x-text="a.imap_password ? a.imap_password.slice(0,4) + '••••' : '-'"></span>
+                    </td>
+                    <td style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'"></td>
+                    <td style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
+                    <td style="color:var(--muted); font-size:12px;">
+                      <span :style="`padding:2px 8px;border-radius:4px;font-size:11px;background:${a.source==='manual'?'#EFF6FF':a.source==='upload'?'#F0FDF4':'#F1F5F9'};color:${a.source==='manual'?'var(--primary)':a.source==='upload'?'var(--success)':'var(--muted)'}`"
+                        x-text="a.source || '-'"></span>
+                    </td>
+                    <td style="color:var(--muted); font-size:12px;" x-text="fmtTs(a.added_at)"></td>
+                    <td>
+                      <template x-if="accountDbStatus[a.email]">
+                        <span :style="`font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:${accountDbStatus[a.email].status==='disabled'?'#FEE2E2':accountDbStatus[a.email].status==='active'?'#DCFCE7':'#F1F5F9'};color:${accountDbStatus[a.email].status==='disabled'?'var(--danger)':accountDbStatus[a.email].status==='active'?'var(--success)':'var(--muted)'}`"
+                          x-text="accountDbStatus[a.email].status==='disabled'?`锁定(${accountDbStatus[a.email].failures}次)`:accountDbStatus[a.email].status==='active'?'正常':'未知'">
+                        </span>
+                      </template>
+                      <template x-if="!accountDbStatus[a.email]">
+                        <span style="font-size:11px;color:var(--muted);">-</span>
+                      </template>
+                    </td>
+                    <td style="display:flex; gap:4px; align-items:center;">
+                      <button
+                        :style="`background:none;border:none;cursor:pointer;padding:4px;color:${accountDbStatus[a.email]?.status==='disabled'?'var(--warn)':'var(--muted)'};`"
+                        @click="resetAccount(a.email)" title="重置登录状态">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                      </button>
+                      <button style="background:none;border:none;cursor:pointer;color:var(--danger);padding:4px;"
+                        @click="deleteAccount(a.email)" title="删除账号">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+                      </button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 底部操作 -->
+          <div style="padding:16px 24px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:flex-end; gap:12px; background:#FAFAFA; border-radius:0 0 12px 12px;">
+            <span style="font-size:13px; color:var(--muted);" x-text="`已选 ${selectedEmails.size} 个账号`"></span>
+            <button class="btn btn-cta" @click="startRun()" :disabled="selectedEmails.size === 0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span x-text="`开始拉取 (${selectedEmails.size})`"></span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       VIEW: 上传账号
+  ═══════════════════════════════════════════════════════════════ -->
+  <div x-show="view === 'upload'" x-cloak x-transition>
+
+    <!-- 页头 -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
+      <div>
+        <h2 style="margin:0 0 4px; font-size:22px; font-weight:700; letter-spacing:-.3px;">上传账号</h2>
+        <p style="margin:0; color:var(--muted); font-size:13.5px;">支持 CSV 或 Excel，需包含 <code>email</code>、<code>imap_password</code> 两列（可选 <code>imap_host</code>、<code>imap_port</code>）</p>
+      </div>
+      <button class="btn btn-ghost btn-sm" @click="goList()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        返回列表
+      </button>
+    </div>
+
+    <!-- 拖拽区域 -->
+    <div class="card" style="padding:32px; margin-bottom:20px;">
+      <div class="drop-zone" :class="{'drag-over': isDragging && !isUploading}"
+           :style="{ opacity: isUploading ? 0.6 : 1, cursor: isUploading ? 'not-allowed' : 'pointer' }"
+           @dragover.prevent="if(!isUploading) isDragging=true"
+           @dragleave="isDragging=false"
+           @drop.prevent="onDrop($event)"
+           @click="if(!isUploading) $refs.fileInput.click()">
+        <svg x-show="!isUploading" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <svg x-show="isUploading" x-cloak width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10">
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+        <div style="text-align:center;">
+          <p style="margin:0; font-weight:600; color:var(--text);" x-text="isUploading ? '解析中…' : '拖拽文件到此处 或 点击选择'"></p>
+          <p style="margin:4px 0 0; font-size:12px; color:var(--muted);" x-show="!isUploading">支持 .csv .xlsx .xls &nbsp;·&nbsp; 最大 10MB</p>
+        </div>
+        <input x-ref="fileInput" type="file" accept=".csv,.xlsx,.xls" style="display:none;" @change="onFileInput($event)" />
+      </div>
+
+      <!-- 模板下载 + 手动添加 -->
+      <div style="margin-top:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span style="font-size:13px; color:var(--muted);">没有文件？</span>
+        <button class="btn btn-ghost btn-sm" @click="downloadTemplate()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载 CSV 模板
+        </button>
+        <span style="font-size:13px; color:var(--muted); margin-left:8px;">或手动添加 →</span>
+        <button class="btn btn-ghost btn-sm" @click="showManualAdd=!showManualAdd">手动添加账号</button>
+      </div>
+
+      <!-- 手动添加 -->
+      <div x-show="showManualAdd" x-transition style="margin-top:20px; padding:20px; background:var(--bg); border-radius:10px; border:1px solid var(--border);">
+        <!-- 第一行：必填字段 -->
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:200px;">
+            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">邮箱 *</label>
+            <input type="text" x-model="manualEmail" placeholder="cursor@example.com" style="width:100%;"
+              @keydown.enter="addManualAccount()" />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:180px;">
+            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">IMAP 密码 *</label>
+            <input type="text" x-model="manualPwd" placeholder="专用密码" style="width:100%;"
+              @keydown.enter="addManualAccount()" />
+          </div>
+        </div>
+        <!-- 第二行：可选字段 + 按钮 -->
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:180px;">
+            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
+              IMAP Host <span style="font-weight:400;text-transform:none;letter-spacing:0;">（可选，默认飞书）</span>
+            </label>
+            <input type="text" x-model="manualHost" placeholder="imap.feishu.cn" style="width:100%;"
+              @keydown.enter="addManualAccount()" />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:100px;max-width:140px;">
+            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
+              Port <span style="font-weight:400;text-transform:none;letter-spacing:0;">（可选）</span>
+            </label>
+            <input type="number" x-model="manualPort" placeholder="993" style="width:100%;"
+              @keydown.enter="addManualAccount()" />
+          </div>
+          <button class="btn btn-primary" style="align-self:flex-end; flex-shrink:0;" @click="addManualAccount()">添加到预览</button>
+        </div>
+      </div>
+
+      <!-- 解析错误 -->
+      <div x-show="uploadError" style="margin-top:14px; padding:12px 16px; background:#FEE2E2; border-radius:8px; color:var(--danger); font-size:13px;" x-text="uploadError"></div>
+    </div>
+
+    <!-- 预览表格（上传/手动添加后显示） -->
+    <template x-if="uploadPreview.length > 0">
+      <div class="card" style="overflow:hidden;">
+        <div style="padding:14px 24px; border-bottom:1px solid var(--border); background:#FAFAFA; border-radius:12px 12px 0 0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span style="font-weight:600; font-size:15px;">预览</span>
+            <span style="color:var(--muted); font-size:13px; margin-left:10px;" x-text="`${uploadPreview.length} 个账号`"></span>
+            <template x-if="uploadConflicts.length > 0">
+              <span style="margin-left:8px; padding:2px 10px; border-radius:999px; background:#FEF3C7; color:var(--warn); font-size:12px; font-weight:600;"
+                x-text="`${uploadConflicts.length} 个已存在（将提示更新）`"></span>
+            </template>
+            <template x-if="uploadNewCount > 0">
+              <span style="margin-left:8px; padding:2px 10px; border-radius:999px; background:#DCFCE7; color:var(--success); font-size:12px; font-weight:600;"
+                x-text="`${uploadNewCount} 个新账号`"></span>
+            </template>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-ghost btn-sm" @click="uploadPreview=[]">清空预览</button>
+            <button class="btn btn-primary btn-sm" @click="saveWithConflictCheck()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              保存到账号库
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60px;">状态</th>
+                <th>邮箱</th>
+                <th>IMAP 密码</th>
+                <th>IMAP Host</th>
+                <th>Port</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(a, i) in uploadPreview" :key="i">
+                <tr :class="uploadConflicts.includes(a.email) ? 'row-conflict' : 'row-new'">
+                  <td>
+                    <span x-show="uploadConflicts.includes(a.email)"
+                      style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:#FEF3C7;color:var(--warn);">已存在</span>
+                    <span x-show="!uploadConflicts.includes(a.email)"
+                      style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:#DCFCE7;color:var(--success);">新增</span>
+                  </td>
+                  <td class="mono" style="font-size:13px;" x-text="a.email"></td>
+                  <td>
+                    <span class="mono" style="font-size:12px; color:var(--muted);" x-text="a.imap_password.slice(0,4) + '••••'"></span>
+                  </td>
+                  <td style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'"></td>
+                  <td style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       VIEW: 拉取进度
+  ═══════════════════════════════════════════════════════════════ -->
+  <div x-show="view === 'run'" x-cloak x-transition>
+
+    <!-- ── 页面头：标题 + 状态胶囊 ── -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">拉取进度</h2>
+      <span class="badge" :class="runFinished ? 'badge-ok' : 'badge-running'" style="font-size:12px; padding:4px 12px; border-radius:999px;">
+        <svg x-show="!runFinished" class="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+        <svg x-show="runFinished" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span x-text="runFinished ? '已完成' : '运行中'"></span>
+      </span>
+    </div>
+
+    <!-- ── 进度信息区：进度条 + 计数 + 状态文字 整体合并 ── -->
+    <div style="margin-bottom:28px; padding:18px 24px; background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,.04);">
+      <!-- 进度条主体 -->
+      <div class="progress-bar-bg" style="margin-bottom:12px; height:10px; border-radius:999px;">
+        <div class="progress-bar-fill"
+          :class="{ animating: !runFinished && runTotal > 0 }"
+          :style="`width:${runTotal > 0 ? Math.round(runDone/runTotal*100) : 0}%; height:10px; border-radius:999px; transition:width .5s cubic-bezier(.4,0,.2,1)`">
+        </div>
+      </div>
+      <!-- 计数 + 状态文字同行 -->
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <span style="font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px;">
+          <template x-if="!runFinished && globalPhaseMsg">
+            <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+          </template>
+          <span x-text="globalPhaseMsg || runStatusText"></span>
+        </span>
+        <span class="mono" style="font-size:13px; color:var(--text); font-weight:600;"
+          x-text="runTotal > 0 ? `${runDone} / ${runTotal}` : '—'"></span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:28px 32px;">
+      <!-- 账号状态列表 -->
+      <div class="overflow-x-auto" style="border:1px solid var(--border); border-radius:10px; margin-bottom:24px;">
+        <table>
+          <thead>
+            <tr>
+              <th>邮箱</th>
+              <th>状态</th>
+              <th>消息</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(item, email) in runItems" :key="email">
+              <tr>
+                <td class="mono" style="font-size:13px;" x-text="email"></td>
+                <td>
+                  <span class="badge"
+                    :class="{
+                      'badge-ok':      item.phase === 'done' || item.phase === 'warn_done',
+                      'badge-warn':    item.phase === 'warn' || item.phase === 'fetched_warn',
+                      'badge-error':   item.phase === 'error',
+                      'badge-running': ['fetching','fetched','invoice','excel'].includes(item.phase),
+                      'badge-pending': item.phase === 'pending',
+                    }">
+                    <template x-if="['fetching','fetched','invoice','excel'].includes(item.phase)">
+                      <svg class="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                    </template>
+                    <span x-text="({
+                      pending:      '等待',
+                      fetching:     '拉取中',
+                      fetched:      '已拉取',
+                      fetched_warn: '拉取警告',
+                      invoice:      '下载账单',
+                      excel:        '生成报表',
+                      done:         '成功',
+                      warn_done:    '部分成功',
+                      warn:         '部分失败',
+                      error:        '失败',
+                    })[item.phase] || item.phase"></span>
+                  </span>
+                </td>
+                <td style="color:var(--muted); font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis;" x-text="item.msg || ''"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 日志 -->
+      <details style="margin-bottom:24px;">
+        <summary style="cursor:pointer; font-size:13px; color:var(--muted); font-weight:600; padding:8px 0; user-select:none; display:flex; align-items:center; gap:6px;">
+          详细日志
+          <span style="background:#F1F5F9; color:var(--muted); font-size:11px; padding:1px 7px; border-radius:999px; font-weight:600;" x-text="logLines.length"></span>
+        </summary>
+        <div style="margin-top:10px; padding:12px 16px; background:#FAFBFD; border-radius:10px; border:1px solid var(--border); max-height:240px; overflow-y:auto;" id="log-box">
+          <template x-for="(line, i) in logLines" :key="i">
+            <div class="log-item">
+              <div class="log-dot" :style="`background:${line.color}`"></div>
+              <span class="log-time" x-text="line.time"></span>
+              <span class="log-text" x-text="line.text"></span>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- 完成后下载 -->
+      <div x-show="runFinished && downloadToken" class="download-ready" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="width:36px;height:36px;border-radius:50%;background:#DCFCE7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div>
+            <p style="margin:0; font-weight:700; font-size:15px; color:var(--text);">数据已就绪</p>
+            <p style="margin:3px 0 0; font-size:13px; color:var(--muted);" x-text="`成功 ${runOkCount} 个账号 · 失败 ${runFailCount} 个`"></p>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="btn btn-cta" @click="downloadZip()" title="下载 Excel + PDF 账单压缩包">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            下载 ZIP（Excel + PDF）
+          </button>
+          <button class="btn btn-ghost" @click="downloadFile()" title="仅下载汇总 Excel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            仅 Excel
+          </button>
+          <button class="btn btn-ghost" style="color:var(--muted); border-color:var(--border);" @click="goList()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+            返回列表
+          </button>
+        </div>
+      </div>
+      <div x-show="runFinished && !downloadToken" style="padding:18px 24px; background:#FFFBEB; border-radius:10px; border:1px solid #FDE68A; display:flex; align-items:center; gap:14px;">
+        <div style="width:36px;height:36px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <p style="margin:0; color:#92400E; font-size:14px; font-weight:600;">所有账号均拉取失败</p>
+          <p style="margin:4px 0 0; color:#B45309; font-size:13px;">请检查账号配置后重试</p>
+          <button class="btn btn-ghost btn-sm" @click="goList()" style="margin-top:10px; border-color:#D97706; color:#D97706;">返回列表</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── 冲突确认弹窗 ───────────────────────────────────────────── -->
+<!-- 外层只做 x-show 开关，内层固定 display:flex 居中，Alpine 不干扰居中布局 -->
+<div x-show="showConflictModal" x-cloak style="position:fixed;inset:0;z-index:200;">
+  <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);"
+       @click="showConflictModal=false">
+    <div class="card" style="max-width:520px;width:90%;padding:28px;max-height:80vh;display:flex;flex-direction:column;" @click.stop>
+      <!-- 标题 -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-shrink:0;">
+        <h3 style="margin:0;font-size:16px;">发现重复账号</h3>
+        <button style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;" @click="showConflictModal=false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <!-- 说明文字 -->
+      <p style="margin:0 0 10px;font-size:14px;color:var(--text);flex-shrink:0;">
+        以下 <strong x-text="uploadConflicts.length"></strong> 个账号在账号库中已存在：
+      </p>
+      <!-- 邮箱列表（可滚动，最多显示约 8 行） -->
+      <div style="flex:1;overflow-y:auto;min-height:0;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:14px;max-height:220px;">
+        <template x-for="email in uploadConflicts" :key="email">
+          <div class="mono" style="padding:5px 2px;font-size:13px;color:var(--text);border-bottom:1px solid var(--border);" x-text="email"></div>
+        </template>
+      </div>
+      <!-- 说明 -->
+      <p style="margin:0 0 18px;font-size:13px;color:var(--muted);flex-shrink:0;">
+        确认后将按邮箱更新这些账号的密码等信息；或选择仅保存新账号（跳过已存在的）。
+      </p>
+      <!-- 操作按钮 -->
+      <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;flex-shrink:0;">
+        <button class="btn btn-ghost btn-sm" @click="showConflictModal=false">取消</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--text);border-color:var(--border);"
+          @click="doSaveAccounts(false);showConflictModal=false">
+          仅保存新账号（<span x-text="uploadNewCount"></span> 个）
+        </button>
+        <button class="btn btn-primary btn-sm"
+          @click="doSaveAccounts(true);showConflictModal=false">
+          确认更新全部（<span x-text="uploadPreview.length"></span> 个）
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 格式说明浮层 ─────────────────────────────────────────── -->
+<div x-show="showFormatHelp" x-cloak style="position:fixed;inset:0;z-index:200;">
+  <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);" @click="showFormatHelp=false">
+    <div class="card" style="max-width:520px;width:90%;padding:28px;" @click.stop>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;">CSV 格式说明</h3>
+        <button style="background:none;border:none;cursor:pointer;color:var(--muted);" @click="showFormatHelp=false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <pre style="background:var(--bg);padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;border:1px solid var(--border);">email,imap_password,imap_host,imap_port
+cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993
+cursor184@eclicktech.com.cn,AnotherPass,,</pre>
+      <p style="margin:12px 0 0; font-size:13px; color:var(--muted);">
+        • <strong>email</strong>、<strong>imap_password</strong> 必填<br/>
+        • imap_host 不填则用默认 <code>imap.feishu.cn</code><br/>
+        • imap_port 不填则用默认 <code>993</code>
+      </p>
+    </div>
+  </div>
+</div>
+
+<style>
+  [x-cloak] { display: none !important; }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  .animate-spin { animation: spin 1s linear infinite; }
+</style>
+
+<script>
+function app() {
+  return {
+    // ── 页面状态 ──
+    serverOk: false,
+    _ready: false,
+    view: 'list',   // 'list' | 'upload' | 'run'
+
+    // ── 账号库（来自 DB） ──
+    dbAccounts: [],
+    accountDbStatus: {},   // { email: {status, failures} }
+    selectedEmails: new Set(),
+
+    // ── 上传预览 ──
+    isDragging: false,
+    isUploading: false,
+    uploadError: '',
+    showManualAdd: false,
+    showFormatHelp: false,
+    manualEmail: '',
+    manualPwd: '',
+    manualHost: '',
+    manualPort: '',
+    uploadPreview: [],     // 解析/手动添加的预览列表
+    uploadConflicts: [],   // 已在 DB 中存在的邮箱
+    showConflictModal: false,
+
+    // ── 日期 / 选项 ──
+    selectedMonth: new Date().toISOString().slice(0, 7),
+    datePreset: '30d',
+    dateFrom: '',
+    dateTo: '',
+    withInvoices: true,
+    withRaw: false,
+
+    // ── 运行状态 ──
+    taskId: null,
+    runTotal: 0,
+    runDone: 0,
+    runOkCount: 0,
+    runFailCount: 0,
+    runFinished: false,
+    runItems: {},
+    logLines: [],
+    globalPhaseMsg: '',
+    downloadToken: null,
+
+    // ── Storage keys ──
+    _SS_KEY: 'cam_run_state',
+
+    // ── 计算属性 ──
+    get uploadNewCount() {
+      return this.uploadPreview.filter(a => !this.uploadConflicts.includes(a.email)).length;
+    },
+
+    // ── 导航 ──
+    goList() {
+      this.view = 'list';
+      this.uploadPreview = [];
+      this.uploadError = '';
+      this.showManualAdd = false;
+      this.loadAccounts();
+    },
+
+    goUpload() {
+      this.view = 'upload';
+      this.uploadPreview = [];
+      this.uploadError = '';
+    },
+
+    // ── 初始化 ──
+    async init() {
+      this.setDatePreset('30d');
+      this.selectedMonth = new Date().toISOString().slice(0, 7);
+      fetch('/api/status').then(r => r.ok && (this.serverOk = true)).catch(() => {});
+
+      // 加载账号库
+      await this.loadAccounts();
+      this._ready = true;
+
+      // 尝试从 sessionStorage 恢复运行中任务
+      try {
+        const raw = sessionStorage.getItem(this._SS_KEY);
+        if (!raw) return;
+        const s = JSON.parse(raw);
+        if (!s.taskId) return;
+
+        const res = await fetch(`/api/task/${s.taskId}`);
+        if (!res.ok) { this._clearState(); return; }
+        const task = await res.json();
+
+        Object.assign(this, {
+          taskId:        s.taskId,
+          view:          'run',
+          selectedMonth: s.selectedMonth || this.selectedMonth,
+          datePreset:    s.datePreset    || this.datePreset,
+          dateFrom:      s.dateFrom      || this.dateFrom,
+          dateTo:        s.dateTo        || this.dateTo,
+          withInvoices:  s.withInvoices  ?? true,
+          withRaw:       s.withRaw       ?? false,
+          runTotal:      task.total,
+          runDone:       task.done,
+          runOkCount:    task.ok?.length  || s.runOkCount  || 0,
+          runFailCount:  task.fail?.length || s.runFailCount || 0,
+          runFinished:   task.status === 'finished',
+          downloadToken: task.download_token || s.downloadToken || null,
+          logLines:      s.logLines || [],
+          runItems:      s.runItems || {},
+        });
+
+        if (task.status === 'running') {
+          this.addLog('var(--warn)', '⚡ 页面已刷新，重新连接任务进度…');
+          this.listenSSE(s.taskId);
+        } else if (task.status === 'finished') {
+          this.addLog('var(--success)', '✅ 任务已完成（从上次会话恢复）');
+        }
+      } catch {}
+    },
+
+    _saveState() {
+      try {
+        sessionStorage.setItem(this._SS_KEY, JSON.stringify({
+          taskId:        this.taskId,
+          view:          this.view,
+          selectedMonth: this.selectedMonth,
+          datePreset:    this.datePreset,
+          dateFrom:      this.dateFrom,
+          dateTo:        this.dateTo,
+          withInvoices:  this.withInvoices,
+          withRaw:       this.withRaw,
+          runTotal:      this.runTotal,
+          runDone:       this.runDone,
+          runOkCount:    this.runOkCount,
+          runFailCount:  this.runFailCount,
+          runFinished:   this.runFinished,
+          downloadToken: this.downloadToken,
+          logLines:      this.logLines.slice(-200),
+          runItems:      this.runItems,
+        }));
+      } catch {}
+    },
+
+    _clearState() {
+      try { sessionStorage.removeItem(this._SS_KEY); } catch {}
+    },
+
+    // ── 账号库加载 ──
+    async loadAccounts() {
+      try {
+        const res = await fetch('/api/accounts');
+        if (!res.ok) return;
+        const data = await res.json();
+        this.dbAccounts = data.accounts || [];
+        // 同步 token 状态
+        const status = {};
+        for (const a of this.dbAccounts) {
+          status[a.email] = { status: a.token_status || 'unknown', failures: a.token_failures || 0 };
+        }
+        this.accountDbStatus = status;
+        // 清理已删除账号的选中状态
+        const emailSet = new Set(this.dbAccounts.map(a => a.email));
+        this.selectedEmails = new Set([...this.selectedEmails].filter(e => emailSet.has(e)));
+      } catch {}
+    },
+
+    async deleteAccount(email) {
+      if (!confirm(`确定删除账号 ${email}？`)) return;
+      try {
+        await fetch(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        this.selectedEmails.delete(email);
+        await this.loadAccounts();
+      } catch (e) {
+        this.addLog('red', `删除失败：${e.message}`);
+      }
+    },
+
+    // ── 日期 ──
+    setDatePreset(preset) {
+      this.datePreset = preset;
+      if (preset === 'custom') return;
+      const today = new Date();
+      this.dateTo = today.toISOString().split('T')[0];
+      const days = preset === '7d' ? 7 : preset === '30d' ? 30 : 90;
+      const past = new Date(today);
+      past.setDate(past.getDate() - days);
+      this.dateFrom = past.toISOString().split('T')[0];
+      this.selectedMonth = this.dateFrom.slice(0, 7);
+    },
+
+    // ── 文件上传 ──
+    onDrop(e) {
+      this.isDragging = false;
+      if (this.isUploading) return;
+      const f = e.dataTransfer?.files?.[0];
+      if (f) this.uploadFile(f);
+    },
+    onFileInput(e) {
+      const f = e.target.files?.[0];
+      e.target.value = '';
+      if (f) this.uploadFile(f);
+    },
+    async uploadFile(file) {
+      if (this.isUploading) return;
+      this.uploadError = '';
+      this.isUploading = true;
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        let data;
+        try { data = await res.json(); } catch {
+          this.uploadError = `服务器错误 (${res.status})，请查看服务日志`;
+          return;
+        }
+        if (!res.ok) { this.uploadError = data.detail || `上传失败 (${res.status})`; return; }
+        this.uploadPreview = data.accounts;
+        this._refreshConflicts();
+        this.addLog('green', `解析成功，共 ${data.count} 个账号`);
+      } catch (err) {
+        this.uploadError = `网络错误: ${err.message}`;
+      } finally {
+        this.isUploading = false;
+      }
+    },
+
+    addManualAccount() {
+      if (!this.manualEmail || !this.manualPwd) return;
+      const host = this.manualHost.trim() || null;
+      const port = this.manualPort ? parseInt(this.manualPort) || null : null;
+      const acc = {
+        email:         this.manualEmail.trim(),
+        imap_password: this.manualPwd.trim(),
+        imap_host:     host,
+        imap_port:     port,
+      };
+      if (!this.uploadPreview.find(a => a.email === acc.email)) {
+        this.uploadPreview.push(acc);
+        this._refreshConflicts();
+      }
+      this.manualEmail = this.manualPwd = this.manualHost = this.manualPort = '';
+    },
+
+    _refreshConflicts() {
+      const existingEmails = new Set(this.dbAccounts.map(a => a.email));
+      this.uploadConflicts = this.uploadPreview
+        .map(a => a.email)
+        .filter(e => existingEmails.has(e));
+    },
+
+    // ── 冲突处理 & 保存 ──
+    saveWithConflictCheck() {
+      if (this.uploadPreview.length === 0) return;
+      this._refreshConflicts();
+      if (this.uploadConflicts.length > 0) {
+        this.showConflictModal = true;
+      } else {
+        this.doSaveAccounts(true);
+      }
+    },
+
+    async doSaveAccounts(overwrite) {
+      const accounts = overwrite
+        ? this.uploadPreview
+        : this.uploadPreview.filter(a => !this.uploadConflicts.includes(a.email));
+
+      if (accounts.length === 0) {
+        this.addLog('var(--muted)', '没有需要保存的账号');
+        this.goList();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/accounts/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accounts, overwrite, source: 'upload' }),
+        });
+        const data = await res.json();
+        this.addLog('var(--success)', `账号库已更新：保存 ${data.saved} 个，跳过 ${data.skipped} 个`);
+        this.goList();
+      } catch (e) {
+        this.uploadError = `保存失败：${e.message}`;
+      }
+    },
+
+    // ── 账号状态 & 重置 ──
+    async resetAccount(email) {
+      try {
+        const res = await fetch('/api/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails: [email] }),
+        });
+        if (res.ok) {
+          this.addLog('orange', `已重置账号：${email}`);
+          await this.loadAccounts();
+        }
+      } catch (e) {
+        this.addLog('red', `重置失败：${e.message}`);
+      }
+    },
+
+    async resetAllDisabled() {
+      const disabled = Object.entries(this.accountDbStatus)
+        .filter(([, s]) => s.status === 'disabled')
+        .map(([email]) => email);
+      if (!disabled.length) return;
+      try {
+        const res = await fetch('/api/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails: disabled }),
+        });
+        if (res.ok) {
+          this.addLog('orange', `已批量重置 ${disabled.length} 个锁定账号`);
+          await this.loadAccounts();
+        }
+      } catch (e) {
+        this.addLog('red', `批量重置失败：${e.message}`);
+      }
+    },
+
+    toggleAll(e) {
+      if (e.target.checked) {
+        this.selectedEmails = new Set(this.dbAccounts.map(a => a.email));
+      } else {
+        this.selectedEmails = new Set();
+      }
+    },
+    toggleOne(email, e) {
+      if (e.target.checked) this.selectedEmails.add(email);
+      else this.selectedEmails.delete(email);
+    },
+
+    // ── 拉取 ──
+    get runStatusText() {
+      if (this.runFinished) return `成功 ${this.runOkCount} 个 · 失败 ${this.runFailCount} 个`;
+      const done = Object.values(this.runItems).filter(i => ['done','warn_done','warn','error'].includes(i.phase)).length;
+      const invoice = Object.values(this.runItems).filter(i => i.phase === 'invoice').length;
+      const excel = Object.values(this.runItems).filter(i => i.phase === 'excel').length;
+      if (excel > 0) return `${excel} 个账号生成报表中…`;
+      if (invoice > 0) return `${invoice} 个账号下载账单中…`;
+      const fetching = Object.values(this.runItems).filter(i => ['fetching','fetched'].includes(i.phase)).length;
+      if (fetching > 0) return `${fetching} 个账号拉取数据中…`;
+      if (this.runTotal > 0) return '准备中…';
+      return '等待启动';
+    },
+
+    async startRun() {
+      const selected = this.dbAccounts.filter(a => this.selectedEmails.has(a.email));
+      if (!selected.length) return;
+
+      this.runItems = {};
+      selected.forEach(a => { this.runItems[a.email] = { phase: 'pending', msg: '' }; });
+      this.runTotal = selected.length;
+      this.runDone = 0;
+      this.runOkCount = 0;
+      this.runFailCount = 0;
+      this.runFinished = false;
+      this.downloadToken = null;
+      this.logLines = [];
+      this.view = 'run';
+
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accounts: selected.map(a => ({
+            email: a.email,
+            imap_password: a.imap_password,
+            imap_host: a.imap_host,
+            imap_port: a.imap_port,
+          })),
+          month:         this.selectedMonth,
+          date_from:     this.dateFrom || null,
+          date_to:       this.dateTo   || null,
+          with_invoices: this.withInvoices,
+          with_raw:      this.withRaw,
+        }),
+      });
+      const { task_id } = await res.json();
+      this.taskId = task_id;
+      this._saveState();
+      this.listenSSE(task_id);
+    },
+
+    listenSSE(taskId) {
+      const es = new EventSource(`/api/stream/${taskId}`);
+
+      es.addEventListener('start', e => {
+        const d = JSON.parse(e.data);
+        this.runTotal = d.total;
+        this.addLog('blue', `任务启动，共 ${d.total} 个账号`);
+      });
+
+      es.addEventListener('progress', e => {
+        const d = JSON.parse(e.data);
+        const item = this.runItems[d.email];
+        if (item) { item.phase = d.phase; item.msg = d.msg || ''; }
+
+        const phaseLabel = {
+          fetching:     '拉取中',
+          fetched:      '已拉取',
+          fetched_warn: '拉取警告',
+          invoice:      '下载账单中',
+          excel:        '生成报表中',
+          done:         '完成',
+          warn_done:    '部分完成',
+          warn:         '部分失败',
+          error:        '失败',
+        }[d.phase] || d.phase;
+
+        // 只有真正的终态才计入进度（防止中间态重复计数）
+        if (d.phase === 'done' || d.phase === 'warn_done') {
+          this.runDone++;
+          const suffix = d.msg ? `（${d.msg}）` : '';
+          this.addLog('var(--success)', `${d.email}：${phaseLabel}${suffix}`);
+        } else if (d.phase === 'error') {
+          this.runDone++;
+          this.addLog('var(--danger)', `${d.email}：失败 — ${d.msg || ''}`);
+        } else if (d.phase === 'fetched_warn') {
+          // 中间态：仅打日志，不计入进度（后续 warn_done 才是终态）
+          this.addLog('var(--warn)', `${d.email}：${d.msg || phaseLabel}`);
+        } else if (d.phase === 'fetching') {
+          this.addLog('var(--primary)', `${d.email}：拉取中…`);
+        } else if (d.phase === 'invoice') {
+          this.addLog('var(--muted)', `${d.email}：下载账单中…`);
+        }
+        // fetched / excel / warn 阶段不打 log，只更新 badge，保持日志简洁
+      });
+
+      es.addEventListener('global_phase', e => {
+        const d = JSON.parse(e.data);
+        const labels = { summary: '生成汇总报表中…', zip_ready: '' };
+        const msg = labels[d.phase] ?? d.msg;
+        if (d.phase === 'zip_ready') {
+          this.globalPhaseMsg = '';
+          this.addLog('var(--success)', '汇总报表已生成，ZIP 就绪');
+        } else {
+          this.globalPhaseMsg = msg;
+          if (msg) this.addLog('var(--muted)', msg);
+        }
+      });
+
+      es.addEventListener('ready', e => {
+        const d = JSON.parse(e.data);
+        this.downloadToken = d.download_token;
+        this.globalPhaseMsg = '';
+        this.addLog('var(--success)', '文件已生成，可以下载');
+        this._saveState();
+      });
+
+      es.addEventListener('finished', e => {
+        const d = JSON.parse(e.data);
+        this.runOkCount = d.ok;
+        this.runFailCount = d.fail;
+        this.runFinished = true;
+        this.globalPhaseMsg = '';
+        this.addLog('var(--success)', `全部完成：成功 ${d.ok} / 失败 ${d.fail}`);
+        this._saveState();
+        es.close();
+      });
+
+      es.addEventListener('error', e => {
+        try {
+          const d = JSON.parse(e.data);
+          this.addLog('var(--danger)', d.msg || '未知错误');
+        } catch {}
+      });
+
+      es.onerror = () => {
+        if (this.runFinished) { es.close(); return; }
+        this.addLog('var(--danger)', 'SSE 连接中断');
+      };
+    },
+
+    addLog(color, text) {
+      const now = new Date().toTimeString().slice(0, 8);
+      this.logLines.push({ time: now, text, color });
+      this.$nextTick(() => {
+        const box = document.getElementById('log-box');
+        if (box) box.scrollTop = box.scrollHeight;
+      });
+    },
+
+    downloadFile() {
+      if (!this.downloadToken) return;
+      window.open(`/api/download/${this.downloadToken}`, '_blank');
+    },
+
+    downloadZip() {
+      if (!this.taskId) return;
+      window.open(`/api/download_zip/${this.taskId}`, '_blank');
+    },
+
+    downloadTemplate() {
+      const csv = 'email,imap_password\ncursor183@eclicktech.com.cn,YourImapPassword\n';
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'cursor_accounts_template.csv';
+      a.click();
+    },
+
+    fmtTs(ts) {
+      if (!ts) return '-';
+      return new Date(ts * 1000).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    },
+  };
+}
+</script>
+</body>
+</html>

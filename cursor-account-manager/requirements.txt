@@ -1,0 +1,18 @@
+# 用 patchright（Playwright 的 undetected patch 版）替代原生 playwright
+# 修复 Runtime.enable / Console.enable / 命令行 flag 泄漏，能过 Cloudflare Turnstile
+patchright>=1.48
+requests>=2.31
+python-dotenv>=1.0
+click>=8.1
+
+capsolver>=1.0
+2captcha-python>=1.2
+
+openpyxl>=3.1
+pymupdf>=1.23          # PDF 渲染为图片（pip install pymupdf）
+Pillow>=10.0           # pymupdf 渲染 PNG 依赖
+
+# Web UI（二期）
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9

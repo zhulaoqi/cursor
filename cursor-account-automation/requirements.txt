@@ -1,0 +1,9 @@
+DrissionPage
+python-dotenv
+requests
+
+# 方案A: Playwright 引擎
+playwright
+
+# 方案B: 2Captcha 求解器
+2captcha-python
