@@ -130,6 +130,8 @@
     .btn-cta      { background: var(--cta); color: #fff; box-shadow: 0 1px 3px rgba(249,115,22,.3); }
     .btn-ghost    { background: transparent; color: var(--primary); border: 1.5px solid var(--primary); }
     .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
+    .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1.5px solid #FCA5A5; }
+    .btn-warning:hover:not(:disabled) { background: #FEE2E2; border-color: #EF4444; }
     .btn-sm       { padding: 6px 14px; font-size: 13px; }
 
     /* ── 卡片 ── */
@@ -141,6 +143,90 @@
     .field-label {
       font-size: 11.5px; color: var(--muted); font-weight: 600;
       text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
+    }
+    .filters-panel {
+      padding: 22px 24px;
+      margin-bottom: 20px;
+    }
+    .filters-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 1.2fr) minmax(220px, .8fr) minmax(220px, 1fr);
+      align-items: stretch;
+    }
+    .filter-section {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 0 24px;
+    }
+    .filter-section:first-child { padding-left: 0; }
+    .filter-section:last-child { padding-right: 0; }
+    .filter-section + .filter-section { border-left: 1px solid var(--border); }
+    .filter-helper {
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .preset-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .preset-btn {
+      min-height: 34px;
+      padding: 6px 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+    }
+    .preset-btn.is-active {
+      border-color: var(--primary);
+      background: #EFF6FF;
+      color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+    }
+    .month-input {
+      width: 160px;
+      min-height: 40px;
+      font-size: 13px;
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+    }
+    .option-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-top: 2px;
+    }
+    .option-row {
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    @media (max-width: 900px) {
+      .filters-grid { grid-template-columns: 1fr; gap: 18px; }
+      .filter-section {
+        padding: 0;
+        border-left: none !important;
+      }
+      .filter-section + .filter-section {
+        padding-top: 18px;
+        border-top: 1px solid var(--border);
+      }
     }
 
     /* ── 输入框 ── */
@@ -209,6 +295,11 @@
       box-shadow: 0 1px 0 rgba(226,232,240,.7);
       backdrop-filter: blur(8px);
     }
+    .account-list-table-wrap {
+      overflow-x: auto;
+      border-radius: 0 0 12px 12px;
+      box-shadow: inset 0 -1px 0 var(--border);
+    }
     .sticky-selection-bar {
       position: fixed;
       left: 20px;
@@ -249,6 +340,86 @@
     }
     .selection-bar-spacer {
       height: 104px;
+      pointer-events: none;
+    }
+    .delete-confirm-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 220;
+    }
+    .modal-scrim {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15,23,42,.52);
+    }
+    .danger-dialog {
+      width: min(460px, 100%);
+      border: 1px solid #FECACA;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 24px 70px rgba(15,23,42,.24), 0 6px 18px rgba(15,23,42,.12);
+      overflow: hidden;
+    }
+    .danger-dialog-head {
+      display: flex;
+      gap: 14px;
+      padding: 22px 24px 14px;
+    }
+    .danger-dialog-icon {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border-radius: 999px;
+      background: #FEE2E2;
+      color: var(--danger);
+    }
+    .danger-dialog-title {
+      margin: 0;
+      color: #991B1B;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .danger-dialog-text {
+      margin: 6px 0 0;
+      color: #475569;
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+    .danger-dialog-list {
+      max-height: 130px;
+      margin: 0 24px;
+      padding: 10px 12px;
+      overflow-y: auto;
+      border: 1px solid #FEE2E2;
+      border-radius: 10px;
+      background: #FFF7F7;
+    }
+    .danger-dialog-list-item {
+      padding: 3px 0;
+      color: #7F1D1D;
+      font-size: 12px;
+    }
+    .danger-dialog-error {
+      margin: 14px 24px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #FEF2F2;
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .danger-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 18px 24px 22px;
     }
     .run-row-actions {
       display: flex;
@@ -302,11 +473,11 @@
     /* ── 日期选择器 ── */
     .date-picker-wrap {
       position: relative;
-      width: 290px;
+      width: min(100%, 300px);
     }
     .date-display {
       width: 100%;
-      min-height: 34px;
+      min-height: 40px;
       display: inline-flex;
       align-items: center;
       justify-content: space-between;
@@ -415,6 +586,17 @@
     }
     .date-day:active { transform: scale(.96); }
     .date-day.is-muted { color: #CBD5E1; font-weight: 500; }
+    .date-day.is-disabled {
+      cursor: not-allowed;
+      color: #CBD5E1;
+      background: transparent;
+      opacity: .55;
+    }
+    .date-day.is-disabled:hover {
+      border-color: transparent;
+      background: transparent;
+      color: #CBD5E1;
+    }
     .date-day.is-today {
       border-color: #CBD5E1;
       color: #0F172A;
@@ -547,17 +729,19 @@
     </div>
 
     <!-- 操作栏：日期区间 + 月份 + 选项 -->
-    <div class="card" style="padding:20px 24px; margin-bottom:20px;">
-      <div style="display:flex; align-items:flex-start; gap:28px; flex-wrap:wrap;">
+    <div class="card filters-panel">
+      <div class="filters-grid">
 
         <!-- 使用明细时间范围 -->
-        <div style="display:flex;flex-direction:column;gap:8px;min-width:280px;">
+        <div class="filter-section">
           <label class="field-label">使用明细时间范围</label>
-          <div style="display:flex;gap:6px;">
+          <div class="preset-group">
             <template x-for="p in [{v:'7d',l:'近7天'},{v:'30d',l:'近30天'},{v:'90d',l:'近90天'},{v:'custom',l:'自定义'}]" :key="p.v">
               <button
+                type="button"
+                class="preset-btn"
+                :class="{'is-active': datePreset===p.v}"
                 @click="setDatePreset(p.v)"
-                :style="`padding:5px 12px;font-size:12.5px;border-radius:6px;cursor:pointer;border:1.5px solid ${datePreset===p.v?'var(--primary)':'var(--border)'};background:${datePreset===p.v?'#EFF6FF':'#fff'};color:${datePreset===p.v?'var(--primary)':'var(--muted)'};font-weight:${datePreset===p.v?'600':'400'};transition:all .15s;`"
                 x-text="p.l">
               </button>
             </template>
@@ -586,8 +770,10 @@
                 <div class="date-grid">
                   <template x-for="day in calendarDays()" :key="day.iso">
                     <button type="button" class="date-day"
-                      :class="{'is-muted': !day.inMonth, 'is-today': day.isToday, 'is-in-range': isDateInRange(day.iso), 'is-selected': day.iso===dateFrom || day.iso===dateTo}"
+                      :class="{'is-muted': !day.inMonth, 'is-disabled': day.isFuture, 'is-today': day.isToday, 'is-in-range': isDateInRange(day.iso), 'is-selected': day.iso===dateFrom || day.iso===dateTo}"
+                      :disabled="day.isFuture"
                       @click="selectRangeDate(day.iso)"
+                      :aria-label="day.isFuture ? `${day.iso}，未来日期不可选择` : day.iso"
                       x-text="day.day">
                     </button>
                   </template>
@@ -600,33 +786,30 @@
               </div>
             </div>
           </div>
+          <span class="filter-helper" x-text="datePreset==='custom' ? '自定义使用明细时间范围' : '按预设快速筛选使用明细'"></span>
         </div>
-
-        <!-- 竖分隔线 -->
-        <div style="width:1px;background:var(--border);align-self:stretch;margin:2px 0;"></div>
 
         <!-- 账单月份 -->
-        <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="filter-section">
           <label class="field-label">账单月份（发票 / 文件命名）</label>
-          <input type="month" x-model="selectedMonth"
-            style="font-size:13px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;" />
-          <span style="font-size:12px;color:var(--muted);">仅筛选发票日期 &amp; 导出文件名</span>
+          <input type="month" x-model="selectedMonth" class="month-input" />
+          <span class="filter-helper">仅筛选发票日期 &amp; 导出文件名</span>
         </div>
 
-        <!-- 竖分隔线 -->
-        <div style="width:1px;background:var(--border);align-self:stretch;margin:2px 0;"></div>
-
         <!-- 导出选项 -->
-        <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="filter-section">
           <label class="field-label">导出选项</label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
-            <label class="toggle"><input type="checkbox" x-model="withInvoices"/><span class="toggle-slider"></span></label>
-            下载发票 PDF
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
-            <label class="toggle"><input type="checkbox" x-model="withRaw"/><span class="toggle-slider"></span></label>
-            保存原始 JSON
-          </label>
+          <div class="option-stack">
+            <label class="option-row">
+              <label class="toggle"><input type="checkbox" x-model="withInvoices"/><span class="toggle-slider"></span></label>
+              下载发票 PDF
+            </label>
+            <label class="option-row">
+              <label class="toggle"><input type="checkbox" x-model="withRaw"/><span class="toggle-slider"></span></label>
+              保存原始 JSON
+            </label>
+          </div>
+          <span class="filter-helper">控制本次导出的附加文件</span>
         </div>
       </div>
     </div>
@@ -661,7 +844,7 @@
             </template>
           </div>
 
-          <div class="overflow-x-auto">
+          <div class="account-list-table-wrap">
             <table>
               <thead>
                 <tr>
@@ -721,7 +904,7 @@
               </tbody>
             </table>
           </div>
-          <div class="selection-bar-spacer" x-show="selectedEmails.size > 0" x-cloak></div>
+          <div class="selection-bar-spacer" x-show="needsSelectionBarSpacer" x-cloak></div>
         </div>
       </template>
     </div>
@@ -1059,10 +1242,54 @@
     <button class="btn btn-ghost btn-sm" @click="clearSelection()">
       清空选择
     </button>
+    <button class="btn btn-warning btn-sm" @click="bulkDeleteSelectedAccounts()" :disabled="isDeletingSelected || selectedEmails.size === 0">
+      <template x-if="isDeletingSelected">
+        <svg class="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+      </template>
+      <template x-if="!isDeletingSelected">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+      </template>
+      <span x-text="isDeletingSelected ? '删除中' : '删除选中'"></span>
+    </button>
     <button class="btn btn-cta" @click="startRun()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       <span x-text="`开始拉取 (${selectedEmails.size})`"></span>
     </button>
+  </div>
+</div>
+
+<!-- ── 删除选中确认弹窗 ───────────────────────────────────────── -->
+<div class="delete-confirm-modal" x-show="showDeleteConfirm" x-cloak x-transition.opacity>
+  <div class="modal-scrim" @click="!isDeletingSelected && (showDeleteConfirm=false)">
+    <div class="danger-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-selected-title" @click.stop>
+      <div class="danger-dialog-head">
+        <div class="danger-dialog-icon" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <h3 id="delete-selected-title" class="danger-dialog-title">确认删除选中的账号？</h3>
+          <p class="danger-dialog-text">
+            将从账号库删除 <strong x-text="selectedEmails.size"></strong> 个账号记录。此操作不会删除历史导出文件，但账号库记录删除后无法撤销。
+          </p>
+        </div>
+      </div>
+      <div class="danger-dialog-list" x-show="selectedEmails.size > 0">
+        <template x-for="email in [...selectedEmails].slice(0, 6)" :key="email">
+          <div class="danger-dialog-list-item mono" x-text="email"></div>
+        </template>
+        <div class="danger-dialog-list-item" x-show="selectedEmails.size > 6" x-text="`还有 ${selectedEmails.size - 6} 个账号...`"></div>
+      </div>
+      <div class="danger-dialog-error" x-show="deleteSelectionError" x-text="deleteSelectionError"></div>
+      <div class="danger-dialog-actions">
+        <button class="btn btn-ghost btn-sm" @click="showDeleteConfirm=false" :disabled="isDeletingSelected">取消</button>
+        <button class="btn btn-warning" @click="confirmBulkDeleteSelectedAccounts()" :disabled="isDeletingSelected || selectedEmails.size === 0">
+          <template x-if="isDeletingSelected">
+            <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+          </template>
+          <span x-text="isDeletingSelected ? '删除中' : `确认删除 (${selectedEmails.size})`"></span>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1150,6 +1377,11 @@ function app() {
     accountDbStatus: {},   // { email: {status, failures} }
     selectedEmails: new Set(),
     searchEmail: '',
+    isDeletingSelected: false,
+    showDeleteConfirm: false,
+    deleteSelectionError: '',
+    needsSelectionBarSpacer: false,
+    _selectionBarSpacerRaf: null,
 
     // ── 上传预览 ──
     isDragging: false,
@@ -1212,6 +1444,7 @@ function app() {
       this.uploadError = '';
       this.showManualAdd = false;
       this.loadAccounts();
+      this._requestSelectionBarSpacerSync();
     },
 
     goUpload() {
@@ -1229,6 +1462,9 @@ function app() {
       // 加载账号库
       await this.loadAccounts();
       this._ready = true;
+      window.addEventListener('scroll', () => this._requestSelectionBarSpacerSync(), { passive: true });
+      window.addEventListener('resize', () => this._requestSelectionBarSpacerSync(), { passive: true });
+      this._requestSelectionBarSpacerSync();
 
       // 尝试从 sessionStorage 恢复运行中任务
       try {
@@ -1312,6 +1548,7 @@ function app() {
         // 清理已删除账号的选中状态
         const emailSet = new Set(this.dbAccounts.map(a => a.email));
         this.selectedEmails = new Set([...this.selectedEmails].filter(e => emailSet.has(e)));
+        this._requestSelectionBarSpacerSync();
       } catch {}
     },
 
@@ -1384,13 +1621,18 @@ function app() {
           day: d.getDate(),
           inMonth: d.getMonth() === first.getMonth(),
           isToday: iso === today,
+          isFuture: iso > today,
         };
       });
     },
     isDateInRange(iso) {
       return !!(this.dateFrom && this.dateTo && iso > this.dateFrom && iso < this.dateTo);
     },
+    isFutureDate(iso) {
+      return iso > this.todayIso();
+    },
     selectRangeDate(iso) {
+      if (this.isFutureDate(iso)) return;
       if (this.rangeSelecting === 'start' || !this.dateFrom || (this.dateFrom && this.dateTo)) {
         this.dateFrom = iso;
         this.dateTo = '';
@@ -1572,6 +1814,7 @@ function app() {
       } else {
         const removed = new Set(targetEmails);
         this.selectedEmails = new Set([...this.selectedEmails].filter(email => !removed.has(email)));
+        this._requestSelectionBarSpacerSync();
       }
     },
     toggleOne(email, e) {
@@ -1580,9 +1823,44 @@ function app() {
       else next.delete(email);
       this.selectedEmails = next;
       if (e.target.checked) this._ensureSelectionBarClearance(e.target);
+      else this._requestSelectionBarSpacerSync();
     },
     clearSelection() {
       this.selectedEmails = new Set();
+      this.showDeleteConfirm = false;
+      this.deleteSelectionError = '';
+      this.needsSelectionBarSpacer = false;
+    },
+    bulkDeleteSelectedAccounts() {
+      if (this.selectedEmails.size === 0 || this.isDeletingSelected) return;
+      this.deleteSelectionError = '';
+      this.showDeleteConfirm = true;
+    },
+    async confirmBulkDeleteSelectedAccounts() {
+      if (this.selectedEmails.size === 0 || this.isDeletingSelected) return;
+      const emails = [...this.selectedEmails];
+
+      this.isDeletingSelected = true;
+      this.deleteSelectionError = '';
+      const failed = [];
+      try {
+        for (const email of emails) {
+          const res = await fetch(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+          if (!res.ok) failed.push(email);
+        }
+        await this.loadAccounts();
+        const failedSet = new Set(failed);
+        this.selectedEmails = new Set([...this.selectedEmails].filter(email => failedSet.has(email)));
+        if (failed.length > 0) {
+          this.deleteSelectionError = `删除完成，但 ${failed.length} 个账号失败，请稍后重试。`;
+        } else {
+          this.showDeleteConfirm = false;
+        }
+      } catch (e) {
+        this.deleteSelectionError = `删除失败：${e.message || e}`;
+      } finally {
+        this.isDeletingSelected = false;
+      }
     },
     _ensureSelectionBarClearance(control) {
       this.$nextTick(() => {
@@ -1594,8 +1872,29 @@ function app() {
           const barRect = bar.getBoundingClientRect();
           const overlap = rowRect.bottom - barRect.top + 12;
           if (overlap > 0) window.scrollBy({ top: overlap, left: 0, behavior: 'auto' });
+          this._syncSelectionBarSpacer();
         });
       });
+    },
+    _requestSelectionBarSpacerSync() {
+      if (this._selectionBarSpacerRaf) cancelAnimationFrame(this._selectionBarSpacerRaf);
+      this._selectionBarSpacerRaf = requestAnimationFrame(() => this._syncSelectionBarSpacer());
+    },
+    _syncSelectionBarSpacer() {
+      this._selectionBarSpacerRaf = null;
+      if (this.view !== 'list' || this.selectedEmails.size === 0) {
+        this.needsSelectionBarSpacer = false;
+        return;
+      }
+      const card = document.querySelector('.account-list-card');
+      const bar = document.querySelector('.sticky-selection-bar');
+      if (!card || !bar) {
+        this.needsSelectionBarSpacer = false;
+        return;
+      }
+      const cardRect = card.getBoundingClientRect();
+      const barRect = bar.getBoundingClientRect();
+      this.needsSelectionBarSpacer = cardRect.bottom > barRect.top;
     },
 
     // ── 拉取 ──
