@@ -97,6 +97,7 @@ _task_lock = threading.Lock()
 
 IMAP_HOST_DEFAULT = SETTINGS.default_imap_host
 IMAP_PORT_DEFAULT = SETTINGS.default_imap_port
+BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 
 # ─── 数据模型 ─────────────────────────────────────────────────────
@@ -118,6 +119,25 @@ class RunRequest(BaseModel):
 
 
 # ─── 辅助 ─────────────────────────────────────────────────────────
+
+def _parse_date_range_to_utc_ts(
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> tuple[Optional[int], Optional[int]]:
+    """把前端选择的北京时间自然日转换成 Cursor API 需要的 UTC 秒时间戳。"""
+    start_ts: Optional[int] = None
+    end_ts: Optional[int] = None
+    if date_from:
+        start_dt = datetime.datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+        start_ts = int(start_dt.timestamp())
+    if date_to:
+        end_dt = (
+            datetime.datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+            + datetime.timedelta(days=1, seconds=-1)
+        )
+        end_ts = int(end_dt.timestamp())
+    return start_ts, end_ts
+
 
 def _normalize_email(email: str) -> str:
     """统一邮箱：去空白/零宽字符并转小写，避免 CSV/Excel 导入更新不命中。"""
@@ -261,13 +281,7 @@ async def run_task(req: RunRequest):
         start_ts: Optional[int] = None
         end_ts: Optional[int] = None
         try:
-            if req.date_from:
-                start_ts = int(datetime.datetime.strptime(req.date_from, "%Y-%m-%d")
-                               .replace(tzinfo=datetime.timezone.utc).timestamp())
-            if req.date_to:
-                end_ts = int((datetime.datetime.strptime(req.date_to, "%Y-%m-%d")
-                              .replace(tzinfo=datetime.timezone.utc)
-                              + datetime.timedelta(days=1, seconds=-1)).timestamp())
+            start_ts, end_ts = _parse_date_range_to_utc_ts(req.date_from, req.date_to)
         except Exception as e:
             log.warning(f"日期解析失败，忽略日期过滤: {e}")
 
