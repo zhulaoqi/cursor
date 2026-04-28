@@ -38,56 +38,84 @@ def fetch_one(
         snap.errors["token"] = str(e)
         return snap
 
-    def _call(name: str, fn):
-        try:
-            return fn()
-        except TokenExpiredError as e:
-            snap.errors[name] = f"401，尝试重刷 token: {e}"
-            mgr.mark_access_token_expired(account.email)
-            try:
-                new_token = mgr.get_valid_token(account)
-                nonlocal client
-                client = CursorClient(new_token)
-                return getattr(client, name if hasattr(client, name) else "")()
-            except Exception as ee:
-                snap.errors[name] = f"重试后仍失败: {ee}"
-                return None
-        except Exception as e:
-            snap.errors[name] = str(e)
-            return None
-
     client = CursorClient(token)
+    auth_relogin_attempts = 0
+    max_auth_relogin_attempts = 3
+
+    def _refresh_client_after_401(reason: str) -> bool:
+        """API 明确返回未登录时，强制重登并重建 client。"""
+        nonlocal client, auth_relogin_attempts
+        if auth_relogin_attempts >= max_auth_relogin_attempts:
+            return False
+        auth_relogin_attempts += 1
+        log.warning(
+            f"[{account.email}] {reason} 返回 401/403，判定当前登录态不可用，"
+            f"准备强制重登（{auth_relogin_attempts}/{max_auth_relogin_attempts}）"
+        )
+        mgr.mark_access_token_expired(account.email)
+        try:
+            client.close()
+        except Exception:
+            pass
+        new_token = mgr.force_relogin(account)
+        client = CursorClient(new_token)
+        log.info(
+            f"[{account.email}] {reason} 已强制重登完成，继续重试当前接口"
+        )
+        return True
+
+    def _call(name: str, fn):
+        last_auth_error: TokenExpiredError | None = None
+        while True:
+            try:
+                return fn()
+            except TokenExpiredError as e:
+                last_auth_error = e
+                try:
+                    if _refresh_client_after_401(name):
+                        continue
+                except Exception as ee:
+                    snap.errors[name] = f"重登后仍失败: {ee}"
+                    return None
+                snap.errors[name] = f"401/403，重登 {max_auth_relogin_attempts} 次后仍失败: {last_auth_error}"
+                return None
+            except Exception as e:
+                snap.errors[name] = str(e)
+                return None
+
     try:
         if "usage" in what_set:
             _last_usage_err: Exception | None = None
-            for _attempt in range(1, 4):  # 最多重试 3 次
+            _attempt = 1
+            while _attempt <= 3:  # 非认证类错误最多重试 3 次
                 try:
                     snap.usage = client.get_current_period_usage() or {}
                     _last_usage_err = None
                     break
                 except TokenExpiredError as e:
-                    snap.errors["usage"] = f"401: {e}"
-                    mgr.mark_access_token_expired(account.email)
-                    _last_usage_err = None  # 401 不重试
+                    try:
+                        if _refresh_client_after_401("usage"):
+                            continue
+                    except Exception as ee:
+                        snap.errors["usage"] = f"重登后仍失败: {ee}"
+                        _last_usage_err = None
+                        break
+                    snap.errors["usage"] = f"401/403，重登 {max_auth_relogin_attempts} 次后仍失败: {e}"
+                    _last_usage_err = None
                     break
                 except Exception as e:
                     _last_usage_err = e
                     if _attempt < 3:
                         time.sleep(2 ** _attempt)  # 2s / 4s 指数退避
+                    _attempt += 1
             if _last_usage_err is not None:
                 snap.errors["usage"] = str(_last_usage_err)
 
         if "plan" in what_set:
-            try:
-                snap.plan = client.get_plan_info() or {}
-            except Exception as e:
-                snap.errors["plan"] = str(e)
+            snap.plan = _call("plan", lambda: client.get_plan_info() or {}) or {}
 
         if "usage_limit" in what_set:
-            try:
-                snap.usage_limit = client.get_usage_limit_status() or {}
-            except Exception as e:
-                snap.errors["usage_limit"] = str(e)
+            snap.usage_limit = _call("usage_limit", lambda: client.get_usage_limit_status() or {}) or {}
 
         if "usage_events" in what_set:
             # ── 优先：CSV 端点，精度最高（含完整 token 用量） ──
@@ -115,12 +143,16 @@ def fetch_one(
 
             # ── 降级：分页 API 端点 ──
             if not csv_ok:
-                try:
-                    snap.usage_events = client.iter_all_usage_events(
+                evs_result = _call(
+                    "usage_events",
+                    lambda: client.iter_all_usage_events(
                         page_size=100,
                         start_ts=start_ts,
                         end_ts=end_ts,
-                    )
+                    ),
+                )
+                if evs_result is not None:
+                    snap.usage_events = evs_result
                     evs = snap.usage_events or []
                     if evs:
                         ts_vals = [int(e.get("timestamp") or 0) for e in evs if e.get("timestamp")]
@@ -135,18 +167,14 @@ def fetch_one(
                             log.info(f"[{account.email}] 使用明细(API): {len(evs)} 条")
                     else:
                         log.info(f"[{account.email}] 使用明细: 0 条（CSV 和 API 均无数据）")
-                except Exception as e:
-                    snap.errors["usage_events"] = str(e)
 
         if "stripe" in what_set:
-            try:
-                snap.stripe = client.get_stripe_info() or {}
-            except Exception as e:
-                snap.errors["stripe"] = str(e)
+            snap.stripe = _call("stripe", lambda: client.get_stripe_info() or {}) or {}
 
         if "invoices" in what_set:
-            try:
-                snap.invoices = client.list_invoices() or []
+            invoices = _call("invoices", lambda: client.list_invoices() or [])
+            if invoices is not None:
+                snap.invoices = invoices
                 if snap.invoices:
                     first = snap.invoices[0]
                     log.info(
@@ -156,9 +184,8 @@ def fetch_one(
                     )
                 else:
                     log.info(f"[{account.email}] 账单: 0 条（端点无数据）")
-            except Exception as e:
-                snap.errors["invoices"] = str(e)
-                log.warning(f"[{account.email}] 账单拉取失败: {e}")
+            elif "invoices" in snap.errors:
+                log.warning(f"[{account.email}] 账单拉取失败: {snap.errors['invoices']}")
     finally:
         client.close()
 

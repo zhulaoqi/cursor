@@ -183,7 +183,7 @@ class TokenManager:
         msg = str(e)
         return any(k in msg for k in self._TRANSIENT_ERRORS)
 
-    def _browser_login_and_save(self, account: Account) -> str:
+    def _browser_login_and_save(self, account: Account, *, force_fresh: bool = False) -> str:
         log.info(f"[{account.email}] 启动浏览器登录兜底")
 
         for attempt in range(1, self._NETWORK_RETRY + 1):
@@ -191,6 +191,7 @@ class TokenManager:
                 access, refresh = browser_login.login(
                     account.email, account.imap_password,
                     imap_host=account.imap_host, imap_port=account.imap_port,
+                    force_fresh=force_fresh,
                 )
                 break  # 成功跳出重试循环
             except BrowserLoginError as e:
@@ -227,7 +228,7 @@ class TokenManager:
     def force_relogin(self, account: Account) -> str:
         """不走缓存 / 不走 refresh，直接浏览器登录。"""
         with _lock_for(account.email):
-            return self._browser_login_and_save(account)
+            return self._browser_login_and_save(account, force_fresh=True)
 
     def mark_access_token_expired(self, email: str) -> None:
         """API 返回 401 时调用，让下次 get_valid_token 触发 refresh。"""

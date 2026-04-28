@@ -794,6 +794,7 @@ def login(
     imap_port: Optional[int] = None,
     headless: Optional[bool] = None,
     proxy: Optional[str] = None,
+    force_fresh: bool = False,
 ) -> tuple[str, str]:
     """
     执行一次完整浏览器登录，返回 (access_token, refresh_token)。
@@ -806,6 +807,9 @@ def login(
     with _LOGIN_SEMAPHORE:
         log.info(f"════ 登录 {email_addr} ════")
         start = time.time()
+        if force_fresh:
+            log.info("强制刷新登录态：清理旧浏览器 profile，跳过旧 session 快路径")
+            _clear_user_data(email_addr)
         with sync_playwright() as pw:
             context, page = _launch(pw, headless=headless, proxy=proxy, email_addr=email_addr)
             try:
@@ -813,19 +817,20 @@ def login(
 
                 # 快路径：profile 里可能已有有效 WorkosCursorSessionToken
                 # 先访问 cursor.com 让 cookie domain 生效，再读 cookie
-                try:
-                    log.info("检查 profile 里是否已有 session cookie ...")
-                    page.goto("https://cursor.com/", wait_until="domcontentloaded", timeout=45000)
-                    _human_pause(1.0, 2.0)
-                    for c in page.context.cookies():
-                        if c.get("name") == "WorkosCursorSessionToken" and c.get("value"):
-                            value = c["value"]
-                            head = value.split("%3A%3A")[0][:8] if "%3A%3A" in value else "?"
-                            log.info(f"profile 已含有效 session（len={len(value)}, user~{head}...），跳过邮箱登录")
-                            return value, ""
-                    log.info("profile 无 session cookie，走邮箱验证码登录流程")
-                except Exception as e:
-                    log.info(f"快路径检查失败（{e}），走常规登录")
+                if not force_fresh:
+                    try:
+                        log.info("检查 profile 里是否已有 session cookie ...")
+                        page.goto("https://cursor.com/", wait_until="domcontentloaded", timeout=45000)
+                        _human_pause(1.0, 2.0)
+                        for c in page.context.cookies():
+                            if c.get("name") == "WorkosCursorSessionToken" and c.get("value"):
+                                value = c["value"]
+                                head = value.split("%3A%3A")[0][:8] if "%3A%3A" in value else "?"
+                                log.info(f"profile 已含有效 session（len={len(value)}, user~{head}...），跳过邮箱登录")
+                                return value, ""
+                        log.info("profile 无 session cookie，走邮箱验证码登录流程")
+                    except Exception as e:
+                        log.info(f"快路径检查失败（{e}），走常规登录")
 
                 _goto_login_page(page)
                 if _is_blocked(page):
