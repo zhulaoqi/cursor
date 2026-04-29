@@ -258,6 +258,13 @@ $ec = $LASTEXITCODE; $ErrorActionPreference = $prev
 if ($ec -ne 0) { Log-Error "pip install 失败，退出码: $ec" }
 Log-OK "Python 依赖安装完成"
 
+Log-Info "安装 Patchright Chromium（账单 PDF 下载依赖）..."
+$prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+& $venvPython -m patchright install chromium 2>&1 | Out-Host
+$ec = $LASTEXITCODE; $ErrorActionPreference = $prev
+if ($ec -ne 0) { Log-Error "patchright install chromium 失败，退出码: $ec" }
+Log-OK "Patchright Chromium 已安装"
+
 # =====================================================================
 Log-Step "Step 7: 检查系统 Google Chrome"
 # =====================================================================

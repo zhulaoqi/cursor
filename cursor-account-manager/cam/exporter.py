@@ -22,7 +22,6 @@ from .token_manager import TokenManager, get_default_manager
 log = get("export")
 
 
-
 def _parse_usage_csv(csv_text: str) -> tuple[list[str], list[list[str]]]:
     """解析使用明细 CSV，返回 (headers, rows)。
     headers：原始列名，原样保留。
@@ -679,7 +678,9 @@ def _normalize_status_text(s: str) -> str:
     if "无法收款" in v:
         return "uncollectible"
     # 英文常见状态
-    for k in ("paid", "open", "refunded", "void", "uncollectible", "draft"):
+    if any(k in v for k in ("unpaid", "not paid", "past due", "payment due")):
+        return "open"
+    for k in ("open", "refunded", "void", "uncollectible", "draft", "paid"):
         if k in v:
             return k
     return _safe_filename(v)
@@ -701,6 +702,22 @@ def _normalize_invoice_url(url: str) -> str:
         ))
     except Exception:
         return s
+
+
+def _filter_paid_billing_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """只保留已支付账单，避免下载 Stripe 未支付账单/付款页。"""
+    paid_items: list[tuple[str, str]] = []
+    seen_urls: set[str] = set()
+    for url, status in items:
+        normalized_status = _normalize_status_text(status)
+        if normalized_status != "paid":
+            continue
+        normalized_url = _normalize_invoice_url(url)
+        if not normalized_url or normalized_url in seen_urls:
+            continue
+        seen_urls.add(normalized_url)
+        paid_items.append((url.strip(), normalized_status))
+    return paid_items
 
 
 def _unique_pdf_path(out_dir: Path, base_name: str) -> Path:
@@ -805,24 +822,29 @@ def _download_pdf_via_browser(hosted_url: str, save_path: Path) -> bool:
                 await page.goto(hosted_url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(2000)
 
-                # 若未拦截到，尝试找 PDF 按钮并提取 href
+                # 若未拦截到，优先找账单/发票按钮，避免点到收据按钮
                 if not intercepted:
-                    btn = page.locator(
-                        'a[href*=".pdf"], a[href*="/pdf"], '
-                        'a:has-text("PDF"), button:has-text("PDF"), '
-                        'a:has-text("pdf")'
-                    ).first
-                    if await btn.count() > 0:
+                    for sel in _stripe_invoice_download_selectors():
+                        btn = page.locator(sel).first
+                        if await btn.count() == 0:
+                            continue
+                        text = await btn.inner_text()
+                        if _is_receipt_download_text(text):
+                            continue
                         href = await btn.get_attribute("href")
                         if href and href.startswith("http"):
                             intercepted.append(href)
+                            break
 
                 # 若还没有，点击 PDF 按钮并等待下载
                 if not intercepted:
-                    btn = page.locator(
-                        'a:has-text("PDF"), button:has-text("PDF")'
-                    ).first
-                    if await btn.count() > 0:
+                    for sel in _stripe_invoice_download_selectors():
+                        btn = page.locator(sel).first
+                        if await btn.count() == 0:
+                            continue
+                        text = await btn.inner_text()
+                        if _is_receipt_download_text(text):
+                            continue
                         async with page.expect_download(timeout=15000) as dl:
                             await btn.click()
                         download = await dl.value
@@ -852,6 +874,38 @@ def _download_pdf_via_browser(hosted_url: str, save_path: Path) -> bool:
     except Exception as e:
         log.warning(f"浏览器下载 PDF 失败: {e}")
         return False
+
+
+def _is_receipt_download_text(text: str) -> bool:
+    """Stripe 已支付页同时有账单和收据按钮，收据不是我们要的文件。"""
+    value = (text or "").strip().lower()
+    return any(word in value for word in ("收据", "receipt"))
+
+
+def _stripe_invoice_download_selectors() -> list[str]:
+    """Stripe 页面下载选择器：先点账单/发票，最后才用通用 PDF 兜底。"""
+    invoice_texts = (
+        "下载账单",
+        "下载发票",
+        "Download invoice",
+        "Invoice",
+        "Invoice PDF",
+    )
+    selectors: list[str] = []
+    for text in invoice_texts:
+        selectors.extend([
+            f'button:has-text("{text}")',
+            f'a:has-text("{text}")',
+            f'[role="button"]:has-text("{text}")',
+        ])
+    selectors.extend([
+        ':text("PDF")',
+        'a[href*=".pdf"]',
+        'a[href*="/pdf"]',
+        '[data-testid*="pdf"]',
+        'a[download]',
+    ])
+    return selectors
 
 
 _STATUS_JS = """
@@ -963,14 +1017,18 @@ async def _download_account_all_pdfs(
                     finally:
                         await status_page.close()
 
-                    if not items:
-                        log.warning(f"[{email}] 账单页未找到有效发票行，跳过")
+                    paid_items = _filter_paid_billing_items(items)
+                    if not paid_items:
+                        log.warning(f"[{email}] 账单页未找到已支付发票行，跳过")
                         return {}
 
-                    log.info(f"[{email}] 账单页状态抓取成功: {len(items)} 条")
+                    log.info(
+                        f"[{email}] 账单页状态抓取成功: 总计 {len(items)} 条，"
+                        f"已支付 {len(paid_items)} 条"
+                    )
 
                     # ── Step 2: 下载每张 PDF（复用同一 ctx，无需重新认证）──
-                    for idx, (hosted_url, status_raw) in enumerate(items, start=1):
+                    for idx, (hosted_url, status_raw) in enumerate(paid_items, start=1):
                         status_tag = _safe_filename(status_raw)
                         if not status_tag:
                             log.warning(f"[{email}] 账单 {idx} 无 status，跳过")
@@ -980,7 +1038,7 @@ async def _download_account_all_pdfs(
                         save_path = _unique_pdf_path(out_dir, base_name)
                         fname = save_path.name
 
-                        log.info(f"[{email}] 下载账单 {idx}/{len(items)}: {fname}")
+                        log.info(f"[{email}] 下载已支付账单 {idx}/{len(paid_items)}: {fname}")
                         ok = False
                         for _attempt in range(1, 4):
                             ok = await _stripe_page_click_pdf(hosted_url, save_path, ctx)
@@ -1168,13 +1226,7 @@ async def _stripe_page_click_pdf(
         log.info(f"Stripe 可点击元素(前10): {clickable}")
 
         # ── 选择器按优先级依次尝试 ──
-        selectors = [
-            ':text("PDF")',
-            'a[href*=".pdf"]',
-            'a[href*="/pdf"]',
-            '[data-testid*="pdf"]',
-            'a[download]',
-        ]
+        selectors = _stripe_invoice_download_selectors()
 
         for sel in selectors:
             try:
@@ -1188,6 +1240,9 @@ async def _stripe_page_click_pdf(
                 tag  = await el.evaluate("e => e.tagName")
                 text = await el.inner_text()
                 log.info(f"  命中: tag={tag}, text={text[:50]!r}, href={href[:80]!r}")
+                if _is_receipt_download_text(text):
+                    log.info(f"  跳过收据下载按钮: text={text[:50]!r}")
+                    continue
 
                 if href.startswith("http") and (".pdf" in href.lower() or "/pdf" in href.lower()):
                     resp = _req.get(href, timeout=30, stream=True,
@@ -1389,8 +1444,9 @@ def _download_pdfs_via_billing_page(
 
         # Step1: 拿到所有 Stripe 发票 URL + 状态
         items = stripe_items if stripe_items is not None else await _billing_page_get_stripe_items(cookie_val)
-        if not items:
-            log.warning("账单页未找到任何发票链接")
+        paid_items = _filter_paid_billing_items(items)
+        if not paid_items:
+            log.warning("账单页未找到已支付发票链接")
             return {}
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1398,7 +1454,7 @@ def _download_pdfs_via_billing_page(
             browser = await p.chromium.launch(headless=True)
             ctx = await browser.new_context(accept_downloads=True)
 
-            for idx, (hosted_url, status_raw) in enumerate(items, start=1):
+            for idx, (hosted_url, status_raw) in enumerate(paid_items, start=1):
                 status_tag = _safe_filename(_normalize_status_text(status_raw))
                 if not status_tag:
                     log.warning(f"账单 {idx} 缺少 status，跳过")
@@ -1408,7 +1464,7 @@ def _download_pdfs_via_billing_page(
                 fname = save_path.name
 
                 log.info(
-                    f"浏览器下载账单 {idx}/{len(items)}: "
+                    f"浏览器下载已支付账单 {idx}/{len(paid_items)}: "
                     f"month={month_tag}, status={status_tag}, url={hosted_url[:80]}"
                 )
                 ok = False
