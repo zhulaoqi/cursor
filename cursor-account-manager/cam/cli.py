@@ -99,7 +99,6 @@ WHAT_ALIAS = {
     "limit": "usage_limit",
     "events": "usage_events",
     "stripe": "stripe",
-    "invoices": "invoices",
     "all": "__all__",
 }
 
@@ -109,7 +108,7 @@ WHAT_ALIAS = {
 @click.option("--email", "email", multiple=True)
 @click.option(
     "--what", default="all",
-    help="逗号分隔: usage,plan,limit,events,stripe,invoices,all",
+    help="逗号分隔: usage,plan,limit,events,stripe,all",
 )
 @click.option("--concurrency", type=int, default=None)
 @click.option(
@@ -263,34 +262,6 @@ def cmd_dump(
         click.echo(f"全账号汇总: {out_root / '_summary.xlsx'}")
 
     _print_summary("dump", ok, fail)
-
-
-# ═══ invoices ═════════════════════════════════════════════════════
-
-@cli.command("invoices")
-@click.option("--download", is_flag=True, help="下载所有发票 PDF")
-@click.option(
-    "--out", type=click.Path(path_type=Path), default=None,
-    help="PDF 输出目录（默认 data/exports/invoices/）",
-)
-@click.option("--all", "all_flag", is_flag=True)
-@click.option("--email", "email", multiple=True)
-def cmd_invoices(download: bool, out: Path | None, all_flag: bool, email: tuple[str, ...]) -> None:
-    """列 / 下载发票。"""
-    accounts = _pick_accounts(all_flag, email)
-    snaps = fetcher.fetch_many(accounts, what=("invoices",))
-
-    if not download:
-        for s in snaps:
-            click.echo(f"{s.email}: {len(s.invoices)} 张发票")
-        return
-
-    target = out or (SETTINGS.exports_dir / "invoices")
-    counts = exporter.download_invoices(accounts, snaps, target)
-    click.echo()
-    for e, n in counts.items():
-        click.echo(f"{e}: 下载 {n} 张 PDF → {target / e}")
-
 
 # ═══ status ═══════════════════════════════════════════════════════
 

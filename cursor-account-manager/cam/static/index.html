@@ -246,20 +246,111 @@
       color: var(--primary);
       box-shadow: 0 0 0 3px rgba(37,99,235,.08);
     }
-    .month-input {
-      width: 142px;
-      min-height: 34px;
-      font-size: 13px;
-      padding: 6px 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
     .month-row {
       display: flex;
       flex-direction: row;
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
+    }
+    .month-picker-wrap {
+      position: relative;
+      flex: 0 0 auto;
+    }
+    .month-display {
+      min-width: 142px;
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .month-display:hover,
+    .month-display:focus-visible {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+      outline: none;
+    }
+    .month-popover {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 70;
+      width: 286px;
+      padding: 12px;
+      border: 1px solid #DDE6F3;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 18px 48px rgba(15,23,42,.16), 0 6px 18px rgba(15,23,42,.08);
+    }
+    .month-popover-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .month-popover-title {
+      min-width: 92px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .month-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    .month-cell {
+      min-height: 38px;
+      border: 1px solid #E2E8F0;
+      border-radius: 9px;
+      background: #fff;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+    }
+    .month-cell:hover {
+      border-color: #BFDBFE;
+      background: #F8FBFF;
+      color: var(--primary);
+    }
+    .month-cell.is-selected {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 6px 14px rgba(37,99,235,.22);
+    }
+    .month-cell.is-current:not(.is-selected) {
+      border-color: #93C5FD;
+      color: var(--primary);
+      background: #EFF6FF;
+    }
+    .month-cell.is-disabled {
+      cursor: not-allowed;
+      color: #CBD5E1;
+      background: #F8FAFC;
+      border-color: #E2E8F0;
+      box-shadow: none;
+    }
+    .month-popover-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
     }
     .option-stack {
       display: flex;
@@ -903,7 +994,37 @@
         <div class="filter-section is-compact">
           <div class="month-row">
             <div class="field-label">账单月份</div>
-            <input type="month" x-model="selectedMonth" class="month-input" />
+            <div class="month-picker-wrap" @click.outside="activeDatePicker==='month' && (activeDatePicker=null)">
+              <button type="button" class="month-display"
+                @click="openMonthPicker()"
+                :aria-expanded="activeDatePicker==='month'"
+                aria-label="选择账单月份">
+                <span x-text="formatSelectedMonth()"></span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </button>
+              <div class="month-popover" x-show="activeDatePicker==='month'" x-cloak x-transition.opacity.scale.origin.top.right>
+                <div class="month-popover-header">
+                  <button type="button" class="date-nav-btn" @click="shiftMonthPickerYear(-1)" aria-label="上一年">‹</button>
+                  <div class="month-popover-title" x-text="monthPickerYear"></div>
+                  <button type="button" class="date-nav-btn" @click="shiftMonthPickerYear(1)" aria-label="下一年">›</button>
+                </div>
+                <div class="month-grid">
+                  <template x-for="m in monthPickerMonths()" :key="m.value">
+                    <button type="button" class="month-cell"
+                      :class="{'is-selected': selectedMonth===m.value, 'is-current': currentMonthIso()===m.value, 'is-disabled': m.isFuture}"
+                      :disabled="m.isFuture"
+                      @click="selectBillingMonth(m.year, m.month)"
+                      :aria-label="`${m.year}年${m.month}月`"
+                      x-text="`${m.month}月`">
+                    </button>
+                  </template>
+                </div>
+                <div class="month-popover-footer">
+                  <button type="button" class="date-footer-btn" @click="clearBillingMonth()">清除</button>
+                  <button type="button" class="date-footer-btn" @click="selectCurrentBillingMonth()">本月</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1525,10 +1646,11 @@ function app() {
 
     // ── 日期 / 选项 ──
     selectedMonth: new Date().toISOString().slice(0, 7),
+    monthPickerYear: new Date().getFullYear(),
     datePreset: '30d',
     dateFrom: '',
     dateTo: '',
-    activeDatePicker: null, // 'from' | 'to' | null
+    activeDatePicker: null, // 'range' | 'month' | null
     calendarCursor: '',
     rangeSelecting: 'start', // 'start' | 'end'
     withInvoices: true,
@@ -1710,6 +1832,50 @@ function app() {
     },
     todayIso() {
       return this.formatDateIso(new Date());
+    },
+    currentMonthIso() {
+      return this.todayIso().slice(0, 7);
+    },
+    parseMonthIso(v) {
+      const [y, m] = String(v || '').split('-').map(Number);
+      if (!y || !m) return null;
+      return { year: y, month: m, value: `${y}-${this.pad2(m)}` };
+    },
+    formatSelectedMonth() {
+      const parsed = this.parseMonthIso(this.selectedMonth);
+      return parsed ? `${parsed.year}年${this.pad2(parsed.month)}月` : '选择月份';
+    },
+    openMonthPicker() {
+      const parsed = this.parseMonthIso(this.selectedMonth) || this.parseMonthIso(this.currentMonthIso());
+      this.monthPickerYear = parsed ? parsed.year : new Date().getFullYear();
+      this.activeDatePicker = 'month';
+    },
+    shiftMonthPickerYear(delta) {
+      this.monthPickerYear = Number(this.monthPickerYear || new Date().getFullYear()) + delta;
+    },
+    monthPickerMonths() {
+      const year = Number(this.monthPickerYear || new Date().getFullYear());
+      const current = this.currentMonthIso();
+      return Array.from({ length: 12 }, (_, i) => {
+        const month = i + 1;
+        const value = `${year}-${this.pad2(month)}`;
+        return { year, month, value, isFuture: value > current };
+      });
+    },
+    selectBillingMonth(year, month) {
+      const value = `${year}-${this.pad2(month)}`;
+      if (value > this.currentMonthIso()) return;
+      this.selectedMonth = value;
+      this.activeDatePicker = null;
+    },
+    clearBillingMonth() {
+      this.selectedMonth = '';
+      this.activeDatePicker = null;
+    },
+    selectCurrentBillingMonth() {
+      this.selectedMonth = this.currentMonthIso();
+      this.monthPickerYear = new Date().getFullYear();
+      this.activeDatePicker = null;
     },
     formatDateDisplay(v) {
       return v ? v.replaceAll('-', '/') : '选择日期';

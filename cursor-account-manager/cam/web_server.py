@@ -140,11 +140,24 @@ def _parse_date_range_to_utc_ts(
     return start_ts, end_ts
 
 
-def _fetch_targets_for_run(*, with_summary: bool) -> tuple[str, ...]:
+def _fetch_targets_for_run(
+    *,
+    with_summary: bool,
+    with_invoices: bool,
+    with_raw: bool,
+) -> tuple[str, ...]:
     """根据导出选项决定本次需要拉取的 API 数据项。"""
-    if with_summary:
+    if with_raw:
         return fetcher.DEFAULT_WHAT
-    return tuple(item for item in fetcher.DEFAULT_WHAT if item != "usage_events")
+
+    targets: list[str] = []
+    if with_summary:
+        # Token 汇总依赖 usage_events；其它轻量字段保留用于概览/诊断。
+        targets.extend(["usage", "plan", "usage_limit", "usage_events", "stripe"])
+
+    # PDF 下载已改为浏览器账单页路径，不依赖 Cursor invoices API。
+    # 仅下载 PDF 时仍需要 fetch_one 获取/刷新 token，但无需额外 API 请求。
+    return tuple(targets)
 
 
 def _should_mark_accounts_done_after_export(*, with_invoices: bool) -> bool:
@@ -327,7 +340,11 @@ async def run_task(req: RunRequest):
         # 记录拉取阶段有 warn 的账号，export 完成后保留 warn 标志
         _warn_emails: set[str] = set()
 
-        fetch_targets = _fetch_targets_for_run(with_summary=req.with_summary)
+        fetch_targets = _fetch_targets_for_run(
+            with_summary=req.with_summary,
+            with_invoices=req.with_invoices,
+            with_raw=req.with_raw,
+        )
 
         def _fetch_one(acc: Account):
             _push(task_id, "progress", {"email": acc.email, "phase": "fetching"})
@@ -369,42 +386,6 @@ async def run_task(req: RunRequest):
                     f.result()
                 except Exception as e:
                     log.exception(f"并发任务异常: {e}")
-
-        # 按账单月份过滤发票（month = "YYYY-MM"）
-        # 优先用 period_start（账单周期开始），避免 created（发票生成时间＝周期末）导致月份偏移
-        invoice_month = req.month or None
-        log.info(f"发票月份过滤: req.month={req.month!r}")
-        if invoice_month and snaps:
-            for snap in snaps:
-                if not snap.invoices:
-                    continue
-                log.info(f"[{snap.email}] 过滤前发票数={len(snap.invoices)}, "
-                         f"示例字段={list(snap.invoices[0].keys())[:12] if snap.invoices else []}")
-                filtered = []
-                for inv in snap.invoices:
-                    # period_start → periodStart → period_end → created → createdAt
-                    ts_raw = (
-                        inv.get("period_start") or inv.get("periodStart") or
-                        inv.get("period_end")   or inv.get("periodEnd")   or
-                        inv.get("created")      or inv.get("createdAt")   or 0
-                    )
-                    try:
-                        ts = int(ts_raw)
-                    except (TypeError, ValueError):
-                        ts = 0
-                    if ts:
-                        # 兼容毫秒时间戳
-                        if ts > 10 ** 12:
-                            ts //= 1000
-                        inv_month = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m")
-                        log.debug(f"  发票 ts={ts} → {inv_month}, 目标={invoice_month}")
-                        if inv_month == invoice_month:
-                            filtered.append(inv)
-                    else:
-                        # 无法识别日期时，仅在未指定月份时保留（不乱过滤）
-                        log.debug(f"  发票无可识别日期字段: {list(inv.keys())}")
-                log.info(f"[{snap.email}] 过滤后发票数={len(filtered)}")
-                snap.invoices = filtered
 
         # 生成文件
         if snaps:

@@ -169,11 +169,9 @@ data/exports/accounts/
 # 从已有 JSON 生成 Excel（不重新拉）
 .venv/bin/python -m cam export --from-dir data/exports/raw --out data/exports/report.xlsx
 
-# 下载发票 PDF
-.venv/bin/python -m cam invoices --all --download --out data/exports/invoices/
 ```
 
-`--what` 可选值：`usage` / `plan` / `limit` / `events` / `stripe` / `invoices` / `all`
+`--what` 可选值：`usage` / `plan` / `limit` / `events` / `stripe` / `all`
 
 ### 4. 维护
 

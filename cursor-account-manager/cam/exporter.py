@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .api_client import CursorClient
 from .config import SETTINGS
 from .logger import get
 from .models import Account, AccountSnapshot
@@ -622,30 +621,6 @@ def export_token_summary_xlsx(
     return out_path
 
 
-def _invoice_candidates(invoice: dict) -> tuple[str, str]:
-    """从发票 dict 里推断 (pdf_url, invoice_id)。
-
-    pdf_url 优先取 invoice_pdf / invoicePdf（Stripe 直链 PDF，预签名，无需认证）。
-    hosted_invoice_url 是 HTML 页面不是 PDF，不用于下载。
-    """
-    if not isinstance(invoice, dict):
-        return "", ""
-    pdf_url = ""
-    # 只取真正的 PDF 直链字段，跳过 hosted_invoice_url（HTML 页）
-    for k in ("invoice_pdf", "invoicePdf", "pdf_url", "pdfUrl", "pdf"):
-        v = invoice.get(k)
-        if isinstance(v, str) and v.startswith("http"):
-            pdf_url = v
-            break
-    inv_id = ""
-    for k in ("number", "id", "invoiceNumber", "invoice_number"):
-        v = invoice.get(k)
-        if isinstance(v, (str, int)):
-            inv_id = str(v)
-            break
-    return pdf_url, inv_id
-
-
 def _invoice_month_tag(month_value: str) -> str:
     """前端 month 传值（如 2026-04）规范化为 YYYY.MM。"""
     s = (month_value or "").strip()
@@ -657,6 +632,75 @@ def _invoice_month_tag(month_value: str) -> str:
     y = m.group(1)
     mo = int(m.group(2))
     return f"{y}.{mo:02d}"
+
+
+def _billing_month_key(value: str) -> str:
+    """把前端 month 或账单页 Date 文本规范化为 YYYY-MM。"""
+    s = (value or "").strip()
+    if not s:
+        return ""
+
+    m = re.search(r"(\d{4})\D+(\d{1,2})", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}"
+
+    month_names = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+    m = re.search(r"\b([A-Za-z]+)\b\s+\d{1,2},\s*(\d{4})", s)
+    if m:
+        month = month_names.get(m.group(1).lower())
+        if month:
+            return f"{m.group(2)}-{month:02d}"
+
+    return ""
+
+
+def _billing_month_select_payload(value: str) -> dict:
+    """生成账单页月份下拉可匹配的目标值和标签。"""
+    key = _billing_month_key(value)
+    if not key:
+        return {}
+    year_s, month_s = key.split("-", 1)
+    year = int(year_s)
+    month = int(month_s)
+    short_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    full_names = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ]
+    labels = [
+        f"{year}年{month}月",
+        f"{year}年{month:02d}月",
+        key,
+        f"{short_names[month - 1]} {year}",
+        f"{full_names[month - 1]} {year}",
+    ]
+    return {"value": key, "year": year, "month": month, "labels": labels}
+
+
+def _month_distance_descending(current_value: str, target_value: str) -> Optional[int]:
+    """按月份下拉降序列表计算从当前月到目标月需要 ArrowDown 的次数。"""
+    current = _billing_month_key(current_value)
+    target = _billing_month_key(target_value)
+    if not current or not target:
+        return None
+    current_y, current_m = current.split("-", 1)
+    target_y, target_m = target.split("-", 1)
+    current_index = int(current_y) * 12 + int(current_m)
+    target_index = int(target_y) * 12 + int(target_m)
+    return current_index - target_index
 
 
 def _normalize_status_text(s: str) -> str:
@@ -704,13 +748,24 @@ def _normalize_invoice_url(url: str) -> str:
         return s
 
 
-def _filter_paid_billing_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+def _filter_paid_billing_items(
+    items: list[tuple],
+    *,
+    invoice_month: str = "",
+) -> list[tuple[str, str]]:
     """只保留已支付账单，避免下载 Stripe 未支付账单/付款页。"""
     paid_items: list[tuple[str, str]] = []
     seen_urls: set[str] = set()
-    for url, status in items:
+    selected_month = _billing_month_key(invoice_month)
+    for item in items:
+        if len(item) < 2:
+            continue
+        url, status = item[0], item[1]
+        row_date = item[2] if len(item) >= 3 else ""
         normalized_status = _normalize_status_text(status)
         if normalized_status != "paid":
+            continue
+        if selected_month and _billing_month_key(str(row_date)) != selected_month:
             continue
         normalized_url = _normalize_invoice_url(url)
         if not normalized_url or normalized_url in seen_urls:
@@ -735,145 +790,6 @@ def _unique_pdf_path(out_dir: Path, base_name: str) -> Path:
         if not cand.exists():
             return cand
         i += 1
-
-
-def _download_pdf_direct(pdf_url: str, save_path: Path) -> bool:
-    """直接用 requests 下载 PDF（适用于 Stripe invoice_pdf 预签名链接）。"""
-    import requests as _req
-    try:
-        resp = _req.get(pdf_url, timeout=30, stream=True,
-                        headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with save_path.open("wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        # 检查下载的确实是 PDF（文件头 %PDF）
-        header = save_path.read_bytes()[:5]
-        if not header.startswith(b"%PDF"):
-            log.warning(f"下载内容不是 PDF（头部={header!r}），删除: {save_path.name}")
-            save_path.unlink(missing_ok=True)
-            return False
-        return True
-    except Exception as e:
-        log.warning(f"直接下载失败: {e}")
-        return False
-
-
-def _extract_pdf_url_from_stripe_page(hosted_url: str) -> Optional[str]:
-    """从 Stripe 托管发票页面 HTML 提取 PDF 直链（无需浏览器）。"""
-    import requests as _req
-    try:
-        resp = _req.get(
-            hosted_url, timeout=20,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                   "AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"},
-        )
-        if not resp.ok:
-            return None
-        text = resp.text
-        patterns = [
-            r'"invoice_pdf"\s*:\s*"(https://[^"]+)"',
-            r'"invoicePdf"\s*:\s*"(https://[^"]+)"',
-            r'"pdf_url"\s*:\s*"(https://[^"]+)"',
-            r'href="(https://[^"]+/pdf[^"]*)"',
-        ]
-        for pat in patterns:
-            m = re.search(pat, text)
-            if m:
-                url = m.group(1).replace("\\u0026", "&").replace("\\/", "/")
-                log.info(f"从 Stripe 页面 HTML 提取到 PDF URL: {url[:80]}")
-                return url
-    except Exception as e:
-        log.debug(f"HTML 提取 PDF URL 失败: {e}")
-    return None
-
-
-def _download_pdf_via_browser(hosted_url: str, save_path: Path) -> bool:
-    """用 patchright 访问 Stripe 发票页，拦截 PDF 请求 URL，再用 requests 下载。
-    适用于 invoice_pdf 无效或为空时的兜底方案。
-    """
-    import asyncio
-
-    async def _run() -> Optional[str]:
-        try:
-            from patchright.async_api import async_playwright
-        except ImportError:
-            log.warning("patchright 未安装，无法用浏览器下载 PDF")
-            return None
-
-        intercepted: list[str] = []
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            ctx = await browser.new_context(accept_downloads=True)
-            page = await ctx.new_page()
-
-            # 拦截所有请求，记录包含 pdf 的 URL
-            async def on_request(req):
-                url = req.url.lower()
-                if ".pdf" in url or "invoice_pdf" in url or "/pdf" in url:
-                    intercepted.append(req.url)
-
-            page.on("request", on_request)
-
-            try:
-                await page.goto(hosted_url, wait_until="domcontentloaded", timeout=25000)
-                await page.wait_for_timeout(2000)
-
-                # 若未拦截到，优先找账单/发票按钮，避免点到收据按钮
-                if not intercepted:
-                    for sel in _stripe_invoice_download_selectors():
-                        btn = page.locator(sel).first
-                        if await btn.count() == 0:
-                            continue
-                        text = await btn.inner_text()
-                        if _is_receipt_download_text(text):
-                            continue
-                        href = await btn.get_attribute("href")
-                        if href and href.startswith("http"):
-                            intercepted.append(href)
-                            break
-
-                # 若还没有，点击 PDF 按钮并等待下载
-                if not intercepted:
-                    for sel in _stripe_invoice_download_selectors():
-                        btn = page.locator(sel).first
-                        if await btn.count() == 0:
-                            continue
-                        text = await btn.inner_text()
-                        if _is_receipt_download_text(text):
-                            continue
-                        async with page.expect_download(timeout=15000) as dl:
-                            await btn.click()
-                        download = await dl.value
-                        dl_path = save_path.parent / download.suggested_filename
-                        await download.save_as(str(dl_path))
-                        if dl_path != save_path:
-                            dl_path.rename(save_path)
-                        await browser.close()
-                        return "DOWNLOADED"  # 已直接下载，无需再用 requests
-            except Exception as e:
-                log.warning(f"浏览器操作异常: {e}")
-            finally:
-                await browser.close()
-
-        return intercepted[0] if intercepted else None
-
-    try:
-        result = asyncio.run(_run())
-        if result is None:
-            return False
-        if result == "DOWNLOADED":
-            # 检验文件
-            header = save_path.read_bytes()[:5] if save_path.exists() else b""
-            return header.startswith(b"%PDF")
-        # 用拦截到的 URL 下载
-        return _download_pdf_direct(result, save_path)
-    except Exception as e:
-        log.warning(f"浏览器下载 PDF 失败: {e}")
-        return False
 
 
 def _is_receipt_download_text(text: str) -> bool:
@@ -919,6 +835,7 @@ _STATUS_JS = """
     if (!a) continue;
     const tds = [...tr.querySelectorAll('td')];
     if (!tds.length) continue;
+    const date = norm(tds[0]?.innerText || tds[0]?.textContent);
     let status = '';
     for (const td of tds) {
       if (td.classList.contains('capitalize')) {
@@ -933,46 +850,470 @@ _STATUS_JS = """
         if (STATUS_KEYS.some(k => t.includes(k.toLowerCase()))) { status = t; break; }
       }
     }
-    out.push({ url: a.href || '', status });
+    out.push({ url: a.href || '', status, date });
   }
   return out;
 }
 """
 
+_BILLING_MONTH_SELECT_JS = """
+async (target) => {
+  if (!target || !target.value || !Array.isArray(target.labels)) return false;
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const labels = target.labels.map(norm).filter(Boolean);
+  const lowerLabels = labels.map(s => s.toLowerCase());
+  const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
+  const matches = (text, value = '') => {
+    const candidates = [norm(text), norm(value)].filter(Boolean);
+    return candidates.some(candidate => {
+      const lower = candidate.toLowerCase();
+      return lowerLabels.some(label => lower === label || lower.includes(label));
+    });
+  };
+  const fire = el => {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  for (const select of document.querySelectorAll('select')) {
+    const options = [...select.options];
+    const option = options.find(o => matches(o.textContent, o.value));
+    if (!option) continue;
+    select.value = option.value;
+    select.selectedIndex = options.indexOf(option);
+    fire(select);
+    return true;
+  }
+
+  const clickables = [...document.querySelectorAll('button,[role="button"],[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="menu"],div[tabindex],span[tabindex]')];
+  const trigger = clickables.find(el => {
+    const text = norm(el.innerText || el.textContent);
+    const aria = norm(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`);
+    if (matches(text) || matches(aria)) return true;
+    if (text.length <= 36 && monthPattern.test(text)) return true;
+    return /账单|发票|invoice|billing|month|月份/i.test(aria) && text.length <= 50;
+  });
+  if (trigger && matches(trigger.innerText || trigger.textContent, trigger.getAttribute('aria-label') || trigger.getAttribute('title') || '')) {
+    return true;
+  }
+  if (trigger) {
+    const isOpen = trigger.getAttribute('aria-expanded') === 'true' || trigger.getAttribute('data-state') === 'open';
+    if (!isOpen) {
+      trigger.click();
+      await sleep(450);
+    }
+  }
+
+  const optionSelectors = '[role="option"],[role="menuitem"],[data-radix-collection-item],button,li,div[tabindex],span[tabindex]';
+  for (let i = 0; i < 8; i += 1) {
+    const options = [...document.querySelectorAll(optionSelectors)]
+      .filter(el => el.offsetParent !== null || el.getClientRects().length > 0);
+    const option = options.find(el => matches(el.innerText || el.textContent, el.getAttribute('aria-label') || el.getAttribute('title') || ''));
+    if (option) {
+      option.click();
+      await sleep(700);
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+"""
+
+_BILLING_MONTH_PROBE_SELECT_JS = """
+async (target) => {
+  // 这个脚本只负责「发现」：打开下拉、读取选项列表、找到匹配文本。
+  // 不再用 dispatchEvent 合成点击选项——合成事件不经过 React fiber，
+  // 无法触发 React state update，需由 Playwright 真实点击来完成。
+  const result = { selected: false, triggerText: '', matchedLabel: '', optionTexts: [], triggerCount: 0, reason: '' };
+  if (!target || !target.value || !Array.isArray(target.labels)) {
+    result.reason = 'invalid target';
+    return result;
+  }
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const labels = target.labels.map(norm).filter(Boolean);
+  const lowerLabels = labels.map(s => s.toLowerCase());
+  const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
+  const matches = (text, value = '') => {
+    const candidates = [norm(text), norm(value)].filter(Boolean);
+    return candidates.some(candidate => {
+      const lower = candidate.toLowerCase();
+      return lowerLabels.some(label => lower === label || lower.includes(label));
+    });
+  };
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const textOf = el => norm(`${el?.innerText || el?.textContent || ''} ${el?.getAttribute?.('aria-label') || ''} ${el?.getAttribute?.('title') || ''}`);
+  const openTrigger = el => {
+    // 仅用于打开下拉，不点选项
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center', inline: 'center' });
+    el.focus?.();
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const event = type.startsWith('pointer')
+        ? new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 })
+        : new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 });
+      el.dispatchEvent(event);
+    }
+  };
+  const optionSelector = '[role="option"],[role="menuitem"],[data-radix-collection-item],button,li,div[tabindex],span[tabindex]';
+  const readOptions = () => [...document.querySelectorAll(optionSelector)]
+    .filter(isVisible)
+    .map(el => ({ el, text: textOf(el) }))
+    .filter(item => item.text && item.text.length <= 80);
+  const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button,[role="button"]';
+  const triggers = [...document.querySelectorAll(triggerSelector)]
+    .filter(isVisible)
+    .map(el => ({ el, text: textOf(el), open: el.getAttribute('aria-expanded') === 'true' || el.getAttribute('data-state') === 'open' }))
+    .filter(item => monthPattern.test(item.text) || item.open || /账单|发票|invoice|billing|month|月份/i.test(item.text));
+  result.triggerCount = triggers.length;
+
+  for (const item of triggers) {
+    result.triggerText = item.text;
+    if (matches(item.text)) {
+      result.selected = true;
+      result.matchedLabel = item.text;
+      result.reason = 'trigger already selected';
+      return result;
+    }
+    if (!item.open) {
+      openTrigger(item.el);
+      await sleep(500);
+    }
+    for (let i = 0; i < 8; i += 1) {
+      const options = readOptions();
+      result.optionTexts = options.map(o => o.text).slice(0, 20);
+      const option = options.find(o => matches(o.text));
+      if (option) {
+        // 发现了匹配选项，记录文字供 Playwright 真实点击，不在 JS 侧点击
+        result.matchedLabel = option.text;
+        result.reason = 'matched portal option';
+        return result;
+      }
+      await sleep(250);
+    }
+  }
+  result.reason = result.optionTexts.length ? 'target option not found' : 'no dropdown options found';
+  return result;
+}
+"""
+
+_BILLING_MONTH_REFRESH_STATE_JS = """
+(target) => {
+  const state = {
+    ready: false,
+    selectedIndicator: false,
+    triggerText: '',
+    rowDates: [],
+    targetRowDates: [],
+    staleRowDates: [],
+  };
+  if (!target || !target.value || !Array.isArray(target.labels)) return state;
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const labels = target.labels.map(norm).filter(Boolean).map(s => s.toLowerCase());
+  const matchesTarget = text => {
+    const lower = norm(text).toLowerCase();
+    return labels.some(label => lower === label || lower.includes(label));
+  };
+  const monthKey = value => {
+    const s = norm(value);
+    const m = s.match(/(\\d{4})\\D+(\\d{1,2})/);
+    if (!m) return '';
+    return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}`;
+  };
+  const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button,[role="button"]';
+  const triggers = [...document.querySelectorAll(triggerSelector)];
+  const trigger = triggers.find(el => matchesTarget(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || ''));
+  if (trigger) {
+    state.selectedIndicator = true;
+    state.triggerText = norm(trigger.innerText || trigger.textContent || trigger.getAttribute('aria-label') || trigger.getAttribute('title') || '');
+  }
+  const rows = [];
+  for (const tr of document.querySelectorAll('tr')) {
+    const a = tr.querySelector('a[href*="invoice.stripe.com"]');
+    if (!a) continue;
+    const firstCell = tr.querySelector('td');
+    const date = norm(firstCell?.innerText || firstCell?.textContent || '');
+    if (date) rows.push(date);
+  }
+  state.rowDates = rows;
+  state.targetRowDates = rows.filter(date => monthKey(date) === target.value);
+  state.staleRowDates = rows.filter(date => monthKey(date) && monthKey(date) !== target.value);
+  state.ready = (state.selectedIndicator || state.targetRowDates.length > 0) && state.staleRowDates.length === 0;
+  return state;
+}
+"""
+
+_BILLING_MONTH_CURRENT_JS = """
+(target) => {
+  if (!target || !Array.isArray(target.labels)) return false;
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const labels = target.labels.map(norm).filter(Boolean);
+  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')];
+  return candidates.some(el => {
+    const text = norm(el.innerText || el.textContent || '');
+    const aria = norm(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`);
+    return labels.some(label => text === label || text.includes(label) || aria.includes(label));
+  });
+}
+"""
+
+_BILLING_MONTH_TRIGGER_TEXT_JS = """
+() => {
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
+  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')];
+  const trigger = candidates.find(el => monthPattern.test(norm(el.innerText || el.textContent || '')));
+  return trigger ? norm(trigger.innerText || trigger.textContent || '') : '';
+}
+"""
+
+_BILLING_MONTH_TRIGGER_SELECTOR = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]'
+_BILLING_MONTH_OPTION_SELECTOR = '[role="option"],[role="menuitem"],[data-radix-collection-item],button'
+
 _BILLING_URLS = [
-    "https://cursor.com/settings/billing",
-    "https://cursor.com/dashboard/billing",
+    "https://cursor.com/dashboard/billing",   # 月份下拉控件可靠，优先尝试
+    "https://cursor.com/settings/billing",    # 备用
 ]
 
 
-async def _fetch_billing_items_in_ctx(page) -> list[tuple[str, str]]:
-    """在已有 page 对象上抓取账单页状态列表，返回 [(url, status), ...]。"""
-    items: list[tuple[str, str]] = []
-    for billing_url in _BILLING_URLS:
-        for _attempt in (1, 2):
+_INVOICE_TRIGGER_EXACT_MONTH_RE = re.compile(
+    r"^\s*\d{4}\s*年\s*\d{1,2}\s*月\s*$|"
+    r"^\s*\d{4}[-/.]\d{1,2}\s*$|"
+    r"^\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*$",
+    re.I,
+)
+_CYCLE_OR_NOISE_RE = re.compile(
+    r"Cycle Starting|Adjust plan|Manage in Stripe|Cancel|Upgrade Now|Cursor navigation|User menu",
+    re.I,
+)
+
+
+async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
+    """用 Playwright 严格定位 Invoices 表头的月份过滤器并点击切换。
+
+    页面上存在多个看起来像"月份下拉"的控件（例如订阅周期管理弹窗里的
+    "Cycle Starting 2026年X月XX日" 选项），但它们和 Invoices 列表完全无关。
+    真正的过滤器特征是：trigger 文本是简短且精确的 "YYYY年M月" 格式，
+    选项文本同样是简短的月份。所以这里采用：
+      1) 用 ^YYYY年M月$ 的精确正则只匹配简短月份按钮
+      2) 排除任何包含 "Cycle Starting / Adjust plan / Cancel" 等噪声词的元素
+      3) 由 Playwright 真实点击触发 React 事件
+    """
+    labels = [str(v) for v in payload.get("labels", []) if v]
+    if not labels:
+        return False
+    target_value = str(payload.get("value", ""))
+
+    try:
+        probe = await page.evaluate(_BILLING_MONTH_PROBE_SELECT_JS, payload)
+        if isinstance(probe, dict):
+            options = probe.get("optionTexts") or []
+            if options:
+                log.info(
+                    "账单页月份下拉探测(诊断): "
+                    f"trigger={str(probe.get('triggerText', ''))[:40]!r}, "
+                    f"options={options[:12]}"
+                )
+    except Exception:
+        pass
+
+    try:
+        all_triggers = page.locator("button").filter(
+            has_text=_INVOICE_TRIGGER_EXACT_MONTH_RE
+        )
+        trigger_count = await all_triggers.count()
+        if trigger_count == 0:
+            log.info("账单页未找到精确 'YYYY年M月' 格式的过滤器按钮")
+            return False
+
+        trigger = None
+        for i in range(min(trigger_count, 5)):
+            candidate = all_triggers.nth(i)
             try:
-                await page.goto(billing_url, wait_until="load", timeout=20000)
-                try:
-                    await page.wait_for_selector("button, a[href]", timeout=8000)
-                except Exception:
-                    pass
-                await page.wait_for_timeout(1500)
+                text = (await candidate.inner_text(timeout=1500)).strip()
             except Exception:
                 continue
-            found_rows: list[dict] = await page.evaluate(_STATUS_JS)
-            items = [
-                (r["url"], _normalize_status_text(str(r.get("status", ""))))
-                for r in (found_rows or [])
-                if isinstance(r, dict)
-                and str(r.get("url", "")).startswith("http")
-                and _normalize_status_text(str(r.get("status", "")))
-            ]
-            log.info(f"账单页 {billing_url}: {len(found_rows or [])} 行, 可用 {len(items)}")
-            if items:
-                for u, s in items:
-                    log.info(f"  status={s!r} url={u[:70]}")
-                break
+            if _CYCLE_OR_NOISE_RE.search(text):
+                continue
+            if not _INVOICE_TRIGGER_EXACT_MONTH_RE.match(text):
+                continue
+            trigger = candidate
+            log.info(f"账单页过滤器定位成功: text={text!r}")
+            break
+
+        if trigger is None:
+            log.info("账单页 'YYYY年M月' 候选按钮均不通过过滤")
+            return False
+
+        try:
+            current_text = (await trigger.inner_text(timeout=1500)).strip()
+        except Exception:
+            current_text = ""
+        if current_text and any(
+            label.lower() in current_text.lower() for label in labels
+        ):
+            log.info(f"账单页过滤器已是目标月份: current={current_text!r}")
+            return True
+
+        await trigger.scroll_into_view_if_needed(timeout=2000)
+        await trigger.click(timeout=3000)
+        await page.wait_for_timeout(700)
+    except Exception as e:
+        log.info(f"账单页过滤器点击触发器失败: {e}")
+        return False
+
+    option_selector = (
+        '[role="option"],[role="menuitem"],[data-radix-collection-item]'
+    )
+    for label in labels:
+        exact_re = re.compile(rf"^\s*{re.escape(label)}\s*$")
+        try:
+            option = (
+                page.locator(option_selector)
+                .filter(has_text=exact_re)
+                .filter(has_not_text=_CYCLE_OR_NOISE_RE)
+                .first
+            )
+            if await option.count() == 0:
+                continue
+            await option.scroll_into_view_if_needed(timeout=1500)
+            await option.click(timeout=3000)
+            await page.wait_for_timeout(800)
+            log.info(f"账单页过滤器已点击月份选项: {label!r}")
+            return True
+        except Exception:
+            continue
+
+    for label in labels:
+        try:
+            option = (
+                page.locator(option_selector)
+                .filter(has_text=label)
+                .filter(has_not_text=_CYCLE_OR_NOISE_RE)
+                .first
+            )
+            if await option.count() == 0:
+                continue
+            await option.scroll_into_view_if_needed(timeout=1500)
+            await option.click(timeout=3000)
+            await page.wait_for_timeout(800)
+            log.info(f"账单页过滤器已点击月份选项(模糊): {label!r}")
+            return True
+        except Exception:
+            continue
+
+    try:
+        current_text = str(await page.evaluate(_BILLING_MONTH_TRIGGER_TEXT_JS) or "")
+        distance = _month_distance_descending(current_text, target_value)
+        if distance is None or distance < 0 or distance > 36:
+            return False
+        for _ in range(distance):
+            await page.keyboard.press("ArrowDown")
+            await page.wait_for_timeout(80)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(800)
+        return True
+    except Exception:
+        return False
+
+
+async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: int = 20000) -> bool:
+    """点击月份后等待账单列表刷新，避免马上读到旧月份的发票行。"""
+    attempts = max(1, timeout_ms // 500)
+    last_state: dict = {}
+    for _ in range(attempts):
+        try:
+            state = await page.evaluate(_BILLING_MONTH_REFRESH_STATE_JS, payload)
+            if isinstance(state, dict):
+                last_state = state
+                if state.get("ready"):
+                    row_dates = state.get("rowDates") or []
+                    log.info(
+                        "账单页月份刷新确认: "
+                        f"trigger={str(state.get('triggerText', ''))[:40]!r}, "
+                        f"rows={row_dates[:8]}"
+                    )
+                    return True
+        except Exception:
+            pass
+        await page.wait_for_timeout(500)
+    log.warning(
+        "账单页月份切换后列表未确认刷新: "
+        f"target={payload.get('value')}, "
+        f"trigger={str(last_state.get('triggerText', ''))[:40]!r}, "
+        f"rows={(last_state.get('rowDates') or [])[:8]}, "
+        f"stale={(last_state.get('staleRowDates') or [])[:8]}"
+    )
+    return False
+
+
+async def _select_billing_month_in_ctx(page, invoice_month: str) -> bool:
+    """先把账单页月份控件切到用户选择的月份，再解析列表。"""
+    payload = _billing_month_select_payload(invoice_month)
+    if not payload:
+        return False
+    try:
+        selected = await _select_billing_month_via_playwright(page, payload)
+        if not selected:
+            selected = bool(await page.evaluate(_BILLING_MONTH_SELECT_JS, payload))
+        if selected:
+            refreshed = await _wait_for_billing_month_refresh(page, payload)
+            if not refreshed:
+                return False
+            log.info(f"账单页月份已切换到 {payload['value']}")
+        else:
+            log.warning(f"账单页未找到可切换到 {payload['value']} 的月份控件，继续使用列表日期过滤兜底")
+        return selected
+    except Exception as e:
+        log.warning(f"账单页月份切换失败: {e}")
+        return False
+
+
+async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tuple[str, str, str]]:
+    """在已有 page 对象上抓取账单页状态列表，返回 [(url, status, date), ...]。"""
+    items: list[tuple[str, str, str]] = []
+    requested_month = _billing_month_key(invoice_month)
+    for billing_url in _BILLING_URLS:
+        try:
+            await page.goto(billing_url, wait_until="load", timeout=20000)
+            # 优先等待 Stripe 发票链接出现，这意味着账单区域（含月份下拉）已渲染完毕。
+            # 等通用 button/a[href] 会在导航栏出现时就满足，账单表格可能尚未渲染。
+            try:
+                await page.wait_for_selector(
+                    'a[href*="invoice.stripe.com"]',
+                    timeout=15000,
+                )
+            except Exception:
+                # 该页面可能没有账单行（如 settings/billing），回退到通用等待
+                try:
+                    await page.wait_for_selector("button, a[href]", timeout=5000)
+                except Exception:
+                    pass
+            await page.wait_for_timeout(500)
+            if requested_month:
+                selected = await _select_billing_month_in_ctx(page, invoice_month)
+                if not selected:
+                    continue
+        except Exception:
+            continue
+        found_rows: list[dict] = await page.evaluate(_STATUS_JS)
+        items = [
+            (
+                r["url"],
+                _normalize_status_text(str(r.get("status", ""))),
+                str(r.get("date", "")),
+            )
+            for r in (found_rows or [])
+            if isinstance(r, dict)
+            and str(r.get("url", "")).startswith("http")
+            and _normalize_status_text(str(r.get("status", "")))
+        ]
+        log.info(f"账单页 {billing_url}: {len(found_rows or [])} 行, 可用 {len(items)}")
         if items:
+            for u, s, d in items:
+                log.info(f"  date={d!r} status={s!r} url={u[:70]}")
             break
     return items
 
@@ -983,6 +1324,7 @@ async def _download_account_all_pdfs(
     email_tag: str,
     month_tag: str,
     email: str,
+    invoice_month: str = "",
     sem: Optional[asyncio.Semaphore] = None,
 ) -> dict[str, str]:
     """单 browser session：抓状态 + 下载所有 PDF。
@@ -1013,18 +1355,23 @@ async def _download_account_all_pdfs(
                     # ── Step 1: 抓账单状态 ──────────────────────────────
                     status_page = await ctx.new_page()
                     try:
-                        items = await _fetch_billing_items_in_ctx(status_page)
+                        items = await _fetch_billing_items_in_ctx(status_page, invoice_month=invoice_month or month_tag)
                     finally:
                         await status_page.close()
 
-                    paid_items = _filter_paid_billing_items(items)
+                    paid_items = _filter_paid_billing_items(
+                        items,
+                        invoice_month=invoice_month or month_tag,
+                    )
                     if not paid_items:
-                        log.warning(f"[{email}] 账单页未找到已支付发票行，跳过")
+                        log.warning(
+                            f"[{email}] 账单页未找到 {month_tag} 的已支付发票行，跳过"
+                        )
                         return {}
 
                     log.info(
                         f"[{email}] 账单页状态抓取成功: 总计 {len(items)} 条，"
-                        f"已支付 {len(paid_items)} 条"
+                        f"{month_tag} 已支付 {len(paid_items)} 条"
                     )
 
                     # ── Step 2: 下载每张 PDF（复用同一 ctx，无需重新认证）──
@@ -1068,15 +1415,15 @@ async def _download_account_all_pdfs(
     return await _body()
 
 
-async def _billing_page_get_stripe_items(cookie_val: str) -> list[tuple[str, str]]:
+async def _billing_page_get_stripe_items(cookie_val: str, invoice_month: str = "") -> list[tuple[str, str, str]]:
     """用 patchright + Cookie 访问 Cursor 账单页，提取发票链接及状态。
 
-    返回: [(hosted_invoice_url, status), ...]
+    返回: [(hosted_invoice_url, status, date), ...]
     status 为账单列表状态列文本（会转小写）。
     """
     from patchright.async_api import async_playwright
 
-    items: list[tuple[str, str]] = []
+    items: list[tuple[str, str, str]] = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context()
@@ -1090,76 +1437,48 @@ async def _billing_page_get_stripe_items(cookie_val: str) -> list[tuple[str, str
         }])
         page = await ctx.new_page()
         try:
-            # 尝试几个可能的账单页 URL
-            for billing_url in [
-                "https://cursor.com/settings/billing",
-                "https://cursor.com/dashboard/billing",
-                "https://cursor.com/cn/dashboard/billing",
-            ]:
-                # 每个页面两次渲染尝试，降低偶发漏抓
-                for _attempt in (1, 2):
+            # 尝试几个可能的账单页 URL，每个 URL 只尝试一次
+            for billing_url in _BILLING_URLS:
+                try:
                     await page.goto(billing_url, wait_until="load", timeout=20000)
-                    await page.wait_for_timeout(2500)
-
-                    # 同一行内逐 td 文本匹配状态关键字 + 类名 `capitalize` 兜底定位
-                    found_rows: list[dict[str, str]] = await page.evaluate("""
-                        () => {
-                          const out = [];
-                          const STATUS_KEYS = [
-                            'paid', 'open', 'refunded', 'void', 'uncollectible', 'draft',
-                            '已支付', '待支付', '未支付', '退款', '草稿', '作废', '无法收款'
-                          ];
-                          const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-                          const rows = [...document.querySelectorAll('tr')];
-                          for (const tr of rows) {
-                            const a = tr.querySelector('a[href*="invoice.stripe.com"]');
-                            if (!a) continue;
-                            const tds = [...tr.querySelectorAll('td')];
-                            if (!tds.length) continue;
-
-                            let status = '';
-                            // 1) Cursor 的状态列 td 一定带 capitalize 类
-                            for (const td of tds) {
-                              if (td.classList.contains('capitalize')) {
-                                const t = norm(td.innerText || td.textContent);
-                                if (t) { status = t; break; }
-                              }
-                            }
-                            // 2) 兜底：逐 td 文本匹配已知状态关键字
-                            if (!status) {
-                              for (const td of tds) {
-                                const t = norm(td.innerText || td.textContent).toLowerCase();
-                                if (!t || t.length > 40) continue;
-                                if (STATUS_KEYS.some(k => t.includes(k.toLowerCase()))) {
-                                  status = t;
-                                  break;
-                                }
-                              }
-                            }
-                            out.push({ url: a.href || '', status: status });
-                          }
-                          return out;
-                        }
-                    """)
-                    items = [
-                        (
-                            row.get("url", ""),
-                            _normalize_status_text(str(row.get("status", ""))),
+                    try:
+                        await page.wait_for_selector(
+                            'a[href*="invoice.stripe.com"]',
+                            timeout=15000,
                         )
-                        for row in (found_rows or [])
-                        if isinstance(row, dict)
-                        and str(row.get("url", "")).startswith("http")
-                        and _normalize_status_text(str(row.get("status", "")))
-                    ]
-                    log.info(
-                        f"账单页 {billing_url}: 行数={len(found_rows or [])}, "
-                        f"可用={len(items)}"
+                    except Exception:
+                        try:
+                            await page.wait_for_selector("button, a[href]", timeout=5000)
+                        except Exception:
+                            pass
+                    await page.wait_for_timeout(500)
+                except Exception:
+                    continue
+                if _billing_month_key(invoice_month):
+                    selected = await _select_billing_month_in_ctx(page, invoice_month)
+                    if not selected:
+                        continue
+
+                # 同一行内抓 URL / Date / Status
+                found_rows: list[dict[str, str]] = await page.evaluate(_STATUS_JS)
+                items = [
+                    (
+                        row.get("url", ""),
+                        _normalize_status_text(str(row.get("status", ""))),
+                        str(row.get("date", "")),
                     )
-                    if items:
-                        for u, s in items:
-                            log.info(f"  行 status={s!r} url={u[:70]}")
-                        break
+                    for row in (found_rows or [])
+                    if isinstance(row, dict)
+                    and str(row.get("url", "")).startswith("http")
+                    and _normalize_status_text(str(row.get("status", "")))
+                ]
+                log.info(
+                    f"账单页 {billing_url}: 行数={len(found_rows or [])}, "
+                    f"可用={len(items)}"
+                )
                 if items:
+                    for u, s, d in items:
+                        log.info(f"  行 date={d!r} status={s!r} url={u[:70]}")
                     break
         except Exception as e:
             log.warning(f"账单页提取链接失败: {e}")
@@ -1383,6 +1702,7 @@ def _download_invoices_all(
             pdf_files = asyncio.run(
                 _download_account_all_pdfs(
                     cookie_val, out_dir, email_tag, month_tag, snap.email,
+                    invoice_month=invoice_month,
                     # sem=None：线程模式，ThreadPoolExecutor 本身控制并发
                     # asyncio.Semaphore 不可跨 event loop 共享，此处必须省略
                 )
@@ -1420,7 +1740,7 @@ def _download_pdfs_via_billing_page(
     *,
     email_tag: str = "account",
     invoice_month: str = "",
-    stripe_items: Optional[list[tuple[str, str]]] = None,
+    stripe_items: Optional[list[tuple]] = None,
 ) -> dict[str, str]:
     """完整浏览器流程：
       Cursor 账单页 (View 链接) → Stripe 发票页 → 点击 PDF 按钮 → 下载。
@@ -1443,10 +1763,10 @@ def _download_pdfs_via_billing_page(
             return {}
 
         # Step1: 拿到所有 Stripe 发票 URL + 状态
-        items = stripe_items if stripe_items is not None else await _billing_page_get_stripe_items(cookie_val)
-        paid_items = _filter_paid_billing_items(items)
+        items = stripe_items if stripe_items is not None else await _billing_page_get_stripe_items(cookie_val, invoice_month=invoice_month)
+        paid_items = _filter_paid_billing_items(items, invoice_month=month_tag)
         if not paid_items:
-            log.warning("账单页未找到已支付发票链接")
+            log.warning(f"账单页未找到 {month_tag} 的已支付发票链接")
             return {}
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1561,129 +1881,6 @@ def _render_pdf_images_to_sheet(ws, pdf_paths: list[Path], email: str) -> None:
             log.warning(f"PDF 渲染失败 {pdf_path.name}: {e}")
             ws.cell(row=cur_row, column=1, value=f"[PDF 渲染失败] {pdf_path.name}: {e}")
             cur_row += 1
-
-
-def _download_one_account_invoices(
-    snap: AccountSnapshot,
-    acc: Account,
-    out_dir: Path,
-    manager: TokenManager,
-    invoice_month: str = "",
-) -> dict[str, str]:
-    """下载单账号所有账单 PDF，返回 {inv_key: filename} 映射。
-
-    下载优先级：
-      1. invoice_pdf 直链（Stripe 预签名，最快）
-      2. 从 hosted_invoice_url 页面 HTML 提取 PDF URL
-      3. patchright 浏览器：Stripe 发票页点击下载（有 hosted_invoice_url 时）
-      4. patchright 浏览器：Cursor 账单页 View 按钮 → Stripe 页下载（API 无数据时兜底）
-    """
-    import asyncio
-    from .api_client import _split_session_token
-
-    def _get_billing_statuses(access_token: str) -> list[tuple[str, str]]:
-        cookie_val, _ = _split_session_token(access_token)
-        if not cookie_val:
-            return []
-        try:
-            return asyncio.run(_billing_page_get_stripe_items(cookie_val))
-        except Exception as e:
-            log.warning(f"[{snap.email}] 账单页状态抓取失败: {e}")
-            return []
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_files: dict[str, str] = {}
-
-    email_tag = _safe_filename(snap.email)
-    month_tag = _invoice_month_tag(invoice_month)
-    if not month_tag:
-        log.warning(f"[{snap.email}] 账单月份为空或格式非法，跳过账单下载")
-        return {}
-    token: Optional[str] = None
-    billing_items: list[tuple[str, str]] = []
-    billing_status_by_url: dict[str, str] = {}
-    try:
-        token = manager.get_valid_token(acc)
-        billing_items = _get_billing_statuses(token)
-        billing_status_by_url = {
-            _normalize_invoice_url(u): s
-            for u, s in billing_items
-            if isinstance(u, str) and u
-        }
-        if billing_items:
-            log.info(f"[{snap.email}] 账单页状态抓取成功: {len(billing_items)} 条")
-        else:
-            log.warning(f"[{snap.email}] 账单页未抓到行级状态，跳过账单下载")
-            return {}
-    except Exception as e:
-        log.warning(f"[{snap.email}] 获取 token/账单状态失败，跳过账单下载: {e}")
-        return {}
-
-    for idx, inv in enumerate(snap.invoices):
-        number     = inv.get("number") or inv.get("invoiceNumber") or ""
-        inv_id_raw = inv.get("id")     or inv.get("invoiceId")     or idx
-        inv_key    = number or str(inv_id_raw)
-        hosted = inv.get("hosted_invoice_url") or inv.get("hostedInvoiceUrl") or ""
-        status_from_page = billing_status_by_url.get(
-            _normalize_invoice_url(hosted), ""
-        ) if hosted else ""
-        status_tag = _safe_filename(_normalize_status_text(status_from_page))
-        if not status_tag:
-            log.warning(f"[{snap.email}] 账单 {inv_key} 未匹配到同一行 status，跳过")
-            continue
-        base_name  = _safe_filename(f"{email_tag}-{month_tag}-{status_tag}.pdf")
-        save_path  = _unique_pdf_path(out_dir, base_name)
-        fname      = save_path.name
-
-        # ── 方式 1：invoice_pdf 直链 ──
-        pdf_url, _ = _invoice_candidates(inv)
-        if pdf_url and _download_pdf_direct(pdf_url, save_path):
-            pdf_files[inv_key] = fname
-            log.info(f"[{snap.email}] 账单 PDF 直链下载成功: {fname}")
-            continue
-
-        # ── 方式 2：从 hosted_invoice_url 提取 ──
-        if hosted:
-            extracted = _extract_pdf_url_from_stripe_page(hosted)
-            if extracted and _download_pdf_direct(extracted, save_path):
-                pdf_files[inv_key] = fname
-                log.info(f"[{snap.email}] 账单 PDF HTML 提取下载成功: {fname}")
-                continue
-
-        # ── 方式 3：patchright 浏览器点击下载 ──
-        if hosted:
-            log.info(f"[{snap.email}] 尝试浏览器下载 PDF: {hosted[:80]}")
-            if _download_pdf_via_browser(hosted, save_path):
-                pdf_files[inv_key] = fname
-                log.info(f"[{snap.email}] 账单 PDF 浏览器下载成功: {fname}")
-                continue
-
-        log.warning(
-            f"[{snap.email}] 账单 {inv_key}: 前三种方式均失败，"
-            f"invoice_pdf={'有' if pdf_url else '无'}, hosted={'有' if hosted else '无'}"
-        )
-
-    # ── 方式 4：API 无发票数据时，整体走浏览器账单页流程 ──
-    if not snap.invoices and not pdf_files:
-        log.info(f"[{snap.email}] API 账单为空，尝试浏览器账单页全流程下载")
-        try:
-            if token is None:
-                token = manager.get_valid_token(acc)
-            billing_pdfs = _download_pdfs_via_billing_page(
-                token, out_dir,
-                email_tag=email_tag,
-                invoice_month=invoice_month,
-                stripe_items=billing_items or None,
-            )
-            if billing_pdfs:
-                pdf_files.update(billing_pdfs)
-                log.info(f"[{snap.email}] 浏览器账单页下载: {len(billing_pdfs)} 个 PDF")
-            else:
-                log.warning(f"[{snap.email}] 浏览器账单页也未找到发票")
-        except Exception as e:
-            log.warning(f"[{snap.email}] 浏览器账单页流程失败: {e}")
-
-    return pdf_files
 
 
 def export_per_account(
@@ -1825,53 +2022,3 @@ def export_per_account(
         _cb("", "zip_ready", "打包 ZIP 就绪")
 
     return summary
-
-
-def download_invoices(
-    accounts: list[Account],
-    snapshots: list[AccountSnapshot],
-    out_dir: Path,
-    *,
-    manager: Optional[TokenManager] = None,
-) -> dict[str, int]:
-    """为每个账号下载其 invoices 里的 PDF。返回 {email: 下载数量}。"""
-    mgr = manager or get_default_manager()
-    acc_by_email = {a.email: a for a in accounts}
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    counts: dict[str, int] = {}
-    for snap in snapshots:
-        acc = acc_by_email.get(snap.email)
-        if acc is None:
-            continue
-        if not snap.invoices:
-            counts[snap.email] = 0
-            continue
-
-        try:
-            token = mgr.get_valid_token(acc)
-        except Exception as e:
-            log.warning(f"[{snap.email}] 下载发票跳过: 无有效 token ({e})")
-            counts[snap.email] = 0
-            continue
-
-        target_dir = out_dir / _safe_filename(snap.email)
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        n = 0
-        with CursorClient(token) as client:
-            for idx, inv in enumerate(snap.invoices):
-                pdf_url, inv_id = _invoice_candidates(inv)
-                if not pdf_url:
-                    continue
-                fname = f"{inv_id or idx}.pdf"
-                save_path = target_dir / _safe_filename(fname)
-                try:
-                    client.download_invoice_pdf(pdf_url, save_path)
-                    n += 1
-                    log.info(f"[{snap.email}] 下载发票 {fname}")
-                except Exception as e:
-                    log.warning(f"[{snap.email}] 下载 {fname} 失败: {e}")
-        counts[snap.email] = n
-    return counts

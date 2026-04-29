@@ -132,8 +132,6 @@ Turnstile 遇到时：
 | `get_usage_limit_status()` | POST | `/aiserver.v1.DashboardService/GetUsageLimitStatusAndActiveGrants` |
 | `get_usage_events(page_index=0, page_size=100)` | POST | `/aiserver.v1.DashboardService/GetFilteredUsageEvents` |
 | `get_stripe_info()` | GET | `https://cursor.com/api/auth/stripe` |
-| `list_invoices()` | GET | `https://cursor.com/api/dashboard/get-invoices`（经 Stripe customer portal） |
-| `download_invoice(pdf_url, path)` | GET | 流式写磁盘 |
 
 所有请求：
 - Host: `api2.cursor.sh` → `Authorization: Bearer <access_token>`
@@ -147,11 +145,10 @@ python -m cam login --all                    # 首次批量浏览器登录
 python -m cam login --email xxx@feishu.cn
 
 python -m cam fetch --all                    # 拉全部数据，写入缓存
-python -m cam fetch --email xxx --what usage,plan,invoices
+python -m cam fetch --email xxx --what usage,plan,stripe
 
 python -m cam export --format csv --out data/exports/usage.csv
 python -m cam export --format json --out data/exports/raw/
-python -m cam invoices --download --out data/exports/invoices/
 
 python -m cam status                         # 账号 token 状态 + 失败次数
 python -m cam reset --email xxx              # 清空 token，强制重新登录

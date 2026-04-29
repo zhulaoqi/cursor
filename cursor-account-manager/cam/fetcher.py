@@ -16,7 +16,7 @@ from .token_manager import TokenManager, get_default_manager
 log = get("fetcher")
 
 
-DEFAULT_WHAT = ("usage", "plan", "usage_limit", "usage_events", "stripe", "invoices")
+DEFAULT_WHAT = ("usage", "plan", "usage_limit", "usage_events", "stripe")
 
 
 def fetch_one(
@@ -170,22 +170,6 @@ def fetch_one(
 
         if "stripe" in what_set:
             snap.stripe = _call("stripe", lambda: client.get_stripe_info() or {}) or {}
-
-        if "invoices" in what_set:
-            invoices = _call("invoices", lambda: client.list_invoices() or [])
-            if invoices is not None:
-                snap.invoices = invoices
-                if snap.invoices:
-                    first = snap.invoices[0]
-                    log.info(
-                        f"[{account.email}] 账单: {len(snap.invoices)} 条，"
-                        f"第一条 keys={list(first.keys()) if isinstance(first, dict) else type(first)}, "
-                        f"invoice_pdf={'有' if (isinstance(first, dict) and (first.get('invoice_pdf') or first.get('invoicePdf'))) else '无'}"
-                    )
-                else:
-                    log.info(f"[{account.email}] 账单: 0 条（端点无数据）")
-            elif "invoices" in snap.errors:
-                log.warning(f"[{account.email}] 账单拉取失败: {snap.errors['invoices']}")
     finally:
         client.close()
 
