@@ -139,51 +139,104 @@
       background: var(--surface); border-radius: 12px;
       border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
     }
-    /* ── 分区 label ── */
+    /* ── 下载参数区 ── */
     .field-label {
-      font-size: 11.5px; color: var(--muted); font-weight: 600;
-      text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
+      flex: 0 0 auto;
+      font-size: 12px; color: #475569; font-weight: 700;
+      letter-spacing: .01em;
+      white-space: nowrap;
     }
     .filters-panel {
-      padding: 22px 24px;
-      margin-bottom: 20px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
     }
     .filters-grid {
       display: grid;
-      grid-template-columns: minmax(320px, 1.2fr) minmax(220px, .8fr) minmax(220px, 1fr);
-      align-items: stretch;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      grid-template-areas:
+        "range month"
+        "export export";
+      column-gap: 18px;
+      row-gap: 12px;
+      align-items: start;
     }
     .filter-section {
       min-width: 0;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      align-items: center;
       gap: 10px;
-      padding: 0 24px;
+      padding: 0;
+      border: none;
+      background: transparent;
     }
-    .filter-section:first-child { padding-left: 0; }
-    .filter-section:last-child { padding-right: 0; }
-    .filter-section + .filter-section { border-left: 1px solid var(--border); }
+    .filter-section + .filter-section {
+      border-left: 1px solid #E8EEF7;
+      padding-left: 18px;
+    }
+    .filter-section.is-primary {
+      grid-area: range;
+      min-height: 0;
+    }
+    .filter-section.is-compact {
+      grid-area: month;
+      min-height: 0;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .filter-section.is-export {
+      grid-area: export;
+      min-height: 0;
+      border-left: none !important;
+      border-top: 1px solid #E8EEF7;
+      padding-left: 0 !important;
+      padding-top: 12px;
+    }
+    .filter-section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
     .filter-helper {
-      min-height: 18px;
       color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: 11.5px;
+      line-height: 1.35;
+      display: none;
+    }
+    .filter-title-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      min-height: 34px;
     }
     .preset-group {
       display: flex;
       align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+      flex: 0 0 auto;
+    }
+    .date-control-row {
+      display: flex;
+      align-items: center;
       gap: 8px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      min-width: 0;
     }
     .preset-btn {
+      flex: 0 0 auto;
       min-height: 34px;
-      padding: 6px 13px;
-      border: 1.5px solid var(--border);
+      padding: 5px 11px;
+      border: 1px solid var(--border);
       border-radius: 8px;
       background: #fff;
       color: var(--muted);
       font-size: 12.5px;
       font-weight: 600;
+      white-space: nowrap;
       cursor: pointer;
       transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
     }
@@ -194,39 +247,93 @@
       box-shadow: 0 0 0 3px rgba(37,99,235,.08);
     }
     .month-input {
-      width: 160px;
-      min-height: 40px;
+      width: 142px;
+      min-height: 34px;
       font-size: 13px;
-      padding: 8px 12px;
-      border: 1.5px solid var(--border);
+      padding: 6px 10px;
+      border: 1px solid var(--border);
       border-radius: 8px;
+    }
+    .month-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
     }
     .option-stack {
       display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding-top: 2px;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+      min-width: 0;
     }
     .option-row {
-      min-height: 30px;
+      flex: 0 0 auto;
+      min-height: 34px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px 6px 10px;
+      border: 1px solid #E8EEF7;
+      border-radius: 8px;
+      background: #fff;
       color: var(--text);
       font-size: 13.5px;
       font-weight: 500;
       cursor: pointer;
+      transition: border-color .15s, background .15s, box-shadow .15s;
+    }
+    .option-row:hover {
+      border-color: #BFDBFE;
+      background: #F8FBFF;
+      box-shadow: 0 2px 8px rgba(37,99,235,.06);
+    }
+    .option-copy {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .option-title {
+      color: var(--text);
+      font-size: 12.5px;
+      font-weight: 700;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+    .option-desc {
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.35;
+      display: none;
     }
     @media (max-width: 900px) {
-      .filters-grid { grid-template-columns: 1fr; gap: 18px; }
+      .filters-grid {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "range"
+          "month"
+          "export";
+      }
       .filter-section {
-        padding: 0;
-        border-left: none !important;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .date-control-row,
+      .preset-group,
+      .option-stack {
+        flex-wrap: wrap;
       }
       .filter-section + .filter-section {
-        padding-top: 18px;
-        border-top: 1px solid var(--border);
+        border-left: none;
+        padding-left: 0;
+        padding-top: 12px;
+        border-top: 1px solid #E8EEF7;
       }
+      .option-stack { align-items: stretch; }
+      .option-row { flex: 1 1 100%; }
     }
 
     /* ── 输入框 ── */
@@ -239,7 +346,7 @@
     select:focus, input:focus { border-color: var(--primary); }
 
     /* ── 开关 ── */
-    .toggle { position: relative; width: 40px; height: 22px; }
+    .toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 auto; }
     .toggle input { opacity: 0; width: 0; height: 0; }
     .toggle-slider {
       position: absolute; inset: 0; cursor: pointer;
@@ -253,6 +360,7 @@
     }
     .toggle input:checked + .toggle-slider { background: var(--primary); }
     .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+    .toggle input:focus-visible + .toggle-slider { box-shadow: 0 0 0 3px rgba(37,99,235,.18); }
 
     /* ── 日志 ── */
     .log-item {
@@ -733,20 +841,23 @@
       <div class="filters-grid">
 
         <!-- 使用明细时间范围 -->
-        <div class="filter-section">
-          <label class="field-label">使用明细时间范围</label>
-          <div class="preset-group">
-            <template x-for="p in [{v:'7d',l:'近7天'},{v:'30d',l:'近30天'},{v:'90d',l:'近90天'},{v:'custom',l:'自定义'}]" :key="p.v">
-              <button
-                type="button"
-                class="preset-btn"
-                :class="{'is-active': datePreset===p.v}"
-                @click="setDatePreset(p.v)"
-                x-text="p.l">
-              </button>
-            </template>
+        <div class="filter-section is-primary">
+          <div class="filter-title-row">
+            <div class="field-label">使用明细时间范围</div>
+            <div class="filter-helper">控制 Token 汇总区间</div>
           </div>
-          <div>
+          <div class="date-control-row">
+            <div class="preset-group">
+              <template x-for="p in [{v:'7d',l:'近7天'},{v:'30d',l:'近30天'},{v:'90d',l:'近90天'},{v:'custom',l:'自定义'}]" :key="p.v">
+                <button
+                  type="button"
+                  class="preset-btn"
+                  :class="{'is-active': datePreset===p.v}"
+                  @click="setDatePreset(p.v)"
+                  x-text="p.l">
+                </button>
+              </template>
+            </div>
             <div class="date-picker-wrap" @click.outside="activeDatePicker==='range' && (activeDatePicker=null)">
               <button type="button" class="date-display"
                 :disabled="datePreset!=='custom'"
@@ -786,30 +897,45 @@
               </div>
             </div>
           </div>
-          <span class="filter-helper" x-text="datePreset==='custom' ? '自定义使用明细时间范围' : '按预设快速筛选使用明细'"></span>
         </div>
 
         <!-- 账单月份 -->
-        <div class="filter-section">
-          <label class="field-label">账单月份（发票 / 文件命名）</label>
-          <input type="month" x-model="selectedMonth" class="month-input" />
-          <span class="filter-helper">仅筛选发票日期 &amp; 导出文件名</span>
+        <div class="filter-section is-compact">
+          <div class="month-row">
+            <div class="field-label">账单月份</div>
+            <input type="month" x-model="selectedMonth" class="month-input" />
+          </div>
         </div>
 
         <!-- 导出选项 -->
-        <div class="filter-section">
-          <label class="field-label">导出选项</label>
+        <div class="filter-section is-export">
+          <div class="filter-title-row">
+            <div class="field-label">导出内容</div>
+            <div class="filter-helper">选择本次生成文件</div>
+          </div>
           <div class="option-stack">
             <label class="option-row">
-              <label class="toggle"><input type="checkbox" x-model="withInvoices"/><span class="toggle-slider"></span></label>
-              下载发票 PDF
+              <span class="option-copy">
+                <span class="option-title">发票 PDF</span>
+                <span class="option-desc">从账单页抓取并打包发票</span>
+              </span>
+              <span class="toggle"><input type="checkbox" x-model="withInvoices"/><span class="toggle-slider"></span></span>
             </label>
             <label class="option-row">
-              <label class="toggle"><input type="checkbox" x-model="withRaw"/><span class="toggle-slider"></span></label>
-              保存原始 JSON
+              <span class="option-copy">
+                <span class="option-title">Token 汇总</span>
+                <span class="option-desc">拉取明细数据并生成汇总 Excel</span>
+              </span>
+              <span class="toggle"><input type="checkbox" x-model="withSummary"/><span class="toggle-slider"></span></span>
+            </label>
+            <label class="option-row">
+              <span class="option-copy">
+                <span class="option-title">原始 JSON</span>
+                <span class="option-desc">保留接口原始响应用于排查</span>
+              </span>
+              <span class="toggle"><input type="checkbox" x-model="withRaw"/><span class="toggle-slider"></span></span>
             </label>
           </div>
-          <span class="filter-helper">控制本次导出的附加文件</span>
         </div>
       </div>
     </div>
@@ -1188,7 +1314,7 @@
       </details>
 
       <!-- 完成后下载 -->
-      <div x-show="runFinished && downloadToken" class="download-ready" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
+      <div x-show="runFinished && (downloadToken || hasZip)" class="download-ready" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
         <div style="display:flex; align-items:center; gap:14px;">
           <div style="width:36px;height:36px;border-radius:50%;background:#DCFCE7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1199,11 +1325,11 @@
           </div>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <button class="btn btn-cta" @click="downloadZip()" title="下载 Excel + PDF 账单压缩包">
+          <button x-show="hasZip" class="btn btn-cta" @click="downloadZip()" title="下载本次生成的 ZIP 压缩包">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            下载 ZIP（Excel + PDF）
+            <span x-text="downloadZipLabel()"></span>
           </button>
-          <button class="btn btn-ghost" @click="downloadFile()" title="仅下载汇总 Excel">
+          <button x-show="downloadToken" class="btn btn-ghost" @click="downloadFile()" title="仅下载汇总 Excel">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             仅 Excel
           </button>
@@ -1213,7 +1339,7 @@
           </button>
         </div>
       </div>
-      <div x-show="runFinished && !downloadToken" style="padding:18px 24px; background:#FFFBEB; border-radius:10px; border:1px solid #FDE68A; display:flex; align-items:center; gap:14px;">
+      <div x-show="runFinished && !downloadToken && !hasZip" style="padding:18px 24px; background:#FFFBEB; border-radius:10px; border:1px solid #FDE68A; display:flex; align-items:center; gap:14px;">
         <div style="width:36px;height:36px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         </div>
@@ -1406,6 +1532,7 @@ function app() {
     calendarCursor: '',
     rangeSelecting: 'start', // 'start' | 'end'
     withInvoices: true,
+    withSummary: true,
     withRaw: false,
 
     // ── 运行状态 ──
@@ -1419,6 +1546,7 @@ function app() {
     logLines: [],
     globalPhaseMsg: '',
     downloadToken: null,
+    hasZip: false,
     retryingEmails: new Set(),
     retryResolvedEmails: new Set(),
     retryDownloads: {},
@@ -1485,6 +1613,7 @@ function app() {
           dateFrom:      s.dateFrom      || this.dateFrom,
           dateTo:        s.dateTo        || this.dateTo,
           withInvoices:  s.withInvoices  ?? true,
+          withSummary:   s.withSummary   ?? true,
           withRaw:       s.withRaw       ?? false,
           runTotal:      task.total,
           runDone:       task.done,
@@ -1492,6 +1621,7 @@ function app() {
           runFailCount:  task.fail?.length || s.runFailCount || 0,
           runFinished:   task.status === 'finished',
           downloadToken: task.download_token || s.downloadToken || null,
+          hasZip:        task.has_zip || s.hasZip || false,
           logLines:      s.logLines || [],
           runItems:      s.runItems || {},
         });
@@ -1515,6 +1645,7 @@ function app() {
           dateFrom:      this.dateFrom,
           dateTo:        this.dateTo,
           withInvoices:  this.withInvoices,
+          withSummary:   this.withSummary,
           withRaw:       this.withRaw,
           runTotal:      this.runTotal,
           runDone:       this.runDone,
@@ -1522,6 +1653,7 @@ function app() {
           runFailCount:  this.runFailCount,
           runFinished:   this.runFinished,
           downloadToken: this.downloadToken,
+          hasZip:        this.hasZip,
           logLines:      this.logLines.slice(-200),
           runItems:      this.runItems,
         }));
@@ -1912,6 +2044,13 @@ function app() {
       if (this.runTotal > 0) return '准备中…';
       return '等待启动';
     },
+    downloadZipLabel() {
+      if (this.withSummary && this.withInvoices) return '下载 ZIP（Excel + PDF）';
+      if (this.withSummary) return '下载 ZIP（Excel）';
+      if (this.withInvoices) return '下载 ZIP（PDF）';
+      if (this.withRaw) return '下载 ZIP（JSON）';
+      return '下载 ZIP';
+    },
 
     async startRun() {
       const selected = this.dbAccounts.filter(a => this.selectedEmails.has(a.email));
@@ -1925,6 +2064,7 @@ function app() {
       this.runFailCount = 0;
       this.runFinished = false;
       this.downloadToken = null;
+      this.hasZip = false;
       this.retryingEmails = new Set();
       this.retryResolvedEmails = new Set();
       this.retryDownloads = {};
@@ -1946,6 +2086,7 @@ function app() {
           date_from:     this.dateFrom || null,
           date_to:       this.dateTo   || null,
           with_invoices: this.withInvoices,
+          with_summary:  this.withSummary,
           with_raw:      this.withRaw,
         }),
       });
@@ -2021,6 +2162,7 @@ function app() {
             date_from:     this.dateFrom || null,
             date_to:       this.dateTo   || null,
             with_invoices: this.withInvoices,
+            with_summary:  this.withSummary,
             with_raw:      this.withRaw,
           }),
         });
@@ -2151,6 +2293,7 @@ function app() {
       es.addEventListener('ready', e => {
         const d = JSON.parse(e.data);
         this.downloadToken = d.download_token;
+        this.hasZip = !!d.has_zip;
         this.globalPhaseMsg = '';
         this.addLog('var(--success)', '文件已生成，可以下载');
         this._saveState();

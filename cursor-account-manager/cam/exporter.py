@@ -1288,7 +1288,7 @@ def _download_invoices_all(
         f"[并发诊断] _download_invoices_all 启动: "
         f"snapshots={len(snapshots)}, concurrency={concurrency}, "
         f"max_workers={max(1, min(concurrency, len(snapshots)))}, "
-        f"SETTINGS.browser_login_concurrency={__import__('cam.config', fromlist=['SETTINGS']).SETTINGS.browser_login_concurrency}"
+        f"SETTINGS.invoice_download_concurrency={__import__('cam.config', fromlist=['SETTINGS']).SETTINGS.invoice_download_concurrency}"
     )
 
     def _one_thread(snap) -> tuple[str, dict]:
@@ -1683,7 +1683,7 @@ def export_per_account(
     # 并发数直接读配置，不依赖 threading.Semaphore._value（该属性反映的是当前
     # 剩余计数，若 semaphore 已被 acquire 过则会得到错误的值）。
     from .config import SETTINGS as _SETTINGS
-    concurrency = max(1, _SETTINGS.browser_login_concurrency)
+    concurrency = max(1, _SETTINGS.invoice_download_concurrency)
 
     all_pdf_files: dict[str, dict[str, str]] = {}
     if with_invoices and snapshots:

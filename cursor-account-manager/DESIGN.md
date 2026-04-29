@@ -95,7 +95,7 @@ CREATE TABLE audit_log (
    └─ 失败 / shouldLogout  → ④
 
 ④ browser_login.login(email, imap_pwd)
-   - 全局 Semaphore(BROWSER_LOGIN_CONCURRENCY)，默认 1，串行
+   - 全局 Semaphore(BROWSER_LOGIN_CONCURRENCY)，默认 5
    - 成功 → 写 SQLite，consecutive_failures = 0
    - 失败 → consecutive_failures += 1
             ≥ 5 → status = 'disabled'，抛 TokenAcquisitionError
@@ -161,9 +161,10 @@ python -m cam reset --email xxx              # 清空 token，强制重新登录
 
 | 阶段 | 并发 | 说明 |
 |---|---|---|
-| 浏览器登录 | `Semaphore(1)` | 防资源爆炸 + 降指纹关联风险 |
+| 浏览器登录 | `Semaphore(BROWSER_LOGIN_CONCURRENCY=5)` | 防资源爆炸 + 降指纹关联风险 |
 | Token 刷新 | `Semaphore(5)` | HTTP，可并发 |
-| API 拉数据 | `Semaphore(API_CONCURRENCY=10)` | 可配置 |
+| API 拉数据 | `Semaphore(API_CONCURRENCY=30)` | 可配置 |
+| 账单 PDF 下载 | `ThreadPoolExecutor(INVOICE_DOWNLOAD_CONCURRENCY=8)` | 独立于登录并发，避免下载阶段被登录参数压住 |
 | IMAP | 每账号独立连接，用完即关 | 飞书有并发上限 |
 
 单账号失败不中断整体，最后汇总成功 / 失败表格。

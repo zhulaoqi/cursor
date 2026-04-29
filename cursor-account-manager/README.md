@@ -71,8 +71,9 @@ IMAP_SEARCH_FOLDERS=INBOX,Junk,Spam
 PROXY=http://user:pass@host:port
 
 # 并发控制
-BROWSER_LOGIN_CONCURRENCY=1   # 浏览器登录串行
-API_CONCURRENCY=10            # API 拉取并发
+BROWSER_LOGIN_CONCURRENCY=5        # 浏览器登录并发
+INVOICE_DOWNLOAD_CONCURRENCY=8     # 账单 PDF 下载并发
+API_CONCURRENCY=30                 # API 拉取并发
 
 # Turnstile 兜底（任选其一或全填）
 CAPSOLVER_API_KEY=

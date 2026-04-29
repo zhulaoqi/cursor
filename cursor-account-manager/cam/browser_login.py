@@ -1,6 +1,6 @@
 """浏览器登录：Playwright + 邮箱验证码 → PKCE 拿 token。
 
-全局并发：BROWSER_LOGIN_CONCURRENCY（默认 1，串行）。
+全局并发：BROWSER_LOGIN_CONCURRENCY（默认 5）。
 失败只向上抛 BrowserLoginError，由调用方累计 consecutive_failures。
 """
 

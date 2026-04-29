@@ -115,6 +115,7 @@ class RunRequest(BaseModel):
     date_from: Optional[str] = None    # "YYYY-MM-DD" 使用明细起始日（含），转 Unix 秒
     date_to: Optional[str] = None      # "YYYY-MM-DD" 使用明细结束日（含）
     with_invoices: bool = True
+    with_summary: bool = True
     with_raw: bool = False
 
 
@@ -137,6 +138,23 @@ def _parse_date_range_to_utc_ts(
         )
         end_ts = int(end_dt.timestamp())
     return start_ts, end_ts
+
+
+def _fetch_targets_for_run(*, with_summary: bool) -> tuple[str, ...]:
+    """根据导出选项决定本次需要拉取的 API 数据项。"""
+    if with_summary:
+        return fetcher.DEFAULT_WHAT
+    return tuple(item for item in fetcher.DEFAULT_WHAT if item != "usage_events")
+
+
+def _should_mark_accounts_done_after_export(*, with_invoices: bool) -> bool:
+    """没有账单下载阶段时，Web 层需要在导出完成后补账号终态。"""
+    return not with_invoices
+
+
+def _has_zip_output_requested(*, with_summary: bool, with_invoices: bool, with_raw: bool) -> bool:
+    """ZIP 里至少会有一种用户请求的导出内容。"""
+    return with_summary or with_invoices or with_raw
 
 
 def _normalize_email(email: str) -> str:
@@ -309,10 +327,17 @@ async def run_task(req: RunRequest):
         # 记录拉取阶段有 warn 的账号，export 完成后保留 warn 标志
         _warn_emails: set[str] = set()
 
+        fetch_targets = _fetch_targets_for_run(with_summary=req.with_summary)
+
         def _fetch_one(acc: Account):
             _push(task_id, "progress", {"email": acc.email, "phase": "fetching"})
             try:
-                snap = fetcher.fetch_one(acc, start_ts=start_ts, end_ts=end_ts)
+                snap = fetcher.fetch_one(
+                    acc,
+                    what=fetch_targets,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
                 has_errors = bool(snap.errors)
                 err_keys   = ",".join(snap.errors.keys()) if has_errors else ""
                 with snap_lock:
@@ -415,9 +440,9 @@ async def run_task(req: RunRequest):
                     # 全局阶段（生成汇总 / ZIP 就绪）
                     _push(task_id, "global_phase", {"phase": phase, "msg": msg})
 
-            # 限制 export 阶段同时打开的浏览器数（与登录阶段保持一致）
+            # 限制 export 阶段同时打开的浏览器数，使用账单下载独立并发。
             _browser_sem = threading.Semaphore(
-                max(1, SETTINGS.browser_login_concurrency)
+                max(1, SETTINGS.invoice_download_concurrency)
             )
             try:
                 exporter.export_per_account(
@@ -426,26 +451,41 @@ async def run_task(req: RunRequest):
                     with_invoices=req.with_invoices,
                     with_detail_xlsx=False,
                     with_full_summary_xlsx=False,
-                    with_summary=True,
+                    with_summary=req.with_summary,
                     invoice_month=req.month or "",
                     start_date=req.date_from or "",
                     end_date=req.date_to or "",
                     progress_cb=_export_cb,
                     browser_semaphore=_browser_sem,
                 )
+                if _should_mark_accounts_done_after_export(with_invoices=req.with_invoices):
+                    for snap in snaps:
+                        _export_cb(snap.email, "done", "")
                 # export 完成后立即释放大字段内存，防止 300 账号 CSV 文本堆积
                 for _s in snaps:
                     _s.usage_csv_text = None  # type: ignore[assignment]
                     _s.usage_events = None    # type: ignore[assignment]
 
-                dl_token = secrets.token_hex(12)
-                summary_xlsx = out_dir / "汇总.xlsx"
-                with _task_lock:                          # _download_files 是全局共享 dict
-                    _download_files[dl_token] = summary_xlsx
+                dl_token: Optional[str] = None
+                if req.with_summary:
+                    dl_token = secrets.token_hex(12)
+                    summary_xlsx = out_dir / "汇总.xlsx"
+                    with _task_lock:                      # _download_files 是全局共享 dict
+                        _download_files[dl_token] = summary_xlsx
+                has_zip = _has_zip_output_requested(
+                    with_summary=req.with_summary,
+                    with_invoices=req.with_invoices,
+                    with_raw=req.with_raw,
+                )
                 with snap_lock:                           # task 字段写入用 worker 内部锁
                     task["download_token"] = dl_token
                     task["out_dir"] = str(out_dir)
-                _push(task_id, "ready", {"download_token": dl_token, "label": label})
+                    task["has_zip"] = has_zip
+                _push(task_id, "ready", {
+                    "download_token": dl_token,
+                    "has_zip": has_zip,
+                    "label": label,
+                })
             except Exception as e:
                 log.exception("生成文件失败")
                 _push(task_id, "error", {"msg": f"生成 Excel 失败: {e}"})
@@ -543,7 +583,7 @@ async def get_task(task_id: str):
         "ok":             task.get("ok", []),
         "fail":           task.get("fail", []),
         "download_token": task.get("download_token"),
-        "has_zip":        bool(task.get("out_dir") and Path(task["out_dir"]).exists()),
+        "has_zip":        bool(task.get("has_zip") and task.get("out_dir") and Path(task["out_dir"]).exists()),
         "events":         tail_events,
         "events_offset":  tail_offset,  # 前端重连时以此作为初始 abs_cursor
     }
@@ -587,6 +627,10 @@ async def download_zip(task_id: str):
                         target_name = f"{stem}_{n}{suf}"
                     used_names.add(target_name)
                     zf.write(pdf, target_name)
+
+                raw_json = acc_dir / "raw.json"
+                if raw_json.exists():
+                    zf.write(raw_json, f"{acc_dir.name}/raw.json")
 
         buf.seek(0)
         yield buf.read()

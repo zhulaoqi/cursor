@@ -57,6 +57,7 @@ class Settings:
     default_imap_port: int
     proxy: str
     browser_login_concurrency: int
+    invoice_download_concurrency: int
     api_concurrency: int
     capsolver_api_key: str
     twocaptcha_api_key: str
@@ -79,8 +80,9 @@ def load_settings() -> Settings:
         default_imap_host=os.environ.get("DEFAULT_IMAP_HOST", "imap.feishu.cn"),
         default_imap_port=_env_int("DEFAULT_IMAP_PORT", 993),
         proxy=os.environ.get("PROXY", "").strip(),
-        browser_login_concurrency=_env_int("BROWSER_LOGIN_CONCURRENCY", 1),
-        api_concurrency=_env_int("API_CONCURRENCY", 10),
+        browser_login_concurrency=_env_int("BROWSER_LOGIN_CONCURRENCY", 5),
+        invoice_download_concurrency=_env_int("INVOICE_DOWNLOAD_CONCURRENCY", 8),
+        api_concurrency=_env_int("API_CONCURRENCY", 30),
         capsolver_api_key=os.environ.get("CAPSOLVER_API_KEY", "").strip(),
         twocaptcha_api_key=os.environ.get("TWOCAPTCHA_API_KEY", "").strip(),
         accounts_csv=_path("ACCOUNTS_CSV", "data/accounts.csv"),
