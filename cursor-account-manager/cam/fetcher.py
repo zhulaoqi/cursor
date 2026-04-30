@@ -64,8 +64,14 @@ def fetch_one(
         )
         return True
 
-    def _call(name: str, fn):
+    def _call(name: str, fn, *, max_transient_attempts: int = 3):
+        """统一调用包装：
+        - TokenExpiredError（401/403）走强制重登流程
+        - 其他异常（代理断连/超时/5xx 等瞬时错误）自动重试 max_transient_attempts 次
+          采用指数退避（2s / 4s / ...），最后一次仍失败则记录错误。
+        """
         last_auth_error: TokenExpiredError | None = None
+        transient_attempt = 0
         while True:
             try:
                 return fn()
@@ -80,8 +86,17 @@ def fetch_one(
                 snap.errors[name] = f"401/403，重登 {max_auth_relogin_attempts} 次后仍失败: {last_auth_error}"
                 return None
             except Exception as e:
-                snap.errors[name] = str(e)
-                return None
+                transient_attempt += 1
+                if transient_attempt >= max_transient_attempts:
+                    snap.errors[name] = str(e)
+                    return None
+                backoff = 2 ** transient_attempt
+                log.warning(
+                    f"[{account.email}] {name} 瞬时错误，{backoff}s 后重试"
+                    f"（{transient_attempt}/{max_transient_attempts - 1}）：{e}"
+                )
+                time.sleep(backoff)
+                continue
 
     try:
         if "usage" in what_set:

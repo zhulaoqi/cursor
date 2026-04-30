@@ -748,12 +748,21 @@ def _normalize_invoice_url(url: str) -> str:
         return s
 
 
+_PAID_BILLING_STATUSES = frozenset({"paid", "refunded"})
+"""可下载的"已支付"账单状态集合。
+
+Stripe 的 `refunded` 表示账单先被支付后又退款，账单 PDF 真实存在且属于
+已收款记录的一部分；与 `open`/`unpaid`/`void`/`draft`/`uncollectible`
+等真正未付款状态不同。下载时一并保留，文件名沿用各自原始状态以示区分。
+"""
+
+
 def _filter_paid_billing_items(
     items: list[tuple],
     *,
     invoice_month: str = "",
 ) -> list[tuple[str, str]]:
-    """只保留已支付账单，避免下载 Stripe 未支付账单/付款页。"""
+    """只保留已支付（含已退款）账单，避免下载 Stripe 未支付账单/付款页。"""
     paid_items: list[tuple[str, str]] = []
     seen_urls: set[str] = set()
     selected_month = _billing_month_key(invoice_month)
@@ -763,7 +772,7 @@ def _filter_paid_billing_items(
         url, status = item[0], item[1]
         row_date = item[2] if len(item) >= 3 else ""
         normalized_status = _normalize_status_text(status)
-        if normalized_status != "paid":
+        if normalized_status not in _PAID_BILLING_STATUSES:
             continue
         if selected_month and _billing_month_key(str(row_date)) != selected_month:
             continue
@@ -1089,6 +1098,63 @@ _CYCLE_OR_NOISE_RE = re.compile(
     re.I,
 )
 
+_BILLING_MONTH_OPTIONS_VISIBLE_JS = """
+(target) => {
+  // 探测目标月份选项当前是否已经在 DOM 中可见。
+  // probe 阶段用合成 PointerEvent 可能已经打开了下拉；若我们再 click trigger
+  // 会把它"toggle 关闭"，所以点击 trigger 之前先用此脚本判断。
+  if (!target || !Array.isArray(target.labels)) return false;
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const lowerLabels = target.labels.map(s => norm(s).toLowerCase()).filter(Boolean);
+  if (!lowerLabels.length) return false;
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const optionSelector = '[role="option"],[role="menuitem"],[data-radix-collection-item]';
+  for (const el of document.querySelectorAll(optionSelector)) {
+    if (!isVisible(el)) continue;
+    const text = norm(el.innerText || el.textContent).toLowerCase();
+    if (!text || text.length > 80) continue;
+    if (/cycle starting|cancel|adjust plan|manage in stripe/i.test(text)) continue;
+    if (lowerLabels.some(label => text === label)) return true;
+  }
+  return false;
+}
+"""
+
+_BILLING_PAGE_READY_JS = """
+() => {
+  // 严格的账单页就绪判定（避免被导航栏 button/a 提前误判）：
+  // 1) 已出现 Stripe 发票链接（当前筛选下有账单）
+  // 2) 已出现精确月份 trigger（可进行月份切换）
+  // 3) 已出现明确空态文案（无账单）
+  if (document.querySelector('a[href*="invoice.stripe.com"]')) return true;
+  const monthRe = /^\\s*\\d{4}\\s*年\\s*\\d{1,2}\\s*月\\s*$|^\\s*\\d{4}[-/.]\\d{1,2}\\s*$|^\\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\s*$/i;
+  const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button';
+  for (const el of document.querySelectorAll(triggerSelector)) {
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (text && monthRe.test(text)) return true;
+  }
+  const pageText = (document.body?.innerText || '').replace(/\\s+/g, ' ');
+  if (/no invoices|no past invoices|没有账单|没有发票|暂无账单|暂无发票/i.test(pageText)) {
+    return true;
+  }
+  return false;
+}
+"""
+
+
+async def _wait_billing_page_ready(page, *, timeout_ms: int = 25000) -> bool:
+    """等待账单区域真正渲染完成。
+
+    与通用 ``button, a[href]`` 不同，此函数只在账单核心元素出现时返回 True，
+    防止页面尚未 hydrate 就进入月份切换流程。
+    """
+    try:
+        await page.wait_for_function(_BILLING_PAGE_READY_JS, timeout=timeout_ms)
+        await page.wait_for_timeout(600)
+        return True
+    except Exception:
+        return False
+
 
 async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
     """用 Playwright 严格定位 Invoices 表头的月份过滤器并点击切换。
@@ -1119,12 +1185,22 @@ async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
     except Exception:
         pass
 
+    # probe 阶段可能用合成 PointerEvent 已经打开了 Radix portal 下拉；
+    # 若再 click trigger 会切换关闭，导致下面找不到选项。所以先探测：
+    options_already_visible = False
+    try:
+        options_already_visible = bool(
+            await page.evaluate(_BILLING_MONTH_OPTIONS_VISIBLE_JS, payload)
+        )
+    except Exception:
+        options_already_visible = False
+
     try:
         all_triggers = page.locator("button").filter(
             has_text=_INVOICE_TRIGGER_EXACT_MONTH_RE
         )
         trigger_count = await all_triggers.count()
-        if trigger_count == 0:
+        if trigger_count == 0 and not options_already_visible:
             log.info("账单页未找到精确 'YYYY年M月' 格式的过滤器按钮")
             return False
 
@@ -1143,23 +1219,27 @@ async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
             log.info(f"账单页过滤器定位成功: text={text!r}")
             break
 
-        if trigger is None:
+        if trigger is None and not options_already_visible:
             log.info("账单页 'YYYY年M月' 候选按钮均不通过过滤")
             return False
 
-        try:
-            current_text = (await trigger.inner_text(timeout=1500)).strip()
-        except Exception:
-            current_text = ""
-        if current_text and any(
-            label.lower() in current_text.lower() for label in labels
-        ):
-            log.info(f"账单页过滤器已是目标月份: current={current_text!r}")
-            return True
+        if trigger is not None and not options_already_visible:
+            try:
+                current_text = (await trigger.inner_text(timeout=1500)).strip()
+            except Exception:
+                current_text = ""
+            if current_text and any(
+                label.lower() in current_text.lower() for label in labels
+            ):
+                log.info(f"账单页过滤器已是目标月份: current={current_text!r}")
+                return True
 
-        await trigger.scroll_into_view_if_needed(timeout=2000)
-        await trigger.click(timeout=3000)
-        await page.wait_for_timeout(700)
+        if options_already_visible:
+            log.info("账单页下拉已打开（probe 已展开），跳过 trigger click 直接选项点击")
+        else:
+            await trigger.scroll_into_view_if_needed(timeout=2000)
+            await trigger.click(timeout=3000)
+            await page.wait_for_timeout(700)
     except Exception as e:
         log.info(f"账单页过滤器点击触发器失败: {e}")
         return False
@@ -1278,20 +1358,10 @@ async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tup
     for billing_url in _BILLING_URLS:
         try:
             await page.goto(billing_url, wait_until="load", timeout=20000)
-            # 优先等待 Stripe 发票链接出现，这意味着账单区域（含月份下拉）已渲染完毕。
-            # 等通用 button/a[href] 会在导航栏出现时就满足，账单表格可能尚未渲染。
-            try:
-                await page.wait_for_selector(
-                    'a[href*="invoice.stripe.com"]',
-                    timeout=15000,
-                )
-            except Exception:
-                # 该页面可能没有账单行（如 settings/billing），回退到通用等待
-                try:
-                    await page.wait_for_selector("button, a[href]", timeout=5000)
-                except Exception:
-                    pass
-            await page.wait_for_timeout(500)
+            ready = await _wait_billing_page_ready(page)
+            if not ready:
+                log.info(f"账单页核心区域未就绪，跳过 URL: {billing_url}")
+                continue
             if requested_month:
                 selected = await _select_billing_month_in_ctx(page, invoice_month)
                 if not selected:
@@ -1326,93 +1396,99 @@ async def _download_account_all_pdfs(
     email: str,
     invoice_month: str = "",
     sem: Optional[asyncio.Semaphore] = None,
+    browser=None,
 ) -> dict[str, str]:
-    """单 browser session：抓状态 + 下载所有 PDF。
+    """单账号抓状态 + 下载所有 PDF。
 
-    sem 仅在 asyncio.gather 并发模式下使用（控制协程级浏览器数量）。
-    从 ThreadPoolExecutor 线程调用时传 None，由线程池本身控制并发。
-    asyncio.Semaphore 不能跨 event loop 共享，线程模式下必须为 None。
+    默认复用外部传入的 browser（单 Chromium 多 Context 并发模型）。
+    若 browser 为空，退化为兼容模式：函数内部自建 browser。
     """
-    from patchright.async_api import async_playwright
 
-    async def _body() -> dict[str, str]:
+    async def _run_with_browser(active_browser) -> dict[str, str]:
         out_dir.mkdir(parents=True, exist_ok=True)
         pdf_files: dict[str, str] = {}
         try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=True)
+            ctx = await active_browser.new_context(accept_downloads=True)
+            try:
+                await ctx.add_cookies([{
+                    "name": "WorkosCursorSessionToken",
+                    "value": cookie_val,
+                    "domain": "cursor.com",
+                    "path": "/",
+                    "httpOnly": True,
+                    "secure": True,
+                }])
+
+                # ── Step 1: 抓账单状态 ──────────────────────────────
+                status_page = await ctx.new_page()
                 try:
-                    ctx = await browser.new_context(accept_downloads=True)
-                    await ctx.add_cookies([{
-                        "name": "WorkosCursorSessionToken",
-                        "value": cookie_val,
-                        "domain": "cursor.com",
-                        "path": "/",
-                        "httpOnly": True,
-                        "secure": True,
-                    }])
-
-                    # ── Step 1: 抓账单状态 ──────────────────────────────
-                    status_page = await ctx.new_page()
-                    try:
-                        items = await _fetch_billing_items_in_ctx(status_page, invoice_month=invoice_month or month_tag)
-                    finally:
-                        await status_page.close()
-
-                    paid_items = _filter_paid_billing_items(
-                        items,
-                        invoice_month=invoice_month or month_tag,
-                    )
-                    if not paid_items:
-                        log.warning(
-                            f"[{email}] 账单页未找到 {month_tag} 的已支付发票行，跳过"
-                        )
-                        return {}
-
-                    log.info(
-                        f"[{email}] 账单页状态抓取成功: 总计 {len(items)} 条，"
-                        f"{month_tag} 已支付 {len(paid_items)} 条"
-                    )
-
-                    # ── Step 2: 下载每张 PDF（复用同一 ctx，无需重新认证）──
-                    for idx, (hosted_url, status_raw) in enumerate(paid_items, start=1):
-                        status_tag = _safe_filename(status_raw)
-                        if not status_tag:
-                            log.warning(f"[{email}] 账单 {idx} 无 status，跳过")
-                            continue
-
-                        base_name = _safe_filename(f"{email_tag}-{month_tag}-{status_tag}.pdf")
-                        save_path = _unique_pdf_path(out_dir, base_name)
-                        fname = save_path.name
-
-                        log.info(f"[{email}] 下载已支付账单 {idx}/{len(paid_items)}: {fname}")
-                        ok = False
-                        for _attempt in range(1, 4):
-                            ok = await _stripe_page_click_pdf(hosted_url, save_path, ctx)
-                            if ok:
-                                break
-                            log.warning(f"[{email}] 账单 {idx} 第 {_attempt} 次失败，重试...")
-                            await asyncio.sleep(3)
-
-                        if ok:
-                            pdf_files[str(idx)] = fname
-                            log.info(f"[{email}] 账单 PDF 下载成功: {fname}")
-                        else:
-                            log.warning(f"[{email}] 账单 {idx} 重试 3 次均失败，跳过")
+                    items = await _fetch_billing_items_in_ctx(status_page, invoice_month=invoice_month or month_tag)
                 finally:
-                    await browser.close()
+                    await status_page.close()
+
+                paid_items = _filter_paid_billing_items(
+                    items,
+                    invoice_month=invoice_month or month_tag,
+                )
+                if not paid_items:
+                    log.warning(
+                        f"[{email}] 账单页未找到 {month_tag} 的已支付发票行，跳过"
+                    )
+                    return {}
+
+                log.info(
+                    f"[{email}] 账单页状态抓取成功: 总计 {len(items)} 条，"
+                    f"{month_tag} 已支付 {len(paid_items)} 条"
+                )
+
+                # ── Step 2: 下载每张 PDF（复用同一 ctx，无需重新认证）──
+                for idx, (hosted_url, status_raw) in enumerate(paid_items, start=1):
+                    status_tag = _safe_filename(status_raw)
+                    if not status_tag:
+                        log.warning(f"[{email}] 账单 {idx} 无 status，跳过")
+                        continue
+
+                    base_name = _safe_filename(f"{email_tag}-{month_tag}-{status_tag}.pdf")
+                    save_path = _unique_pdf_path(out_dir, base_name)
+                    fname = save_path.name
+
+                    log.info(f"[{email}] 下载已支付账单 {idx}/{len(paid_items)}: {fname}")
+                    ok = False
+                    for _attempt in range(1, 4):
+                        ok = await _stripe_page_click_pdf(hosted_url, save_path, ctx)
+                        if ok:
+                            break
+                        log.warning(f"[{email}] 账单 {idx} 第 {_attempt} 次失败，重试...")
+                        await asyncio.sleep(3)
+
+                    if ok:
+                        pdf_files[str(idx)] = fname
+                        log.info(f"[{email}] 账单 PDF 下载成功: {fname}")
+                    else:
+                        log.warning(f"[{email}] 账单 {idx} 重试 3 次均失败，跳过")
+            finally:
+                await ctx.close()
         except Exception as e:
             log.warning(f"[{email}] 浏览器账单下载整体异常: {e}")
 
         return pdf_files
 
-    # asyncio.Semaphore 只在同一 event loop（asyncio.gather 模式）下使用。
-    # 线程模式（ThreadPoolExecutor）调用时 sem=None，由线程池控制并发，
-    # 跨 event loop 共享 asyncio.Semaphore 会导致死锁。
+    async def _run() -> dict[str, str]:
+        if browser is not None:
+            return await _run_with_browser(browser)
+        from patchright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            local_browser = await pw.chromium.launch(headless=True)
+            try:
+                return await _run_with_browser(local_browser)
+            finally:
+                await local_browser.close()
+
     if sem is not None:
         async with sem:
-            return await _body()
-    return await _body()
+            return await _run()
+    return await _run()
 
 
 async def _billing_page_get_stripe_items(cookie_val: str, invoice_month: str = "") -> list[tuple[str, str, str]]:
@@ -1441,17 +1517,10 @@ async def _billing_page_get_stripe_items(cookie_val: str, invoice_month: str = "
             for billing_url in _BILLING_URLS:
                 try:
                     await page.goto(billing_url, wait_until="load", timeout=20000)
-                    try:
-                        await page.wait_for_selector(
-                            'a[href*="invoice.stripe.com"]',
-                            timeout=15000,
-                        )
-                    except Exception:
-                        try:
-                            await page.wait_for_selector("button, a[href]", timeout=5000)
-                        except Exception:
-                            pass
-                    await page.wait_for_timeout(500)
+                    ready = await _wait_billing_page_ready(page)
+                    if not ready:
+                        log.info(f"账单页核心区域未就绪，跳过 URL: {billing_url}")
+                        continue
                 except Exception:
                     continue
                 if _billing_month_key(invoice_month):
@@ -1631,19 +1700,10 @@ def _download_invoices_all(
     concurrency: int,
     progress_cb=None,
 ) -> dict:
-    """并发下载所有账号账单。
-
-    核心策略：ThreadPoolExecutor + 每线程独立 asyncio.run()。
-    - patchright 的 async_playwright() 有全局异步锁，在同一 event loop 内无法
-      真正并发启动多浏览器（asyncio.gather 方案仍是串行）
-    - 每个线程拥有独立 event loop，patchright 全局锁仅在本线程内生效，
-      多线程之间完全隔离，实现真正并发
-    - 每账号合并"状态抓取 + PDF下载"为单次 asyncio.run()，浏览器实例减半
+    """并发下载所有账号账单（单 Chromium + 多 Context）。
 
     返回 {email: {idx_str: filename}} 映射。
     """
-    import concurrent.futures as _cf
-    import threading as _threading
     from .api_client import _split_session_token
 
     month_tag = _invoice_month_tag(invoice_month)
@@ -1658,33 +1718,33 @@ def _download_invoices_all(
             except Exception:
                 pass
 
+    # 页面加载阶段对资源敏感。INVOICE_ACTIVE_CONTEXT_LIMIT 用于限制“同时活跃
+    # 的 billing context 数”；当该值 <= 0 时，表示不额外限制（仅受并发配置约束）。
+    from .config import SETTINGS as _SETTINGS
+    active_limit_cfg = int(getattr(_SETTINGS, "invoice_active_context_limit", 3))
+    if active_limit_cfg > 0:
+        max_parallel = max(1, min(concurrency, len(snapshots), active_limit_cfg))
+    else:
+        max_parallel = max(1, min(concurrency, len(snapshots)))
     log.info(
         f"[并发诊断] _download_invoices_all 启动: "
         f"snapshots={len(snapshots)}, concurrency={concurrency}, "
-        f"max_workers={max(1, min(concurrency, len(snapshots)))}, "
-        f"SETTINGS.invoice_download_concurrency={__import__('cam.config', fromlist=['SETTINGS']).SETTINGS.invoice_download_concurrency}"
+        f"active_context_limit={max_parallel}, "
+        f"INVOICE_ACTIVE_CONTEXT_LIMIT={active_limit_cfg}"
     )
 
-    def _one_thread(snap) -> tuple[str, dict]:
-        """在独立线程中为单个账号完成状态抓取 + 下载，每线程有独立 event loop。"""
+    async def _one_account(snap, browser, sem: asyncio.Semaphore) -> tuple[str, dict]:
+        """复用同一个 Chromium，为单账号创建独立 context 下载账单。"""
         import time as _time
-        import threading as _threading
         _t0 = _time.time()
-        log.info(
-            f"[{snap.email}] ★ THREAD_ENTER tid={_threading.get_ident()} t={_t0:.3f}"
-        )
         acc = acc_by_email.get(snap.email)
         if acc is None:
             return snap.email, {}
         try:
-            token = manager.get_valid_token(acc)
+            token = await asyncio.to_thread(manager.get_valid_token, acc)
         except Exception as e:
             log.warning(f"[{snap.email}] 获取 token 失败，跳过账单: {e}")
             return snap.email, {}
-
-        log.info(
-            f"[{snap.email}] ★ GOT_TOKEN dt={_time.time()-_t0:.3f}s"
-        )
 
         cookie_val, _ = _split_session_token(token)
         if not cookie_val:
@@ -1695,43 +1755,52 @@ def _download_invoices_all(
         out_dir = out_root / email_tag / "invoices"
 
         _cb(snap.email, "invoice", "下载账单中...")
-        log.info(
-            f"[{snap.email}] ★ BEFORE_ASYNCIO_RUN dt={_time.time()-_t0:.3f}s"
-        )
         try:
-            pdf_files = asyncio.run(
-                _download_account_all_pdfs(
-                    cookie_val, out_dir, email_tag, month_tag, snap.email,
-                    invoice_month=invoice_month,
-                    # sem=None：线程模式，ThreadPoolExecutor 本身控制并发
-                    # asyncio.Semaphore 不可跨 event loop 共享，此处必须省略
-                )
+            pdf_files = await _download_account_all_pdfs(
+                cookie_val, out_dir, email_tag, month_tag, snap.email,
+                invoice_month=invoice_month,
+                sem=sem,
+                browser=browser,
             )
         except Exception as e:
             log.warning(f"[{snap.email}] 账单下载异常: {e}")
             pdf_files = {}
 
         inv_count = len(pdf_files)
+        log.info(f"[{snap.email}] 账单阶段完成: {inv_count} 份, dt={_time.time()-_t0:.3f}s")
         _cb(snap.email, "done", f"账单 {inv_count} 份" if inv_count else "")
         return snap.email, pdf_files
 
-    out: dict = {}
-    max_workers = max(1, min(concurrency, len(snapshots)))
-    try:
-        with _cf.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futs = {pool.submit(_one_thread, snap): snap for snap in snapshots}
-            for fut in _cf.as_completed(futs):
-                snap = futs[fut]
+    async def _run() -> dict:
+        from patchright.async_api import async_playwright
+
+        out: dict = {}
+        sem = asyncio.Semaphore(max_parallel)
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                tasks = [
+                    asyncio.create_task(_one_account(snap, browser, sem))
+                    for snap in snapshots
+                ]
+                for task in asyncio.as_completed(tasks):
+                    try:
+                        email, pdf_files = await task
+                        out[email] = pdf_files
+                    except Exception as e:
+                        log.warning(f"账单下载任务异常: {e}")
+            finally:
                 try:
-                    email, pdf_files = fut.result()
-                    out[email] = pdf_files
+                    await browser.close()
                 except Exception as e:
-                    log.warning(f"[{snap.email}] 账单下载任务异常: {e}")
-                    out[snap.email] = {}
+                    log.warning(f"关闭共享浏览器异常: {e}")
+        return out
+
+    try:
+        return asyncio.run(_run())
     except Exception as e:
         log.warning(f"账单并发下载整体失败: {e}")
         return {}
-    return out
 
 
 def _download_pdfs_via_billing_page(
@@ -1932,9 +2001,8 @@ def export_per_account(
     out_root.mkdir(parents=True, exist_ok=True)
 
     # ── Phase 1：并发下载账单 PDF ──────────────────────────────────
-    # ThreadPoolExecutor 每线程独立运行一个 asyncio event loop + patchright 实例，
-    # 并发数直接读配置，不依赖 threading.Semaphore._value（该属性反映的是当前
-    # 剩余计数，若 semaphore 已被 acquire 过则会得到错误的值）。
+    # 单 Chromium + 多 Context 模型：并发数代表“同时活跃 context 数”。
+    # 该并发与登录并发解耦，直接读取配置值。
     from .config import SETTINGS as _SETTINGS
     concurrency = max(1, _SETTINGS.invoice_download_concurrency)
 

@@ -170,7 +170,8 @@ $userKeys = @(
     "CAPSOLVER_API_KEY",
     "TWOCAPTCHA_API_KEY",
     "DEFAULT_IMAP_HOST",
-    "DEFAULT_IMAP_PORT"
+    "DEFAULT_IMAP_PORT",
+    "IMAP_SEARCH_FOLDERS"
 )
 $userVals = @{}
 if ($backupEnv -and (Test-Path $backupEnv)) {
@@ -208,6 +209,7 @@ $envContent = @(
     "# ─── 并发控制 ───",
     "BROWSER_LOGIN_CONCURRENCY=5",
     "INVOICE_DOWNLOAD_CONCURRENCY=8",
+    "INVOICE_ACTIVE_CONTEXT_LIMIT=3",
     "API_CONCURRENCY=30",
     "",
     "# ─── Turnstile 兜底求解器 ───",

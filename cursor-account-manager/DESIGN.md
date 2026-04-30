@@ -161,10 +161,18 @@ python -m cam reset --email xxx              # 清空 token，强制重新登录
 | 浏览器登录 | `Semaphore(BROWSER_LOGIN_CONCURRENCY=5)` | 防资源爆炸 + 降指纹关联风险 |
 | Token 刷新 | `Semaphore(5)` | HTTP，可并发 |
 | API 拉数据 | `Semaphore(API_CONCURRENCY=30)` | 可配置 |
-| 账单 PDF 下载 | `ThreadPoolExecutor(INVOICE_DOWNLOAD_CONCURRENCY=8)` | 独立于登录并发，避免下载阶段被登录参数压住 |
+| 账单 PDF 下载 | `INVOICE_DOWNLOAD_CONCURRENCY` + `INVOICE_ACTIVE_CONTEXT_LIMIT`（单 Chromium + 多 Context + `asyncio.Semaphore`） | 与登录并发隔离，避免多浏览器进程竞争；详见 `docs/invoice-download-single-browser-design.md` |
 | IMAP | 每账号独立连接，用完即关 | 飞书有并发上限 |
 
 单账号失败不中断整体，最后汇总成功 / 失败表格。
+
+### 8.1 账单下载并发改造说明
+
+账单下载链路正在从“多 Chromium 进程并发”迁移到“单 Chromium 进程 + 多 BrowserContext 并发”，以根因解决高并发时页面空白、月份过滤器缺失等稳定性问题。设计与实施计划见：
+
+- `docs/invoice-download-single-browser-design.md`
+
+该改造仅作用于 `cam/exporter.py` 的账单抓取/下载流程，不修改 `cam/browser_login.py` 的登录逻辑（`sync_playwright + launch_persistent_context`），确保登录链路行为不变。
 
 ## 9. 依赖
 
