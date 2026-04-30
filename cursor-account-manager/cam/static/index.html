@@ -427,8 +427,9 @@
       .option-row { flex: 1 1 100%; }
     }
 
-    /* ── 输入框 ── */
-    select, input[type="text"], input[type="month"], input[type="date"] {
+    /* ── 输入框样式：select 与文本/数字输入；
+       原生月份与日期输入已全部替换为自定义 picker，所以这里不再覆盖它们 ── */
+    select, input[type="text"], input[type="number"] {
       background: var(--surface); border: 1.5px solid var(--border);
       border-radius: 8px; padding: 8px 12px; font-size: 14px;
       color: var(--text); outline: none;
@@ -663,8 +664,51 @@
     .row-conflict td { background: #FFFBEB !important; }
     .row-new td { background: #F0FDF4 !important; }
 
+    /* ── 表格行内图标按钮（重置/删除）──
+       触摸目标 32×32px（紧凑型表格），具备 hover/active/focus 反馈和焦点环。
+       使用语义色 token：默认 muted、重置 warn、删除 danger。 */
+    .table-row-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 32px;
+      min-height: 32px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+    }
+    .table-row-action:hover {
+      background: rgba(15,23,42,.05);
+      border-color: var(--border);
+    }
+    .table-row-action:active { transform: scale(0.96); }
+    .table-row-action:focus-visible {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.18);
+    }
+    .table-row-action.is-warn { color: var(--warn); }
+    .table-row-action.is-warn:hover {
+      background: rgba(245,158,11,.10);
+      border-color: rgba(245,158,11,.35);
+    }
+    .table-row-action.is-danger { color: var(--danger); }
+    .table-row-action.is-danger:hover {
+      background: rgba(239,68,68,.08);
+      border-color: rgba(239,68,68,.35);
+    }
+    .table-row-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     /* ── 输入框 focus ring ── */
-    select:focus, input[type="text"]:focus, input[type="month"]:focus, input[type="date"]:focus {
+    select:focus, input[type="text"]:focus, input[type="number"]:focus {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(37,99,235,.08);
     }
@@ -1135,16 +1179,24 @@
                         <span style="font-size:11px;color:var(--muted);">-</span>
                       </template>
                     </td>
-                    <td style="display:flex; gap:4px; align-items:center;">
-                      <button
-                        :style="`background:none;border:none;cursor:pointer;padding:4px;color:${accountDbStatus[a.email]?.status==='disabled'?'var(--warn)':'var(--muted)'};`"
-                        @click="resetAccount(a.email)" title="重置登录状态">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                      </button>
-                      <button style="background:none;border:none;cursor:pointer;color:var(--danger);padding:4px;"
-                        @click="deleteAccount(a.email)" title="删除账号">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-                      </button>
+                    <td>
+                      <div class="table-row-actions">
+                        <button type="button"
+                          class="table-row-action"
+                          :class="{ 'is-warn': accountDbStatus[a.email]?.status === 'disabled' }"
+                          @click="resetAccount(a.email)"
+                          title="重置登录状态"
+                          aria-label="重置登录状态">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </button>
+                        <button type="button"
+                          class="table-row-action is-danger"
+                          @click="deleteAccount(a.email)"
+                          title="删除账号"
+                          aria-label="删除账号">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 </template>
@@ -1540,6 +1592,47 @@
   </div>
 </div>
 
+<!-- ── 单账号删除确认弹窗 ─────────────────────────────────────── -->
+<div class="delete-confirm-modal"
+     x-show="showDeleteAccountModal"
+     x-cloak
+     x-transition.opacity
+     @keydown.escape.window="showDeleteAccountModal && closeDeleteAccountModal()">
+  <div class="modal-scrim" @click="closeDeleteAccountModal()">
+    <div class="danger-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title" @click.stop>
+      <div class="danger-dialog-head">
+        <div class="danger-dialog-icon" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <h3 id="delete-account-title" class="danger-dialog-title">确认删除该账号？</h3>
+          <p class="danger-dialog-text">
+            将从账号库永久删除以下记录。此操作不会删除历史导出文件，但账号库记录删除后无法撤销。
+          </p>
+        </div>
+      </div>
+      <div class="danger-dialog-list" x-show="deleteAccountTarget">
+        <div class="danger-dialog-list-item mono" x-text="deleteAccountTarget"></div>
+      </div>
+      <div class="danger-dialog-error" x-show="deleteAccountError" x-text="deleteAccountError"></div>
+      <div class="danger-dialog-actions">
+        <button id="delete-account-cancel"
+                class="btn btn-ghost btn-sm"
+                @click="closeDeleteAccountModal()"
+                :disabled="isDeletingAccount">取消</button>
+        <button class="btn btn-warning"
+                @click="confirmDeleteAccount()"
+                :disabled="isDeletingAccount || !deleteAccountTarget">
+          <template x-if="isDeletingAccount">
+            <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+          </template>
+          <span x-text="isDeletingAccount ? '删除中' : '确认删除'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── 冲突确认弹窗 ───────────────────────────────────────────── -->
 <!-- 外层只做 x-show 开关，内层固定 display:flex 居中，Alpine 不干扰居中布局 -->
 <div x-show="showConflictModal" x-cloak style="position:fixed;inset:0;z-index:200;">
@@ -1627,6 +1720,10 @@ function app() {
     isDeletingSelected: false,
     showDeleteConfirm: false,
     deleteSelectionError: '',
+    showDeleteAccountModal: false,
+    deleteAccountTarget: '',
+    isDeletingAccount: false,
+    deleteAccountError: '',
     needsSelectionBarSpacer: false,
     _selectionBarSpacerRaf: null,
 
@@ -1806,15 +1903,43 @@ function app() {
       } catch {}
     },
 
-    async deleteAccount(email) {
-      if (!confirm(`确定删除账号 ${email}？`)) return;
+    requestDeleteAccount(email) {
+      if (!email || this.isDeletingAccount) return;
+      this.deleteAccountTarget = email;
+      this.deleteAccountError = '';
+      this.showDeleteAccountModal = true;
+      this.$nextTick(() => {
+        const btn = document.getElementById('delete-account-cancel');
+        if (btn) btn.focus();
+      });
+    },
+    closeDeleteAccountModal() {
+      if (this.isDeletingAccount) return;
+      this.showDeleteAccountModal = false;
+      this.deleteAccountTarget = '';
+      this.deleteAccountError = '';
+    },
+    async confirmDeleteAccount() {
+      const email = this.deleteAccountTarget;
+      if (!email || this.isDeletingAccount) return;
+      this.isDeletingAccount = true;
+      this.deleteAccountError = '';
       try {
-        await fetch(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        const res = await fetch(`/api/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         this.selectedEmails.delete(email);
+        this.showDeleteAccountModal = false;
+        this.deleteAccountTarget = '';
         await this.loadAccounts();
       } catch (e) {
-        this.addLog('red', `删除失败：${e.message}`);
+        this.deleteAccountError = `删除失败：${e.message || e}`;
+        this.addLog('red', this.deleteAccountError);
+      } finally {
+        this.isDeletingAccount = false;
       }
+    },
+    async deleteAccount(email) {
+      this.requestDeleteAccount(email);
     },
 
     // ── 日期 ──
