@@ -42,6 +42,25 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertEqual(settings.invoice_active_context_limit, 3)
         self.assertEqual(settings.api_concurrency, 30)
 
+    def test_bi_sync_related_defaults(self):
+        with patch.dict(
+            os.environ,
+            {
+                "BI_SYNC_ENABLE": "",
+                "BI_SYNC_CRON": "",
+                "BI_SYNC_LOCK_FILE": "",
+                "ALERT_BOT_ENABLE": "",
+            },
+            clear=False,
+        ):
+            settings = config.load_settings()
+
+        self.assertFalse(settings.bi_sync_enable)
+        self.assertEqual(settings.bi_sync_cron, "30 1 * * *")
+        self.assertEqual(settings.bi_sync_lock_file, "/tmp/cam_bi_sync.lock")
+        self.assertFalse(settings.alert_bot_enable)
+        self.assertEqual(settings.alert_to_emails, "")
+
 
 if __name__ == "__main__":
     unittest.main()

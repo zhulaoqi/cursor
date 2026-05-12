@@ -10,14 +10,14 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     :root {
-      --primary:  #2563EB;
+      --primary:  #1D4ED8;
       --secondary:#3B82F6;
       --cta:      #F97316;
-      --bg:       #F8FAFC;
+      --bg:       #F3F7FC;
       --surface:  #FFFFFF;
       --text:     #1E293B;
       --muted:    #64748B;
-      --border:   #E2E8F0;
+      --border:   #DBE4F0;
       --success:  #16A34A;
       --warn:     #D97706;
       --danger:   #DC2626;
@@ -25,7 +25,9 @@
     *, *::before, *::after { box-sizing: border-box; }
     body {
       font-family: 'Fira Sans', system-ui, sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(900px 420px at 100% -120px, rgba(29,78,216,.10), transparent 58%),
+        linear-gradient(180deg, #F8FBFF 0%, var(--bg) 44%, #F5F8FD 100%);
       color: var(--text);
       font-size: 14px;
       line-height: 1.6;
@@ -35,8 +37,8 @@
 
     /* ── 拖拽区域 ── */
     .drop-zone {
-      border: 2px dashed var(--border);
-      border-radius: 12px;
+      border: 2px dashed #C9D7EE;
+      border-radius: 14px;
       padding: 48px 24px;
       display: flex;
       flex-direction: column;
@@ -44,11 +46,13 @@
       justify-content: center;
       gap: 14px;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s, opacity 0.2s;
+      transition: border-color 0.2s, background 0.2s, opacity 0.2s, box-shadow 0.2s;
+      background: linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%);
     }
     .drop-zone:hover, .drop-zone.drag-over {
       border-color: var(--primary);
       background: #EFF6FF;
+      box-shadow: 0 12px 30px rgba(37,99,235,.12);
     }
 
     /* ── 进度条 ── */
@@ -76,6 +80,297 @@
     .badge-error   { background: #FEE2E2; color: #B91C1C; }
     .badge-pending { background: #F1F5F9; color: #64748B; }
     .badge-running { background: #DBEAFE; color: #1D4ED8; }
+    .badge-neutral { background: #E2E8F0; color: #334155; }
+    .date-chip {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .date-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .date-chip.active { background: #EFF6FF; border-color: #BFDBFE; color: #1D4ED8; }
+    .stage-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 2px;
+      border-bottom: 1px solid #EEF2F7;
+      font-size: 13px;
+    }
+    .stage-row:last-child { border-bottom: none; }
+    .stage-meta { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 12px; }
+    .stage-status-text { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .stage-msg {
+      margin-top: 6px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: #F8FAFC;
+      border: 1px solid #EAF0F7;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .sync-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      background: #fff;
+    }
+    .sync-date-plugin { position: relative; min-width: 190px; }
+    .sync-date-trigger {
+      width: 100%;
+      height: 40px;
+      border: 1px solid #CBD5E1;
+      border-radius: 14px;
+      background: #fff;
+      padding: 0 12px 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 14px;
+      color: #0F172A;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .sync-date-trigger:hover {
+      border-color: #94A3B8;
+      background: #FCFDFF;
+    }
+    .sync-date-trigger.open {
+      border-color: #93C5FD;
+      box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    }
+    .sync-date-trigger:disabled {
+      cursor: not-allowed;
+      opacity: .65;
+      background: #F8FAFC;
+    }
+    .sync-date-panel {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 46px;
+      z-index: 40;
+      background: #fff;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      box-shadow: 0 16px 36px rgba(15,23,42,.14);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sync-date-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .sync-date-weekday {
+      text-align: center;
+      font-size: 12px;
+      color: #64748B;
+      font-weight: 600;
+      line-height: 20px;
+    }
+    .sync-date-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+    }
+    .sync-date-day {
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: #0F172A;
+      font-size: 12px;
+      font-weight: 600;
+      height: 30px;
+      cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .sync-date-day:hover { background: #EFF6FF; color: #1D4ED8; }
+    .sync-date-day.is-muted { color: #94A3B8; font-weight: 500; }
+    .sync-date-day.is-disabled {
+      cursor: not-allowed;
+      color: #CBD5E1;
+      opacity: .65;
+    }
+    .sync-date-day.is-disabled:hover { background: transparent; color: #CBD5E1; }
+    .sync-date-day.is-selected {
+      background: #2563EB;
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(37,99,235,.24);
+    }
+    .sync-date-day.is-today:not(.is-selected) {
+      border: 1px solid #BFDBFE;
+      color: #1D4ED8;
+    }
+    .sync-date-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 6px;
+      border-top: 1px solid #EEF2F7;
+    }
+    .sync-date-foot-btn {
+      border: none;
+      background: transparent;
+      color: #2563EB;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 4px 6px;
+      border-radius: 6px;
+    }
+    .sync-date-foot-btn:hover { background: #EFF6FF; }
+    .sync-date-panel-list {
+      max-height: 180px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .sync-date-native {
+      height: 36px;
+      padding: 0 10px;
+      font-size: 13px;
+    }
+    .sync-action-btn { min-width: 108px; justify-content: center; }
+    .sync-shell {
+      position: relative;
+      padding: 20px;
+      border-radius: 18px;
+      border: 1px solid #DCE5F3;
+      background: linear-gradient(180deg, #F7FAFF 0%, #F9FBFF 56%, #FFFFFF 100%);
+      box-shadow: 0 10px 26px rgba(15,23,42,.06), inset 0 1px 0 rgba(255,255,255,.7);
+      overflow: hidden;
+    }
+    .sync-shell::before {
+      content: '';
+      position: absolute;
+      top: -88px;
+      right: -66px;
+      width: 240px;
+      height: 240px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(37,99,235,.14) 0%, rgba(37,99,235,0) 70%);
+      pointer-events: none;
+    }
+    .sync-head {
+      position: relative;
+      z-index: 1;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom:20px;
+      flex-wrap:wrap;
+      gap:14px;
+    }
+    .sync-desc {
+      margin: 6px 0 0;
+      color: #64748B;
+      font-size: 13px;
+      max-width: 720px;
+    }
+    .sync-task-grid {
+      position: relative;
+      z-index: 1;
+      display:grid;
+      grid-template-columns: repeat(auto-fit,minmax(360px,1fr));
+      gap:14px;
+      margin-bottom:16px;
+    }
+    .sync-task-card {
+      padding: 18px 20px;
+      border: 1px solid #DDE6F2;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%);
+      box-shadow: 0 6px 18px rgba(15,23,42,.05);
+    }
+    .sync-task-card.main { border-left: 4px solid #3B82F6; }
+    .sync-task-card.replay { border-left: 4px solid #0EA5A4; }
+    .sync-badge-main { background: #E8F0FF; color: #1D4ED8; }
+    .sync-badge-replay { background: #E6FFFB; color: #0F766E; }
+    .sync-section-card {
+      border-radius: 14px;
+      border: 1px solid #DDE6F2;
+      background: #fff;
+      box-shadow: 0 8px 22px rgba(15,23,42,.045);
+      padding: 18px 22px;
+      margin-bottom: 16px;
+    }
+    .sync-section-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0F172A;
+      letter-spacing: .01em;
+    }
+    .sync-section-card table thead th {
+      background: #F8FBFF;
+      color: #64748B;
+      font-weight: 700;
+      font-size: 11.5px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .sync-section-card table tbody td {
+      font-size: 13px;
+      color: #1E293B;
+    }
+    .sync-section-card table tbody tr:hover {
+      background: #F1F7FF !important;
+    }
+    .sync-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+    .sync-meta-item {
+      border: 1px solid #E3EAF5;
+      border-radius: 11px;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFF 100%);
+    }
+    .sync-meta-k { font-size:12px; color:#64748B; margin-bottom:2px; }
+    .sync-meta-v { font-size:14px; font-weight:700; color:var(--text); }
+    .sync-log-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      color:var(--muted);
+      font-size:11px;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      padding:0 2px 6px;
+      border-bottom:1px solid #EEF2F7;
+      margin-bottom:4px;
+    }
+    .log-link-tag {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      height:30px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid #C4D7FF;
+      background:#F2F7FF;
+      color:#1D4ED8;
+      font-size:12px;
+      font-weight:700;
+      cursor:pointer;
+      transition:all .15s ease;
+    }
+    .log-link-tag:hover {
+      background:#DBEAFE;
+      border-color:#93C5FD;
+      transform:translateY(-1px);
+    }
 
     /* ── 自定义 Checkbox ── */
     input[type="checkbox"] {
@@ -105,39 +400,43 @@
     /* ── 表格 ── */
     table { border-collapse: collapse; width: 100%; }
     th {
-      background: #F8FAFC; color: #94A3B8; font-weight: 700;
+      background: #F7FAFF; color: #718198; font-weight: 700;
       font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
       border-bottom: 1px solid var(--border);
     }
-    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid #F1F5F9; white-space: nowrap; }
+    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid #EDF2FA; white-space: nowrap; }
     thead th { border-bottom: 1px solid var(--border); }
     tr:last-child td { border-bottom: none; }
     tbody tr { transition: background .12s; }
-    tbody tr:nth-child(even) { background: #FAFBFD; }
+    tbody tr:nth-child(even) { background: #FBFDFF; }
     tbody tr:hover { background: #EEF5FF !important; }
 
     /* ── 按钮 ── */
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 9px 20px; border-radius: 8px; font-weight: 600; font-size: 14px;
-      cursor: pointer; border: none; transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+      height: 38px; padding: 0 18px; border-radius: 10px; font-weight: 700; font-size: 13px;
+      cursor: pointer; border: 1px solid transparent; transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s, background .15s, border-color .15s;
       white-space: nowrap;
+      justify-content: center;
+      letter-spacing: .01em;
     }
-    .btn:hover:not(:disabled) { opacity: .88; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    .btn:hover:not(:disabled) { opacity: 1; box-shadow: 0 8px 18px rgba(15,23,42,.10); transform: translateY(-1px); }
     .btn:active:not(:disabled) { transform: scale(0.97); box-shadow: none; }
     .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary  { background: var(--primary); color: #fff; box-shadow: 0 1px 3px rgba(37,99,235,.3); }
-    .btn-cta      { background: var(--cta); color: #fff; box-shadow: 0 1px 3px rgba(249,115,22,.3); }
-    .btn-ghost    { background: transparent; color: var(--primary); border: 1.5px solid var(--primary); }
+    .btn-primary  { background: linear-gradient(180deg, #3B82F6 0%, #1D4ED8 100%); color: #fff; border-color: #1D4ED8; box-shadow: 0 8px 18px rgba(37,99,235,.26); }
+    .btn-cta      { background: linear-gradient(180deg, #FB923C 0%, #EA580C 100%); color: #fff; border-color:#EA580C; box-shadow: 0 8px 18px rgba(249,115,22,.22); }
+    .btn-ghost    { background: #F8FBFF; color: var(--primary); border: 1px solid #BCD0F6; }
     .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
     .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1.5px solid #FCA5A5; }
     .btn-warning:hover:not(:disabled) { background: #FEE2E2; border-color: #EF4444; }
-    .btn-sm       { padding: 6px 14px; font-size: 13px; }
+    .btn-sm       { height: 36px; padding: 0 14px; font-size: 13px; }
 
     /* ── 卡片 ── */
     .card {
-      background: var(--surface); border-radius: 12px;
-      border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03);
+      background: linear-gradient(180deg, #FFFFFF 0%, #FCFDFF 100%);
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 20px rgba(15,23,42,.055), 0 2px 6px rgba(15,23,42,.04);
     }
     /* ── 下载参数区 ── */
     .field-label {
@@ -149,6 +448,7 @@
     .filters-panel {
       padding: 12px 14px;
       margin-bottom: 12px;
+      background: linear-gradient(180deg, #FFFFFF 0%, #F9FBFF 100%);
     }
     .filters-grid {
       display: grid;
@@ -431,9 +731,10 @@
        原生月份与日期输入已全部替换为自定义 picker，所以这里不再覆盖它们 ── */
     select, input[type="text"], input[type="number"] {
       background: var(--surface); border: 1.5px solid var(--border);
-      border-radius: 8px; padding: 8px 12px; font-size: 14px;
+      border-radius: 10px; padding: 8px 12px; font-size: 14px;
       color: var(--text); outline: none;
-      transition: border-color 0.15s;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 1px 2px rgba(15,23,42,.04);
+      transition: border-color 0.15s, box-shadow .15s;
     }
     select:focus, input:focus { border-color: var(--primary); }
 
@@ -710,7 +1011,7 @@
     /* ── 输入框 focus ring ── */
     select:focus, input[type="text"]:focus, input[type="number"]:focus {
       border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.14);
     }
 
     /* ── 日期选择器 ── */
@@ -923,7 +1224,7 @@
         <template x-if="view !== 'list'">
           <span style="display:flex;align-items:center;gap:6px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            <span x-text="view === 'upload' ? '上传账号' : '拉取进度'"></span>
+            <span x-text="view === 'upload' ? '上传账号' : (view === 'sync' ? '拉取日志&补偿拉取' : '拉取进度')"></span>
           </span>
         </template>
       </div>
@@ -960,13 +1261,17 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
-        <button class="btn btn-ghost btn-sm" @click="loadAccounts()" title="刷新列表">
+        <button class="btn btn-ghost" @click="loadAccounts()" title="刷新列表">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           刷新
         </button>
         <button class="btn btn-primary" @click="goUpload()">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           上传账号
+        </button>
+        <button class="btn btn-ghost" @click="goSync()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg>
+          日志与补拉
         </button>
       </div>
     </div>
@@ -1525,6 +1830,278 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════════════
+       VIEW: 拉取日志&补偿拉取
+  ═══════════════════════════════════════════════════════════════ -->
+  <div x-show="view === 'sync'" x-cloak x-transition class="sync-shell">
+    <div class="sync-head">
+      <div>
+        <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">拉取日志&补偿拉取</h2>
+        <p class="sync-desc">每日主任务固定拉取昨日全量账号；补拉作为并行功能单独触发。</p>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="btn btn-ghost" @click="goList()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          返回列表
+        </button>
+        <button class="btn btn-ghost" @click="loadSyncDashboard()">刷新</button>
+      </div>
+    </div>
+
+    <div class="sync-task-grid">
+      <div class="sync-task-card main">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+          <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+            手动执行昨日同步
+          </div>
+          <span class="badge sync-badge-main">主任务</span>
+        </div>
+        <p style="margin:0 0 14px; font-size:12px; color:var(--muted); line-height:1.5;">
+          固定拉取昨日全天全部账号数据（T+0 补齐），用于日常主链路同步。
+        </p>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:12px; color:var(--muted);">业务日期</span>
+            <div class="sync-date-plugin" @click.outside="syncDailyDatePanelOpen = false">
+              <button type="button"
+                class="sync-date-trigger"
+                :class="{ 'open': syncDailyDatePanelOpen }"
+                @click="openSyncDatePicker('daily')">
+                <span x-text="syncDailyDate || _yesterdayDateStr()"></span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div x-show="syncDailyDatePanelOpen" x-cloak x-transition class="sync-date-panel">
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <template x-for="d in syncReplayDateOptions()" :key="`daily-${d.value}`">
+                    <button type="button"
+                      class="date-chip"
+                      :class="{ 'active': syncDailyDate === d.value }"
+                      @click="selectSyncDate('daily', d.value)"
+                      x-text="d.label"></button>
+                  </template>
+                </div>
+                <div class="date-popover-header" style="padding:0;">
+                  <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('daily', -1)" aria-label="上一月">‹</button>
+                  <div class="date-popover-title" x-text="syncCalendarTitle('daily')"></div>
+                  <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('daily', 1)" aria-label="下一月">›</button>
+                </div>
+                <div class="sync-date-weekdays">
+                  <template x-for="d in ['日','一','二','三','四','五','六']" :key="`daily-week-${d}`">
+                    <div class="sync-date-weekday" x-text="d"></div>
+                  </template>
+                </div>
+                <div class="sync-date-grid">
+                  <template x-for="day in syncCalendarDays('daily')" :key="`daily-${day.iso}`">
+                    <button type="button"
+                      class="sync-date-day"
+                      :class="{
+                        'is-muted': !day.inMonth,
+                        'is-disabled': day.isFuture,
+                        'is-today': day.isToday,
+                        'is-selected': syncDailyDate === day.iso
+                      }"
+                      :disabled="day.isFuture"
+                      @click="selectSyncDate('daily', day.iso)"
+                      x-text="day.day"></button>
+                  </template>
+                </div>
+                <div class="sync-date-footer">
+                  <button type="button" class="sync-date-foot-btn" @click="selectSyncDate('daily', _yesterdayDateStr())">昨天</button>
+                  <button type="button" class="sync-date-foot-btn" @click="selectSyncDate('daily', todayIso())">今天</button>
+                </div>
+              </div>
+            </div>
+          </span>
+          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingDaily" @click="triggerSyncRun()">
+            <span x-text="syncSubmittingDaily ? '提交中...' : '执行'"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sync-task-card replay">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+          <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+            自定义补拉（按账号）
+          </div>
+          <span class="badge sync-badge-replay">补偿任务</span>
+        </div>
+        <p style="margin:0 0 12px; font-size:12px; color:var(--muted); line-height:1.5;">
+          按需补拉指定账号，不限定失败账号。支持逗号、空格或换行分隔邮箱。
+        </p>
+        <div style="display:grid; grid-template-columns: 190px minmax(0, 1fr); gap:12px; align-items:stretch;">
+          <div>
+            <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">业务日期</div>
+            <div style="border:1px solid var(--border); border-radius:10px; padding:8px; min-height:122px;">
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                <template x-for="d in syncReplayDateOptions()" :key="d.value">
+                  <button type="button"
+                    class="date-chip"
+                    :class="{ 'active': syncReplayDate === d.value }"
+                    @click="syncReplayDate = d.value"
+                    x-text="d.label"></button>
+                </template>
+              </div>
+              <div class="sync-date-plugin" style="min-width:unset;" @click.outside="syncReplayDatePanelOpen = false">
+                <button type="button"
+                  class="sync-date-trigger"
+                  :class="{ 'open': syncReplayDatePanelOpen }"
+                  @click="openSyncDatePicker('replay')">
+                  <span x-text="syncReplayDate || '请选择日期'"></span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div x-show="syncReplayDatePanelOpen" x-cloak x-transition class="sync-date-panel">
+                  <div class="date-popover-header" style="padding:0;">
+                    <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('replay', -1)" aria-label="上一月">‹</button>
+                    <div class="date-popover-title" x-text="syncCalendarTitle('replay')"></div>
+                    <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('replay', 1)" aria-label="下一月">›</button>
+                  </div>
+                  <div class="sync-date-weekdays">
+                    <template x-for="d in ['日','一','二','三','四','五','六']" :key="`replay-week-${d}`">
+                      <div class="sync-date-weekday" x-text="d"></div>
+                    </template>
+                  </div>
+                  <div class="sync-date-grid">
+                    <template x-for="day in syncCalendarDays('replay')" :key="`replay-${day.iso}`">
+                      <button type="button"
+                        class="sync-date-day"
+                        :class="{
+                          'is-muted': !day.inMonth,
+                          'is-disabled': day.isFuture,
+                          'is-today': day.isToday,
+                          'is-selected': syncReplayDate === day.iso
+                        }"
+                        :disabled="day.isFuture"
+                        @click="selectSyncDate('replay', day.iso)"
+                        x-text="day.day"></button>
+                    </template>
+                  </div>
+                  <div class="sync-date-footer">
+                    <button type="button" class="sync-date-foot-btn" @click="selectSyncDate('replay', _yesterdayDateStr())">昨天</button>
+                    <button type="button" class="sync-date-foot-btn" @click="selectSyncDate('replay', todayIso())">今天</button>
+                  </div>
+                  <div class="sync-date-panel-list">
+                    <template x-for="d in syncRecentDateList()" :key="d">
+                      <button type="button" class="btn btn-ghost btn-sm"
+                        style="width:100%; justify-content:flex-start;"
+                        @click="selectSyncDate('replay', d)"
+                        x-text="d"></button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">账号邮箱</div>
+            <textarea x-model="syncReplayEmails" rows="2" placeholder="a@xx.com,b@xx.com"
+              class="sync-input" style="min-height:122px; resize:none;"></textarea>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingReplay" @click="triggerSyncReplay()">
+            <span x-text="syncSubmittingReplay ? '提交中...' : '执行'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sync-section-card">
+      <div x-show="!syncTodayRun" style="color:var(--muted); font-size:13px;">今天暂无同步记录。</div>
+      <div x-show="syncTodayRun" class="sync-meta-grid">
+        <div class="sync-meta-item">
+          <div class="sync-meta-k">状态</div>
+          <div class="sync-meta-v"><span class="badge" :class="syncStatusClass(syncTodayRun?.status)" x-text="syncStatusLabel(syncTodayRun?.status)"></span></div>
+        </div>
+        <div class="sync-meta-item"><div class="sync-meta-k">开始时间</div><div class="sync-meta-v" x-text="fmtTsFull(syncTodayRun?.started_at)"></div></div>
+        <div class="sync-meta-item"><div class="sync-meta-k">结束时间</div><div class="sync-meta-v" x-text="fmtTsFull(syncTodayRun?.ended_at)"></div></div>
+        <div class="sync-meta-item"><div class="sync-meta-k">快照账号数</div><div class="sync-meta-v" x-text="syncTodayRun?.account_snapshot_total ?? 0"></div></div>
+        <div class="sync-meta-item"><div class="sync-meta-k">成功 / 失败</div><div class="sync-meta-v" x-text="`${syncTodayRun?.account_success ?? 0} / ${syncTodayRun?.account_failed ?? 0}`"></div></div>
+      </div>
+    </div>
+
+    <div class="sync-section-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+        <div class="sync-section-title">执行日志</div>
+        <button class="btn btn-ghost btn-sm" @click="syncLogCompact = !syncLogCompact" x-text="syncLogCompact ? '切换详细模式' : '切换简洁模式'"></button>
+      </div>
+      <div x-show="syncStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
+      <div x-show="syncStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="sync-log-head">
+          <span>阶段</span>
+          <span>状态 / 时间 / 耗时</span>
+        </div>
+        <template x-for="(s, idx) in syncStages" :key="`${s.id}-${s.ts}`">
+          <div>
+            <div class="stage-row">
+              <span class="mono" x-text="syncStageLabel(s.stage)"></span>
+              <span class="stage-meta">
+                <span class="stage-status-text" :style="`color:${syncStatusColor(s.status)}`">
+                  <span class="dot" :style="`background:${syncStatusColor(s.status)}`"></span>
+                  <span x-text="syncStatusLabel(s.status)"></span>
+                </span>
+                <span x-text="fmtTsFull(s.ts)"></span>
+                <span x-text="syncStageElapsed(idx)"></span>
+              </span>
+            </div>
+            <div class="stage-msg" x-show="!syncLogCompact && (s.message || '').trim().length > 0" x-text="s.message"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="sync-section-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div class="sync-section-title">失败账号</div>
+        <button class="btn btn-ghost btn-sm" :disabled="!syncTodayRun?.run_id || syncSubmittingRetry || syncFailedAccounts.length===0" @click="retryTodayFailed()">
+          执行
+        </button>
+      </div>
+      <div x-show="syncFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
+      <div x-show="syncFailedAccounts.length>0" class="overflow-x-auto">
+        <table>
+          <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
+          <tbody>
+            <template x-for="a in syncFailedAccounts" :key="a.id">
+              <tr>
+                <td class="mono" x-text="a.account_email"></td>
+                <td style="max-width:520px; overflow:hidden; text-overflow:ellipsis;" x-text="a.error_message || '-'"></td>
+                <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="sync-section-card" style="margin-bottom:0;">
+      <div class="sync-section-title" style="margin-bottom:10px;">最近运行</div>
+      <div class="overflow-x-auto">
+        <table>
+          <thead><tr><th>run_id</th><th>日期</th><th>状态</th><th>成功/失败</th><th>开始</th><th>操作</th></tr></thead>
+          <tbody>
+            <template x-for="r in syncRuns" :key="r.run_id">
+              <tr @click="loadSyncRunDetail(r.run_id)" style="cursor:pointer;">
+                <td class="mono" x-text="r.run_id"></td>
+                <td x-text="r.biz_date"></td>
+                <td><span class="badge" :class="syncStatusClass(r.status)" x-text="syncStatusLabel(r.status)"></span></td>
+                <td x-text="`${r.account_success||0}/${r.account_failed||0}`"></td>
+                <td x-text="fmtTsFull(r.started_at)"></td>
+                <td>
+                  <button type="button" class="log-link-tag" @click.stop="loadSyncRunDetail(r.run_id)">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                    查看日志
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- ── 选中后吸附操作条 ───────────────────────────────────────── -->
@@ -1710,7 +2287,7 @@ function app() {
     // ── 页面状态 ──
     serverOk: false,
     _ready: false,
-    view: 'list',   // 'list' | 'upload' | 'run'
+    view: 'list',   // 'list' | 'upload' | 'run' | 'sync'
 
     // ── 账号库（来自 DB） ──
     dbAccounts: [],
@@ -1770,6 +2347,27 @@ function app() {
     retryResolvedEmails: new Set(),
     retryDownloads: {},
     retryTaskIds: {},
+    syncTodayRun: null,
+    syncStages: [],
+    syncFailedAccounts: [],
+    syncRuns: [],
+    syncTaskId: null,
+    syncSubmittingDaily: false,
+    syncSubmittingReplay: false,
+    syncSubmittingRetry: false,
+    syncDailyDatePanelOpen: false,
+    syncReplayDatePanelOpen: false,
+    syncDailyCalendarCursor: '',
+    syncReplayCalendarCursor: '',
+    syncDailyDate: '',
+    syncReplayDate: '',
+    syncReplayEmails: '',
+    syncLiveRun: null,
+    syncLiveStages: [],
+    syncLiveProgress: null,
+    syncRunDetailTimer: null,
+    syncTaskNotice: null,
+    syncLogCompact: true,
 
     // ── Storage keys ──
     _SS_KEY: 'cam_run_state',
@@ -1799,6 +2397,10 @@ function app() {
       this.uploadPreview = [];
       this.uploadError = '';
     },
+    goSync() {
+      this.view = 'sync';
+      this.loadSyncDashboard();
+    },
 
     // ── 初始化 ──
     async init() {
@@ -1808,6 +2410,7 @@ function app() {
 
       // 加载账号库
       await this.loadAccounts();
+      await this.loadSyncDashboard();
       this._ready = true;
       window.addEventListener('scroll', () => this._requestSelectionBarSpacerSync(), { passive: true });
       window.addEventListener('resize', () => this._requestSelectionBarSpacerSync(), { passive: true });
@@ -1901,6 +2504,447 @@ function app() {
         this.selectedEmails = new Set([...this.selectedEmails].filter(e => emailSet.has(e)));
         this._requestSelectionBarSpacerSync();
       } catch {}
+    },
+    async loadSyncRunsOnly() {
+      try {
+        const runsRes = await fetch('/api/sync/runs?limit=30');
+        if (runsRes.ok) {
+          const d2 = await runsRes.json();
+          this.syncRuns = d2.runs || [];
+        }
+      } catch (e) {
+        this.addLog('var(--danger)', `加载运行列表失败：${e.message || e}`);
+      }
+    },
+    async loadSyncDashboard() {
+      try {
+        const [todayRes, runsRes] = await Promise.all([
+          fetch('/api/sync/today'),
+          fetch('/api/sync/runs?limit=30'),
+        ]);
+        if (todayRes.ok) {
+          const d = await todayRes.json();
+          // 仅在有“今日 run”时覆盖主详情，避免把刚执行的昨日 run 详情抹掉
+          if (d.run) {
+            this.syncTodayRun = d.run || null;
+            this.syncStages = d.stages || [];
+            this.syncFailedAccounts = d.failed_accounts || [];
+          }
+          if (this.syncTodayRun?.biz_date && !this.syncReplayDate) {
+            this.syncReplayDate = this.syncTodayRun.biz_date;
+          }
+          if (!this.syncReplayDate) {
+            const now = new Date();
+            const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+            this.syncReplayDate = local.toISOString().slice(0, 10);
+          }
+          if (!this.syncDailyDate) {
+            this.syncDailyDate = this._yesterdayDateStr();
+          }
+        }
+        if (runsRes.ok) {
+          const d2 = await runsRes.json();
+          this.syncRuns = d2.runs || [];
+        }
+        // 刷新后兜底：若“今日记录”为空，自动展示最近一条（优先运行中）
+        if (!this.syncTodayRun && this.syncRuns.length > 0) {
+          const running = this.syncRuns.find(r => r.status === 'running');
+          const latest = running || this.syncRuns[0];
+          if (latest?.run_id) {
+            await this.loadSyncRunDetail(latest.run_id);
+            if (latest.status === 'running') {
+              this._startSyncRunDetailPolling(latest.run_id);
+            }
+          }
+        }
+      } catch (e) {
+        this.addLog('var(--danger)', `加载同步监控失败：${e.message || e}`);
+      }
+    },
+    async loadSyncRunDetail(runId) {
+      if (!runId) return;
+      try {
+        const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+        this.syncTodayRun = d.run || null;
+        this.syncStages = d.stages || [];
+        this.syncFailedAccounts = (d.accounts || []).filter(a => a.status === 'failed');
+        this._setSyncTaskNoticeFromRun(this.syncTodayRun);
+      } catch (e) {
+        this.addLog('var(--danger)', `加载 run 详情失败：${e.message || e}`);
+      }
+    },
+    _setSyncTaskNotice(title, message, color = 'var(--primary)') {
+      this.syncTaskNotice = {
+        title,
+        message,
+        color,
+        time: `${new Date().toLocaleDateString('zh-CN')} ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`,
+      };
+    },
+    _setSyncTaskNoticeFromRun(run) {
+      if (!run) return;
+      const status = run.status || '';
+      const summary = run.error_summary || '';
+      if (status === 'failed') {
+        this._setSyncTaskNotice('同步失败', summary || '任务执行失败，请检查失败账号与阶段日志', 'var(--danger)');
+      } else if (status === 'partial_failed') {
+        this._setSyncTaskNotice('同步部分失败', summary || '部分账号执行失败，请查看失败账号', 'var(--warn)');
+      } else if (status === 'success') {
+        this._setSyncTaskNotice('同步成功', '任务执行完成，全部账号成功', 'var(--success)');
+      }
+    },
+    _stopSyncRunDetailPolling() {
+      if (this.syncRunDetailTimer) {
+        clearInterval(this.syncRunDetailTimer);
+        this.syncRunDetailTimer = null;
+      }
+    },
+    _startSyncRunDetailPolling(runId) {
+      if (!runId) return;
+      this._stopSyncRunDetailPolling();
+      this.syncRunDetailTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          const run = d.run || null;
+          if (run) {
+            this.syncTodayRun = run;
+            this.syncStages = d.stages || [];
+            this.syncFailedAccounts = (d.accounts || []).filter(a => a.status === 'failed');
+            this._upsertSyncRun(run);
+            if (run.status !== 'running') {
+              this._stopSyncRunDetailPolling();
+            }
+          }
+        } catch {}
+      }, 2000);
+    },
+    _upsertSyncRun(run) {
+      if (!run || !run.run_id) return;
+      const idx = this.syncRuns.findIndex(r => r.run_id === run.run_id);
+      if (idx >= 0) {
+        this.syncRuns[idx] = { ...this.syncRuns[idx], ...run };
+      } else {
+        this.syncRuns.unshift(run);
+      }
+      if (this.syncRuns.length > 30) {
+        this.syncRuns = this.syncRuns.slice(0, 30);
+      }
+    },
+    _pollSyncTask(taskId) {
+      this._stopSyncRunDetailPolling();
+      const timer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/sync/task/${encodeURIComponent(taskId)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          if (d.live) {
+            this.syncLiveRun = d.live.run || null;
+            this.syncLiveStages = d.live.stages || [];
+            this.syncLiveProgress = d.live.progress || null;
+            if (d.live.run) this._upsertSyncRun(d.live.run);
+            if (d.live.run) {
+              this.syncTodayRun = d.live.run;
+              this.syncStages = d.live.stages || [];
+              const tail = d.live.account_tail || [];
+              this.syncFailedAccounts = tail.filter(a => a.status === 'failed');
+            }
+          }
+          if (d.status === 'finished' || d.status === 'failed') {
+            clearInterval(timer);
+            if (d.status === 'failed') {
+              this.addLog('var(--danger)', `同步执行失败：${d.error || '未知错误'}`);
+              this._setSyncTaskNotice('同步异常', d.error || '任务执行异常', 'var(--danger)');
+            } else {
+              const bizStatus = d.result?.status;
+              if (bizStatus === 'success') {
+                this.addLog('var(--success)', '同步执行完成');
+                this._setSyncTaskNotice('同步成功', '任务执行完成，全部账号成功', 'var(--success)');
+              } else if (bizStatus) {
+                this.addLog('var(--warn)', `同步任务结束，业务状态：${bizStatus}`);
+                if (bizStatus === 'failed') {
+                  this._setSyncTaskNotice('同步失败', d.result?.message || '任务失败，请查看失败账号与日志', 'var(--danger)');
+                } else if (bizStatus === 'partial_failed') {
+                  this._setSyncTaskNotice('同步部分失败', d.result?.message || '部分账号失败，请查看失败账号列表', 'var(--warn)');
+                } else {
+                  this._setSyncTaskNotice('同步结束', `业务状态：${bizStatus}`, 'var(--primary)');
+                }
+              } else {
+                this.addLog('var(--success)', '同步执行完成');
+                this._setSyncTaskNotice('同步结束', '任务已结束', 'var(--primary)');
+              }
+            }
+            const finishedRunId = d?.result?.run_id || d?.run_id || d?.live?.run?.run_id || '';
+            if (finishedRunId) {
+              await this.loadSyncRunDetail(finishedRunId);
+            }
+            this.loadSyncRunsOnly();
+            this._stopSyncRunDetailPolling();
+          }
+        } catch {}
+      }, 2000);
+    },
+    _yesterdayDateStr() {
+      const now = new Date();
+      const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+      local.setDate(local.getDate() - 1);
+      return local.toISOString().slice(0, 10);
+    },
+    _dateOffsetStr(daysAgo) {
+      const now = new Date();
+      const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+      local.setDate(local.getDate() - Number(daysAgo || 0));
+      return local.toISOString().slice(0, 10);
+    },
+    syncReplayDateOptions() {
+      return [
+        { label: '昨天', value: this._dateOffsetStr(1) },
+        { label: '前天', value: this._dateOffsetStr(2) },
+        { label: '近3天', value: this._dateOffsetStr(3) },
+      ];
+    },
+    syncRecentDateList() {
+      const list = [];
+      for (let i = 0; i < 14; i += 1) list.push(this._dateOffsetStr(i));
+      return list;
+    },
+    openSyncDatePicker(kind) {
+      const k = kind === 'daily' ? 'daily' : 'replay';
+      const baseIso = (k === 'daily' ? this.syncDailyDate : this.syncReplayDate) || this._yesterdayDateStr();
+      const d = this.parseDateIso(baseIso) || new Date();
+      const cursor = `${d.getFullYear()}-${this.pad2(d.getMonth() + 1)}`;
+      if (k === 'daily') {
+        this.syncDailyCalendarCursor = cursor;
+        this.syncDailyDatePanelOpen = true;
+        this.syncReplayDatePanelOpen = false;
+      } else {
+        this.syncReplayCalendarCursor = cursor;
+        this.syncReplayDatePanelOpen = true;
+        this.syncDailyDatePanelOpen = false;
+      }
+    },
+    syncCalendarTitle(kind) {
+      const cursor = kind === 'daily'
+        ? (this.syncDailyCalendarCursor || this.todayIso().slice(0, 7))
+        : (this.syncReplayCalendarCursor || this.todayIso().slice(0, 7));
+      const [y, m] = cursor.split('-').map(Number);
+      return `${y}年${this.pad2(m)}月`;
+    },
+    shiftSyncCalendarMonth(kind, delta) {
+      const cursor = kind === 'daily'
+        ? (this.syncDailyCalendarCursor || this.todayIso().slice(0, 7))
+        : (this.syncReplayCalendarCursor || this.todayIso().slice(0, 7));
+      const [y, m] = cursor.split('-').map(Number);
+      const d = new Date(y, m - 1 + Number(delta || 0), 1);
+      const next = `${d.getFullYear()}-${this.pad2(d.getMonth() + 1)}`;
+      if (kind === 'daily') this.syncDailyCalendarCursor = next;
+      else this.syncReplayCalendarCursor = next;
+    },
+    syncCalendarDays(kind) {
+      const cursor = kind === 'daily'
+        ? (this.syncDailyCalendarCursor || this.todayIso().slice(0, 7))
+        : (this.syncReplayCalendarCursor || this.todayIso().slice(0, 7));
+      const [y, m] = cursor.split('-').map(Number);
+      const first = new Date(y, m - 1, 1);
+      const start = new Date(first);
+      start.setDate(first.getDate() - first.getDay());
+      const today = this.todayIso();
+      return Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        const iso = this.formatDateIso(d);
+        return {
+          iso,
+          day: d.getDate(),
+          inMonth: d.getMonth() === first.getMonth(),
+          isToday: iso === today,
+          isFuture: iso > today,
+        };
+      });
+    },
+    selectSyncDate(kind, iso) {
+      if (this.isFutureDate(iso)) return;
+      if (kind === 'daily') {
+        this.syncDailyDate = iso;
+        this.syncDailyDatePanelOpen = false;
+      } else {
+        this.syncReplayDate = iso;
+        this.syncReplayDatePanelOpen = false;
+      }
+    },
+    syncStatusLabel(status) {
+      const s = String(status || '').toLowerCase();
+      if (s === 'success') return '成功';
+      if (s === 'running') return '执行中';
+      if (s === 'failed') return '失败';
+      if (s === 'partial_failed') return '部分失败';
+      if (s === 'skipped') return '已跳过';
+      if (s === 'start') return '开始';
+      return s || '-';
+    },
+    syncStatusClass(status) {
+      const s = String(status || '').toLowerCase();
+      if (s === 'success') return 'badge-ok';
+      if (s === 'running' || s === 'start') return 'badge-running';
+      if (s === 'failed') return 'badge-error';
+      if (s === 'partial_failed') return 'badge-warn';
+      if (s === 'skipped') return 'badge-pending';
+      return 'badge-neutral';
+    },
+    syncStatusColor(status) {
+      const s = String(status || '').toLowerCase();
+      if (s === 'success') return '#16A34A';
+      if (s === 'running' || s === 'start') return '#2563EB';
+      if (s === 'failed') return '#DC2626';
+      if (s === 'partial_failed') return '#D97706';
+      if (s === 'skipped') return '#64748B';
+      return '#64748B';
+    },
+    syncStageLabel(stage) {
+      const m = {
+        init: '初始化',
+        fetch: '账号拉取',
+        load_ods: '写入 ODS',
+        load_dwd: '构建 DWD',
+        finalize: '收尾汇总',
+      };
+      const k = String(stage || '').toLowerCase();
+      return m[k] || stage || '-';
+    },
+    syncStageElapsed(idx) {
+      const i = Number(idx);
+      if (!Number.isFinite(i) || i <= 0) return '耗时: -';
+      const cur = Number(this.syncStages?.[i]?.ts || 0);
+      const prev = Number(this.syncStages?.[i - 1]?.ts || 0);
+      if (!cur || !prev) return '耗时: -';
+      const sec = Math.max(0, cur - prev);
+      if (sec < 60) return `耗时: ${sec}s`;
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `耗时: ${m}m${s}s`;
+    },
+    _isValidBizDate(v) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim());
+    },
+    async _readApiError(res, fallbackText) {
+      if (res.ok) return '';
+      try {
+        const data = await res.json();
+        if (data && data.detail) return String(data.detail);
+      } catch {}
+      return fallbackText || `HTTP ${res.status}`;
+    },
+    async triggerSyncRun() {
+      if (this.syncSubmittingDaily) return;
+      if (!this._isValidBizDate(this.syncDailyDate)) {
+        this.addLog('var(--warn)', '业务日期格式不正确，请使用 YYYY-MM-DD');
+        return;
+      }
+      this.syncSubmittingDaily = true;
+      this.syncTaskNotice = null;
+      try {
+        const bizDate = this.syncDailyDate || this._yesterdayDateStr();
+        const res = await fetch('/api/sync/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger: 'manual', biz_date: bizDate }),
+        });
+        if (!res.ok) throw new Error(await this._readApiError(res, `HTTP ${res.status}`));
+        const d = await res.json();
+        this.syncTaskId = d.sync_task_id;
+        await this.loadSyncRunsOnly();
+        if (d.run_id) {
+          await this.loadSyncRunDetail(d.run_id);
+        }
+        this.syncLiveRun = null;
+        this.syncLiveStages = [];
+        this.syncLiveProgress = null;
+        this.addLog('var(--primary)', `昨日同步任务已启动（${bizDate}）：${this.syncTaskId}`);
+        this._pollSyncTask(this.syncTaskId);
+      } catch (e) {
+        this.addLog('var(--danger)', `启动同步失败：${e.message || e}`);
+      } finally {
+        this.syncSubmittingDaily = false;
+      }
+    },
+    async retryTodayFailed() {
+      if (!this.syncTodayRun?.run_id || this.syncSubmittingRetry) return;
+      this.syncSubmittingRetry = true;
+      this.syncTaskNotice = null;
+      try {
+        const res = await fetch(`/api/sync/retry/${encodeURIComponent(this.syncTodayRun.run_id)}`, {
+          method: 'POST',
+        });
+        if (!res.ok) throw new Error(await this._readApiError(res, `HTTP ${res.status}`));
+        const d = await res.json();
+        this.syncTaskId = d.sync_task_id;
+        await this.loadSyncRunsOnly();
+        if (d.run_id) {
+          await this.loadSyncRunDetail(d.run_id);
+        }
+        this.syncLiveRun = null;
+        this.syncLiveStages = [];
+        this.syncLiveProgress = null;
+        this.addLog('var(--primary)', `失败账号补拉已启动：${this.syncTaskId}`);
+        this._pollSyncTask(this.syncTaskId);
+      } catch (e) {
+        this.addLog('var(--danger)', `启动补拉失败：${e.message || e}`);
+      } finally {
+        this.syncSubmittingRetry = false;
+      }
+    },
+    _parseReplayEmails() {
+      const raw = (this.syncReplayEmails || '').trim();
+      if (!raw) return [];
+      const items = raw
+        .split(/[\s,;，；\n\r\t]+/g)
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+      return [...new Set(items)];
+    },
+    async triggerSyncReplay() {
+      if (this.syncSubmittingReplay) return;
+      const emails = this._parseReplayEmails();
+      if (!emails.length) {
+        this.addLog('var(--warn)', '请先填写要补拉的账号邮箱');
+        return;
+      }
+      if (!this._isValidBizDate(this.syncReplayDate)) {
+        this.addLog('var(--warn)', '业务日期格式不正确，请使用 YYYY-MM-DD');
+        return;
+      }
+      this.syncSubmittingReplay = true;
+      this.syncTaskNotice = null;
+      try {
+        const res = await fetch('/api/sync/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trigger: 'replay',
+            biz_date: this.syncReplayDate || null,
+            emails,
+          }),
+        });
+        if (!res.ok) throw new Error(await this._readApiError(res, `HTTP ${res.status}`));
+        const d = await res.json();
+        this.syncTaskId = d.sync_task_id;
+        await this.loadSyncRunsOnly();
+        if (d.run_id) {
+          await this.loadSyncRunDetail(d.run_id);
+        }
+        this.syncLiveRun = null;
+        this.syncLiveStages = [];
+        this.syncLiveProgress = null;
+        this.addLog('var(--primary)', `已启动自定义补拉：${emails.length} 个账号`);
+        this._pollSyncTask(this.syncTaskId);
+      } catch (e) {
+        this.addLog('var(--danger)', `启动自定义补拉失败：${e.message || e}`);
+      } finally {
+        this.syncSubmittingReplay = false;
+      }
     },
 
     requestDeleteAccount(email) {
@@ -2646,6 +3690,11 @@ function app() {
     fmtTs(ts) {
       if (!ts) return '-';
       return new Date(ts * 1000).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    },
+    fmtTsFull(ts) {
+      if (!ts) return '-';
+      const d = new Date(ts * 1000);
+      return `${d.toLocaleDateString('zh-CN')} ${d.toLocaleTimeString('zh-CN', { hour12: false })}`;
     },
   };
 }

@@ -38,10 +38,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import exporter, fetcher
+from .bi_sync import run_daily_sync
 from .account_store import load_accounts
 from .config import SETTINGS
 from .logger import get
 from .models import Account, AccountSnapshot
+from .sync_log_store import get_default_sync_log_store
 
 log = get("web")
 
@@ -94,6 +96,7 @@ app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 _tasks: Dict[str, Dict[str, Any]] = {}
 _download_files: Dict[str, Path] = {}
 _task_lock = threading.Lock()
+_sync_runtime: Dict[str, Dict[str, Any]] = {}
 
 IMAP_HOST_DEFAULT = SETTINGS.default_imap_host
 IMAP_PORT_DEFAULT = SETTINGS.default_imap_port
@@ -117,6 +120,12 @@ class RunRequest(BaseModel):
     with_invoices: bool = True
     with_summary: bool = True
     with_raw: bool = False
+
+
+class SyncRunRequest(BaseModel):
+    biz_date: Optional[str] = None
+    trigger: str = "manual"
+    emails: List[str] = []
 
 
 # ─── 辅助 ─────────────────────────────────────────────────────────
@@ -248,6 +257,83 @@ def _parse_excel_bytes(data: bytes) -> List[AccountRow]:
 
 def _safe_filename(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._@-]+", "_", s)
+
+
+def _today_bj() -> str:
+    return datetime.datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
+
+
+def _has_running_sync_task() -> bool:
+    return any(t.get("status") == "running" for t in _sync_runtime.values())
+
+
+def _default_sync_biz_date() -> str:
+    return (datetime.datetime.now(BEIJING_TZ) - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _build_live_sync_snapshot(run_id: str) -> dict[str, Any]:
+    store = get_default_sync_log_store()
+    run = store.get_run(run_id)
+    if not run:
+        return {"run": None, "stages": [], "account_tail": [], "progress": None}
+    stages = store.list_stage_logs(run_id)
+    accounts = store.list_account_logs(run_id)
+    success = sum(1 for a in accounts if a.get("status") == "success")
+    failed = sum(1 for a in accounts if a.get("status") == "failed")
+    total = int(run.get("account_snapshot_total") or run.get("account_total") or 0)
+    done = len(accounts)
+    progress = {
+        "total": total,
+        "done": done,
+        "success": success,
+        "failed": failed,
+        "running": max(0, total - done),
+    }
+    return {
+        "run": run,
+        "stages": stages[-20:],
+        "account_tail": accounts[-30:],
+        "progress": progress,
+    }
+
+
+def _build_runtime_run_fallback(run_id: str) -> Optional[dict[str, Any]]:
+    """当 run 尚未落到 SQLite 时，返回内存任务态，避免前端 404。"""
+    with _task_lock:
+        items = list(_sync_runtime.values())
+    for t in items:
+        if str(t.get("run_id") or "") != run_id:
+            continue
+        task_status = str(t.get("status") or "running")
+        result = t.get("result") if isinstance(t.get("result"), dict) else {}
+        biz_status = str(result.get("status") or "")
+        if task_status == "running":
+            status = "running"
+        elif task_status == "failed":
+            status = "failed"
+        else:
+            status = biz_status or "finished"
+        return {
+            "run_id": run_id,
+            "biz_date": str(result.get("biz_date") or t.get("biz_date") or ""),
+            "trigger_type": str(result.get("trigger_type") or "manual"),
+            "status": status,
+            "started_at": int(t.get("started_at") or int(time.time())),
+            "ended_at": int(t.get("finished_at") or 0) or None,
+            "duration_sec": int(max(0, int((t.get("finished_at") or time.time())) - int(t.get("started_at") or time.time()))),
+            "account_total": int(result.get("account_total") or 0),
+            "account_snapshot_total": int(result.get("account_total") or 0),
+            "new_account_count": 0,
+            "account_success": int(result.get("account_success") or 0),
+            "account_failed": int(result.get("account_failed") or 0),
+            "event_total": int(result.get("event_total") or 0),
+            "ods_rows": int(result.get("ods_rows") or 0),
+            "dwd_rows": int(result.get("dwd_rows") or 0),
+            "error_summary": str(t.get("error") or result.get("message") or ""),
+            "created_at": int(t.get("started_at") or int(time.time())),
+            "updated_at": int(t.get("finished_at") or int(time.time())),
+        }
+    return None
 
 
 # ─── 路由 ─────────────────────────────────────────────────────────
@@ -750,6 +836,211 @@ async def api_status():
         running = sum(1 for t in _tasks.values() if t["status"] == "running")
         finished = sum(1 for t in _tasks.values() if t["status"] == "finished")
     return {"running": running, "finished": finished, "total_tasks": len(_tasks)}
+
+
+# ─── 每日同步监控 API ───────────────────────────────────────────────
+
+@app.get("/api/sync/today")
+async def sync_today():
+    store = get_default_sync_log_store()
+    run = store.get_latest_run(_today_bj())
+    if not run:
+        return {"run": None}
+    stages = store.list_stage_logs(run["run_id"])
+    failed_accounts = store.list_account_logs(run["run_id"], status="failed")
+    return {"run": run, "stages": stages, "failed_accounts": failed_accounts}
+
+
+@app.get("/api/sync/runs")
+async def sync_runs(limit: int = 30):
+    store = get_default_sync_log_store()
+    return {"runs": store.list_runs(limit=limit)}
+
+
+@app.get("/api/sync/run/{run_id}")
+async def sync_run_detail(run_id: str):
+    store = get_default_sync_log_store()
+    run = store.get_run(run_id)
+    if not run:
+        fallback = _build_runtime_run_fallback(run_id)
+        if fallback:
+            return {
+                "run": fallback,
+                "stages": [],
+                "accounts": [],
+            }
+        raise HTTPException(status_code=404, detail="run_id 不存在")
+    return {
+        "run": run,
+        "stages": store.list_stage_logs(run_id),
+        "accounts": store.list_account_logs(run_id),
+    }
+
+
+@app.post("/api/sync/run")
+async def sync_run(req: SyncRunRequest):
+    trigger_type = (req.trigger or "manual").strip().lower()
+    # 约束：scheduler/daily 必须是“昨日 + 全量账号”
+    if trigger_type in {"scheduler", "daily"}:
+        target_biz_date = _default_sync_biz_date()
+        target_emails: Optional[tuple[str, ...]] = None
+    elif trigger_type == "manual":
+        target_biz_date = req.biz_date or _default_sync_biz_date()
+        target_emails = None
+    else:
+        target_biz_date = req.biz_date or _default_sync_biz_date()
+        target_emails = tuple(req.emails) if req.emails else None
+
+    with _task_lock:
+        if _has_running_sync_task():
+            raise HTTPException(status_code=409, detail="已有同步任务在执行中，请稍后再试")
+        sync_task_id = secrets.token_hex(8)
+        sync_run_id = f"{target_biz_date.replace('-', '')}_{secrets.token_hex(4)}"
+        _sync_runtime[sync_task_id] = {
+            "status": "running",
+            "result": None,
+            "error": "",
+            "run_id": sync_run_id,
+            "biz_date": target_biz_date,
+            "started_at": int(time.time()),
+            "finished_at": None,
+        }
+    # 触发即落主日志：前端刷新列表无需等待后台线程进入业务逻辑
+    store = get_default_sync_log_store()
+    store.create_run(
+        run_id=sync_run_id,
+        biz_date=target_biz_date,
+        trigger_type=trigger_type or "manual",
+        account_total=0,
+        account_snapshot_total=0,
+        new_account_count=0,
+    )
+
+    def _worker() -> None:
+        try:
+            result = run_daily_sync(
+                biz_date=target_biz_date,
+                trigger_type=trigger_type or "manual",
+                emails=target_emails,
+                run_id=sync_run_id,
+            )
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "finished"
+                _sync_runtime[sync_task_id]["result"] = result
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            try:
+                store.add_stage(run_id=sync_run_id, stage="init", status="failed", message=err)
+                store.finish_run(
+                    run_id=sync_run_id,
+                    status="failed",
+                    account_success=0,
+                    account_failed=0,
+                    event_total=0,
+                    ods_rows=0,
+                    dwd_rows=0,
+                    error_summary=err,
+                )
+            except Exception:
+                pass
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "failed"
+                _sync_runtime[sync_task_id]["error"] = err
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {
+        "sync_task_id": sync_task_id,
+        "run_id": sync_run_id,
+        "biz_date": target_biz_date,
+    }
+
+
+@app.get("/api/sync/task/{sync_task_id}")
+async def sync_task_status(sync_task_id: str):
+    with _task_lock:
+        task = dict(_sync_runtime.get(sync_task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    run_id = task.get("run_id")
+    if run_id:
+        task["live"] = _build_live_sync_snapshot(str(run_id))
+    return task
+
+
+@app.post("/api/sync/retry/{run_id}")
+async def sync_retry(run_id: str, biz_date: Optional[str] = None):
+    store = get_default_sync_log_store()
+    src = store.get_run(run_id)
+    target_biz_date = biz_date or (str(src.get("biz_date")) if src else _default_sync_biz_date())
+    sync_run_id = f"{str(target_biz_date).replace('-', '')}_{secrets.token_hex(4)}"
+    with _task_lock:
+        if _has_running_sync_task():
+            raise HTTPException(status_code=409, detail="已有同步任务在执行中，请稍后再试")
+        sync_task_id = secrets.token_hex(8)
+        _sync_runtime[sync_task_id] = {
+            "status": "running",
+            "result": None,
+            "error": "",
+            "run_id": sync_run_id,
+            "biz_date": target_biz_date,
+            "started_at": int(time.time()),
+            "finished_at": None,
+        }
+    store.create_run(
+        run_id=sync_run_id,
+        biz_date=target_biz_date,
+        trigger_type="retry",
+        account_total=0,
+        account_snapshot_total=0,
+        new_account_count=0,
+    )
+
+    def _worker() -> None:
+        try:
+            failed_store = get_default_sync_log_store()
+            failed_emails = tuple(failed_store.list_failed_accounts(run_id))
+            if not failed_emails:
+                result = {"run_id": sync_run_id, "status": "skipped", "message": "无失败账号"}
+            else:
+                result = run_daily_sync(
+                    biz_date=target_biz_date,
+                    trigger_type="retry",
+                    emails=failed_emails,
+                    run_id=sync_run_id,
+                )
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "finished"
+                _sync_runtime[sync_task_id]["result"] = result
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            try:
+                store.add_stage(run_id=sync_run_id, stage="init", status="failed", message=err)
+                store.finish_run(
+                    run_id=sync_run_id,
+                    status="failed",
+                    account_success=0,
+                    account_failed=0,
+                    event_total=0,
+                    ods_rows=0,
+                    dwd_rows=0,
+                    error_summary=err,
+                )
+            except Exception:
+                pass
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "failed"
+                _sync_runtime[sync_task_id]["error"] = err
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {
+        "sync_task_id": sync_task_id,
+        "run_id": sync_run_id,
+        "biz_date": target_biz_date,
+    }
 
 
 def serve(host: str = "0.0.0.0", port: int = 8765, reload: bool = False):

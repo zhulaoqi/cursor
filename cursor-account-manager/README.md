@@ -20,6 +20,8 @@
 - ✅ **批量 API 调用**：拉取 usage / plan / 配额 / 使用事件（全量分页）/ 订阅 / 发票，并发可控
 - ✅ **Excel 多 Sheet 导出**：账号概览 / 使用明细（含 token 数 / 成本 USD）/ 发票清单
 - ✅ **每账号独立目录**：`dump` 命令一键生成账号文件夹 + 发票 PDF + 全账号汇总
+- ✅ **BI 日同步（StarRocks）**：按日落库 ODS/DWD，支持失败账号补拉
+- ✅ **同步监控页**：查看今日同步状态、阶段时间、失败账号并一键补拉
 
 ---
 
@@ -81,6 +83,19 @@ TWOCAPTCHA_API_KEY=
 
 HEADLESS=true
 VERIFICATION_CODE_TIMEOUT=120
+
+# BI 日同步（StarRocks）
+BI_SYNC_ENABLE=true
+BI_SYNC_DB_URL=jdbc:mysql://host:9030/database
+BI_SYNC_DB_USERNAME=
+BI_SYNC_DB_PASSWORD=
+BI_SYNC_CRON=30 1 * * *
+BI_SYNC_LOCK_FILE=/tmp/cam_bi_sync.lock
+
+# 告警机器人（可选）
+ALERT_BOT_ENABLE=false
+ALERT_BOT_PROVIDER=feishu
+ALERT_TO_EMAILS=alice@company.com,bob@company.com
 ```
 
 > 非飞书类邮箱（如 awsapps / WorkMail）若未显式传 `timeout`，系统会自动延长等待窗口（至少 240s）以适配慢投递。
@@ -191,6 +206,31 @@ data/exports/accounts/
 # 独立测试 IMAP 连接（不启动浏览器）
 .venv/bin/python -m cam test-imap --email cursor183@eclicktech.com.cn
 ```
+
+### 5. BI 日同步（StarRocks）
+
+```bash
+# 手动执行一次（默认同步昨天，按北京时间）
+.venv/bin/python -m cam sync-daily
+
+# 指定日期执行
+.venv/bin/python -m cam sync-daily --biz-date 2026-05-11
+
+# 按 run_id 重跑失败账号
+.venv/bin/python -m cam sync-retry --run-id 20260511_ab12cd34
+
+# 调度模式：执行一次调度任务
+.venv/bin/python -m cam sync-scheduler-once
+
+# 调度模式：常驻循环（MVP）
+.venv/bin/python -m cam sync-scheduler-loop
+```
+
+Web UI 中可点击“同步监控”查看：
+- 今日同步是否成功
+- 开始/结束时间
+- 阶段日志
+- 失败账号与一键补拉
 
 ---
 

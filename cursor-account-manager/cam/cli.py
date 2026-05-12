@@ -16,6 +16,8 @@ from .account_store import filter_accounts, load_accounts
 from .config import SETTINGS
 from .logger import get, setup
 from .models import Account, AccountSnapshot, TokenAcquisitionError
+from .bi_sync import retry_failed_accounts, run_daily_sync
+from .scheduler import run_scheduler_loop, run_scheduler_once_for_yesterday
 from .token_manager import get_default_manager
 from .token_store import get_default_store
 
@@ -353,6 +355,46 @@ def cmd_web(host: str, port: int, reload: bool) -> None:
 
 def main() -> None:
     cli()
+
+
+# ═══ sync-daily / sync-retry（BI 日同步）════════════════════════════
+
+@cli.command("sync-daily")
+@click.option("--biz-date", default="", help="业务日期 YYYY-MM-DD；默认昨天（北京时间）")
+@click.option("--trigger", default="manual", help="触发类型（manual/scheduler/retry）")
+@click.option("--email", "email", multiple=True, help="仅同步指定账号（可重复）")
+def cmd_sync_daily(biz_date: str, trigger: str, email: tuple[str, ...]) -> None:
+    """执行每日明细同步（CSV/API 拉取 -> StarRocks ODS/DWD）。"""
+    result = run_daily_sync(
+        biz_date=biz_date or None,
+        trigger_type=trigger or "manual",
+        emails=email or None,
+    )
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@cli.command("sync-retry")
+@click.option("--run-id", required=True, help="失败重跑的来源 run_id")
+@click.option("--biz-date", default="", help="可选：覆盖重跑日期 YYYY-MM-DD")
+def cmd_sync_retry(run_id: str, biz_date: str) -> None:
+    """按 run_id 重跑失败账号。"""
+    result = retry_failed_accounts(run_id=run_id, biz_date=biz_date or None)
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@cli.command("sync-scheduler-once")
+def cmd_sync_scheduler_once() -> None:
+    """按调度触发方式执行一次（默认同步昨天）。"""
+    result = run_scheduler_once_for_yesterday()
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@cli.command("sync-scheduler-loop")
+@click.option("--poll-interval", default=30, type=int, help="轮询间隔秒数（默认30）")
+def cmd_sync_scheduler_loop(poll_interval: int) -> None:
+    """启动本地常驻调度循环（MVP）。"""
+    click.echo("启动同步调度循环（Ctrl+C 停止）")
+    run_scheduler_loop(poll_interval_sec=poll_interval)
 
 
 if __name__ == "__main__":

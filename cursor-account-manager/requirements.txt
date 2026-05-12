@@ -2,6 +2,7 @@
 # 修复 Runtime.enable / Console.enable / 命令行 flag 泄漏，能过 Cloudflare Turnstile
 patchright>=1.48
 requests>=2.31
+pymysql>=1.1
 python-dotenv>=1.0
 click>=8.1
 

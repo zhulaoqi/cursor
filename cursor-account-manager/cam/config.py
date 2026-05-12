@@ -67,6 +67,21 @@ class Settings:
     exports_dir: Path
     headless: bool
     verification_code_timeout: int
+    bi_sync_enable: bool
+    bi_sync_db_url: str
+    bi_sync_db_username: str
+    bi_sync_db_password: str
+    bi_sync_batch_size: int
+    bi_sync_retry_times: int
+    bi_sync_account_timeout_sec: int
+    bi_sync_biz_tz: str
+    bi_sync_cron: str
+    bi_sync_lock_file: str
+    alert_bot_client_id: str
+    alert_bot_secret: str
+    alert_bot_provider: str
+    alert_bot_enable: bool
+    alert_to_emails: str
 
 
 def load_settings() -> Settings:
@@ -92,6 +107,21 @@ def load_settings() -> Settings:
         exports_dir=_path("EXPORTS_DIR", "data/exports"),
         headless=_env_bool("HEADLESS", True),
         verification_code_timeout=_env_int("VERIFICATION_CODE_TIMEOUT", 120),
+        bi_sync_enable=_env_bool("BI_SYNC_ENABLE", False),
+        bi_sync_db_url=os.environ.get("BI_SYNC_DB_URL", "").strip(),
+        bi_sync_db_username=os.environ.get("BI_SYNC_DB_USERNAME", "").strip(),
+        bi_sync_db_password=os.environ.get("BI_SYNC_DB_PASSWORD", "").strip(),
+        bi_sync_batch_size=_env_int("BI_SYNC_BATCH_SIZE", 5000),
+        bi_sync_retry_times=_env_int("BI_SYNC_RETRY_TIMES", 3),
+        bi_sync_account_timeout_sec=_env_int("BI_SYNC_ACCOUNT_TIMEOUT_SEC", 600),
+        bi_sync_biz_tz=os.environ.get("BI_SYNC_BIZ_TZ", "Asia/Shanghai").strip() or "Asia/Shanghai",
+        bi_sync_cron=os.environ.get("BI_SYNC_CRON", "30 1 * * *").strip() or "30 1 * * *",
+        bi_sync_lock_file=os.environ.get("BI_SYNC_LOCK_FILE", "/tmp/cam_bi_sync.lock").strip() or "/tmp/cam_bi_sync.lock",
+        alert_bot_client_id=os.environ.get("ALERT_BOT_CLIENT_ID", "").strip(),
+        alert_bot_secret=os.environ.get("ALERT_BOT_SECRET", "").strip(),
+        alert_bot_provider=os.environ.get("ALERT_BOT_PROVIDER", "feishu").strip() or "feishu",
+        alert_bot_enable=_env_bool("ALERT_BOT_ENABLE", False),
+        alert_to_emails=os.environ.get("ALERT_TO_EMAILS", "").strip(),
     )
 
 
