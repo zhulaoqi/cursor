@@ -85,7 +85,7 @@
 
 告警机器人接入信息（当前）：
 - `client_id`: `cli_a933b8d6d7b81bc3`
-- `secret`: `hDkboxuFdSm2uledMDCSJeffeC7I5UUR`
+- `secret`: `******`
 
 执行要求：
 - 按环境变量方式注入，不在业务代码中硬编码。
