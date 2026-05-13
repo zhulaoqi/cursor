@@ -111,7 +111,7 @@ class StarRocksLoader:
                     input_tokens_w_cache_write  BIGINT      NULL,
                     output_tokens           BIGINT          NULL,
                     total_tokens            BIGINT          NULL,
-                    cost_usd                DECIMAL(18,6)   NULL,
+                    cost                    DECIMAL(18,6)   NULL,
                     raw_event_json          JSON            NULL,
                     ingest_time             DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -152,7 +152,7 @@ class StarRocksLoader:
                     input_tokens_w_cache_write  BIGINT      NULL,
                     output_tokens           BIGINT          NULL,
                     total_tokens            BIGINT          NULL,
-                    cost_usd                DECIMAL(18,6)   NULL,
+                    cost                    DECIMAL(18,6)   NULL,
                     src_run_id              VARCHAR(128)    NOT NULL,
                     etl_time                DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -365,7 +365,7 @@ class StarRocksLoader:
         row["input_tokens_w_cache_write"] = _to_int_or_none(row.get("input_tokens_w_cache_write"))
         row["output_tokens"] = _to_int_or_none(row.get("output_tokens"))
         row["total_tokens"] = _to_int_or_none(row.get("total_tokens"))
-        row["cost_usd"] = _fit_decimal(row.get("cost_usd"), precision=18, scale=6)
+        row["cost"] = _fit_decimal(row.get("cost"), precision=18, scale=6)
         for dt_key in ("event_time",):
             v = row.get(dt_key)
             if isinstance(v, datetime):
@@ -386,12 +386,12 @@ class StarRocksLoader:
                 "dt, run_id, account_email, event_time, "
                 "first_api_request_id, environment, kind, model_name, max_mode, "
                 "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
-                "output_tokens, total_tokens, cost_usd, raw_event_json"
+                "output_tokens, total_tokens, cost, raw_event_json"
                 ") VALUES ("
                 "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
                 "%(first_api_request_id)s, %(environment)s, %(kind)s, %(model_name)s, %(max_mode)s, "
                 "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
-                "%(output_tokens)s, %(total_tokens)s, %(cost_usd)s, %(raw_event_json)s"
+                "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
                 ")"
             )
             try:
@@ -425,12 +425,12 @@ class StarRocksLoader:
                 "dt, run_id, account_email, event_time, "
                 "first_api_request_id, environment, kind, model_name, max_mode, "
                 "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
-                "output_tokens, total_tokens, cost_usd, raw_event_json"
+                "output_tokens, total_tokens, cost, raw_event_json"
                 ") VALUES ("
                 "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
                 "%(first_api_request_id)s, %(environment)s, %(kind)s, %(model_name)s, %(max_mode)s, "
                 "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
-                "%(output_tokens)s, %(total_tokens)s, %(cost_usd)s, %(raw_event_json)s"
+                "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
                 ")"
             )
             try:
@@ -453,7 +453,7 @@ class StarRocksLoader:
                         dt, account_email, event_unique_key, event_time,
                         first_api_request_id, environment, kind, model_name, max_mode,
                         input_tokens_wo_cache_write, input_tokens_w_cache_write,
-                        output_tokens, total_tokens, cost_usd, src_run_id
+                        output_tokens, total_tokens, cost, src_run_id
                     )
                     SELECT
                         dt,
@@ -464,7 +464,7 @@ class StarRocksLoader:
                             date_format(event_time, '%%Y-%%m-%%d %%H:%%i:%%s'), '|',
                             ifnull(model_name, ''), '|',
                             ifnull(cast(total_tokens as varchar(32)), '0'), '|',
-                            ifnull(cast(cost_usd as varchar(64)), '0')
+                            ifnull(cast(cost as varchar(64)), '0')
                         )) AS event_unique_key,
                         event_time,
                         first_api_request_id,
@@ -476,7 +476,7 @@ class StarRocksLoader:
                         input_tokens_w_cache_write,
                         output_tokens,
                         total_tokens,
-                        cost_usd,
+                        cost,
                         run_id
                     FROM {self.db}.{self.ODS_TABLE}
                     WHERE dt = %s
@@ -510,7 +510,7 @@ class StarRocksLoader:
                         dt, account_email, event_unique_key, event_time,
                         first_api_request_id, environment, kind, model_name, max_mode,
                         input_tokens_wo_cache_write, input_tokens_w_cache_write,
-                        output_tokens, total_tokens, cost_usd, src_run_id
+                        output_tokens, total_tokens, cost, src_run_id
                     )
                     SELECT
                         dt,
@@ -521,7 +521,7 @@ class StarRocksLoader:
                             date_format(event_time, '%%Y-%%m-%%d %%H:%%i:%%s'), '|',
                             ifnull(model_name, ''), '|',
                             ifnull(cast(total_tokens as varchar(32)), '0'), '|',
-                            ifnull(cast(cost_usd as varchar(64)), '0')
+                            ifnull(cast(cost as varchar(64)), '0')
                         )) AS event_unique_key,
                         event_time,
                         first_api_request_id,
@@ -533,7 +533,7 @@ class StarRocksLoader:
                         input_tokens_w_cache_write,
                         output_tokens,
                         total_tokens,
-                        cost_usd,
+                        cost,
                         run_id
                     FROM {self.db}.{self.ODS_TABLE}
                     WHERE dt = %s AND account_email = %s

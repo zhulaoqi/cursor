@@ -169,8 +169,8 @@ def _rows_from_usage_csv(
                 "total_tokens": _to_int(
                     _pick_value(row, ("total_tokens", "totaltokens", "total tokens"))
                 ),
-                "cost_usd": _to_float(
-                    _pick_value(row, ("cost_usd", "cost", "total_cost_usd"))
+                "cost": _to_float(
+                    _pick_value(row, ("cost", "cost_usd", "total_cost_usd"))
                 ),
                 "raw_event_json": json.dumps(row, ensure_ascii=False),
             }
@@ -218,7 +218,7 @@ def _rows_from_usage_events(
                 ),
                 "output_tokens": _to_int(token_usage.get("outputTokens")),
                 "total_tokens": _to_int(token_usage.get("totalTokens")),
-                "cost_usd": _to_float(token_usage.get("totalCents")) / 100 if token_usage.get("totalCents") is not None else None,
+                "cost": _to_float(token_usage.get("totalCents")) / 100 if token_usage.get("totalCents") is not None else None,
                 "raw_event_json": json.dumps(ev, ensure_ascii=False),
             }
         )
