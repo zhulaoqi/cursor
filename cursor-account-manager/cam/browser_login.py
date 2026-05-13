@@ -180,6 +180,7 @@ def _launch(pw: Playwright, headless: bool, proxy: str, email_addr: str):
         "no_viewport": True,
         "ignore_default_args": ignore_args,
     }
+    log.info(f"浏览器启动模式: {'headless' if headless else 'headed'}")
 
     if has_chrome:
         kwargs["channel"] = "chrome"
@@ -802,6 +803,12 @@ def login(
     失败抛 BrowserLoginError。全局 Semaphore 串行，防资源爆炸。
     """
     headless = SETTINGS.headless if headless is None else headless
+    # 桌面平台默认强制有痕登录（更容易通过 Turnstile，也便于人工观察）
+    # 若确实要无头登录，可显式设置 BROWSER_LOGIN_FORCE_HEADED=false。
+    force_headed = os.environ.get("BROWSER_LOGIN_FORCE_HEADED", "true").strip().lower() in ("1", "true", "yes", "on")
+    if force_headed and _requires_system_chrome() and headless:
+        log.warning("检测到桌面平台 HEADLESS=true，登录阶段强制切换为有痕模式")
+        headless = False
     proxy = proxy if proxy is not None else SETTINGS.proxy
 
     with _LOGIN_SEMAPHORE:

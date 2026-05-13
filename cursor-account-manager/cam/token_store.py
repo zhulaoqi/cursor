@@ -182,6 +182,23 @@ class TokenStore:
                 (email, int(time.time()), action, detail[:2000]),
             )
 
+    def get_latest_error_detail(self, email: str) -> str:
+        """返回账号最近一次失败原因，优先登录/刷新错误日志。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT detail
+                FROM audit_log
+                WHERE email = ?
+                  AND action IN ('browser_login_fail', 'browser_login_error', 'refresh_fail', 'refresh_error')
+                  AND COALESCE(detail, '') <> ''
+                ORDER BY ts DESC, id DESC
+                LIMIT 1
+                """,
+                (email,),
+            ).fetchone()
+            return (row["detail"] or "").strip() if row else ""
+
     # ─── Accounts CRUD ───────────────────────────────────────────────
 
     def list_accounts(self) -> list[dict]:

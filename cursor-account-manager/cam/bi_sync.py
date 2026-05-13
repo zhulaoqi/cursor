@@ -292,7 +292,31 @@ def run_daily_sync(
     ok_count = 0
     fail_count = 0
     error_messages: list[str] = []
+    fetch_fail_count = 0
+    load_fail_count = 0
+    load_ok_count = 0
+    ods_rows = 0
+    dwd_rows = 0
     log_store.add_stage(run_id=run_id, stage="fetch", status="start")
+    log_store.add_stage(run_id=run_id, stage="load_ods", status="start")
+    log_store.add_stage(run_id=run_id, stage="load_dwd", status="start")
+    try:
+        loader.ensure_tables()
+    except Exception as e:
+        msg = f"init_load_failed:{type(e).__name__}:{e}"
+        log_store.add_stage(run_id=run_id, stage="load_ods", status="failed", message=msg)
+        log_store.add_stage(run_id=run_id, stage="load_dwd", status="failed", message=msg)
+        log_store.finish_run(
+            run_id=run_id,
+            status="failed",
+            account_success=0,
+            account_failed=snapshot_total,
+            event_total=0,
+            ods_rows=0,
+            dwd_rows=0,
+            error_summary=msg[:2000],
+        )
+        raise
     for item in snapshot:
         acc = item.account
         acc_start = int(time.time())
@@ -330,21 +354,55 @@ def run_daily_sync(
                 last_err = f"{type(e).__name__}: {e}"
         acc_end = int(time.time())
         if account_rows or last_err == "":
-            ok_count += 1
-            all_rows.extend(account_rows)
-            log_store.add_account_log(
-                run_id=run_id,
-                account_email=acc.email,
-                account_source=item.source,
-                is_new_account=item.is_new,
-                status="success",
-                started_at=acc_start,
-                ended_at=acc_end,
-                fetch_rows=len(account_rows),
-                load_rows=0,
-            )
+            # 按账号+日期增量落库：账号拉完即入 ODS/DWD，避免整天全量在末尾一次性写入。
+            try:
+                normalized = [loader.normalize_decimal_fields(r) for r in account_rows]
+                loaded_ods = loader.replace_ods_rows_for_account(
+                    biz_date=target_date,
+                    account_email=acc.email,
+                    rows=normalized,
+                )
+                loaded_dwd = loader.rebuild_dwd_for_account_date(
+                    biz_date=target_date,
+                    account_email=acc.email,
+                )
+                ods_rows += loaded_ods
+                dwd_rows += loaded_dwd
+                load_ok_count += 1
+                ok_count += 1
+                all_rows.extend(account_rows)
+                log_store.add_account_log(
+                    run_id=run_id,
+                    account_email=acc.email,
+                    account_source=item.source,
+                    is_new_account=item.is_new,
+                    status="success",
+                    started_at=acc_start,
+                    ended_at=acc_end,
+                    fetch_rows=len(account_rows),
+                    load_rows=loaded_dwd,
+                )
+            except Exception as e:
+                fail_count += 1
+                load_fail_count += 1
+                err = f"{acc.email}:load_failed:{type(e).__name__}:{e}"
+                error_messages.append(err)
+                log_store.add_account_log(
+                    run_id=run_id,
+                    account_email=acc.email,
+                    account_source=item.source,
+                    is_new_account=item.is_new,
+                    status="failed",
+                    started_at=acc_start,
+                    ended_at=acc_end,
+                    fetch_rows=len(account_rows),
+                    load_rows=0,
+                    error_message=f"load_failed:{type(e).__name__}:{e}",
+                )
+                log.warning(f"[{run_id}] {err}")
         else:
             fail_count += 1
+            fetch_fail_count += 1
             err = f"{acc.email}:{last_err}"
             error_messages.append(err)
             log_store.add_account_log(
@@ -364,27 +422,21 @@ def run_daily_sync(
     log_store.add_stage(
         run_id=run_id,
         stage="fetch",
-        status="success" if fail_count == 0 else "failed",
+        status="success" if fetch_fail_count == 0 else "failed",
         message=f"ok={ok_count},fail={fail_count},rows={len(all_rows)}",
     )
-
-    ods_rows = 0
-    dwd_rows = 0
-    try:
-        log_store.add_stage(run_id=run_id, stage="load_ods", status="start")
-        loader.ensure_tables()
-        normalized = [loader.normalize_decimal_fields(r) for r in all_rows]
-        ods_rows = loader.replace_ods_rows(biz_date=target_date, rows=normalized)
-        log_store.add_stage(run_id=run_id, stage="load_ods", status="success", message=f"rows={ods_rows}")
-
-        log_store.add_stage(run_id=run_id, stage="load_dwd", status="start")
-        dwd_rows = loader.rebuild_dwd_for_date(biz_date=target_date)
-        log_store.add_stage(run_id=run_id, stage="load_dwd", status="success", message=f"rows={dwd_rows}")
-    except Exception as e:
-        msg = f"load_failed:{type(e).__name__}:{e}"
-        log_store.add_stage(run_id=run_id, stage="load_dwd", status="failed", message=msg)
-        error_messages.append(msg)
-        fail_count = max(1, fail_count)
+    log_store.add_stage(
+        run_id=run_id,
+        stage="load_ods",
+        status="success" if load_fail_count == 0 else "failed",
+        message=f"ok={load_ok_count},fail={load_fail_count},rows={ods_rows}",
+    )
+    log_store.add_stage(
+        run_id=run_id,
+        stage="load_dwd",
+        status="success" if load_fail_count == 0 else "failed",
+        message=f"ok={load_ok_count},fail={load_fail_count},rows={dwd_rows}",
+    )
 
     if fail_count == 0:
         status = "success"

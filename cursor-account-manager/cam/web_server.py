@@ -432,6 +432,23 @@ async def run_task(req: RunRequest):
             with_raw=req.with_raw,
         )
 
+        def _summarize_snapshot_errors(errors: dict[str, str]) -> str:
+            """将 snap.errors 压缩成可读提示，优先展示具体错误内容。"""
+            if not errors:
+                return ""
+            parts: list[str] = []
+            for key, val in errors.items():
+                detail = str(val or "").replace("\n", " ").strip()
+                if len(detail) > 160:
+                    detail = detail[:157] + "..."
+                if detail:
+                    parts.append(f"{key}: {detail}")
+                else:
+                    parts.append(key)
+            if len(parts) > 2:
+                return "；".join(parts[:2]) + f"；另有 {len(parts) - 2} 项错误"
+            return "；".join(parts)
+
         def _fetch_one(acc: Account):
             _push(task_id, "progress", {"email": acc.email, "phase": "fetching"})
             try:
@@ -443,18 +460,19 @@ async def run_task(req: RunRequest):
                 )
                 has_errors = bool(snap.errors)
                 err_keys   = ",".join(snap.errors.keys()) if has_errors else ""
+                err_detail = _summarize_snapshot_errors(snap.errors) if has_errors else ""
                 with snap_lock:
                     snaps.append(snap)
                     task["done"] += 1
                     if has_errors:
                         _warn_emails.add(acc.email)
-                        task["fail"].append({"email": acc.email, "error": err_keys})
+                        task["fail"].append({"email": acc.email, "error": err_detail or err_keys})
                 if has_errors:
                     for k, v in snap.errors.items():
                         log.warning(f"[{acc.email}] 拉取失败 {k}: {v}")
                     _push(task_id, "progress", {
                         "email": acc.email, "phase": "fetched_warn",
-                        "msg": f"拉取部分失败: {err_keys}",
+                        "msg": f"拉取部分失败: {err_detail or err_keys}",
                     })
                 else:
                     # 拉取完成，等待后续账单下载后再标 done

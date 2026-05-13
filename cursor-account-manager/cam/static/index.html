@@ -2121,7 +2121,10 @@
             <template x-for="a in syncFailedAccounts" :key="a.id">
               <tr>
                 <td class="mono" x-text="a.account_email"></td>
-                <td style="max-width:520px; overflow:hidden; text-overflow:ellipsis;" x-text="a.error_message || '-'"></td>
+                <td
+                  style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                  :title="a.error_message || '-'"
+                  x-text="a.error_message || '-'"></td>
                 <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
               </tr>
             </template>
@@ -2136,23 +2139,89 @@
         <table>
           <thead><tr><th>run_id</th><th>日期</th><th>状态</th><th>成功/失败</th><th>开始</th><th>操作</th></tr></thead>
           <tbody>
-            <template x-for="r in syncRuns" :key="r.run_id">
-              <tr @click="loadSyncRunDetail(r.run_id)" style="cursor:pointer;">
+            <template x-for="r in syncRunsPaged" :key="r.run_id">
+              <tr @click="toggleSyncRunInlineDetail(r.run_id)" style="cursor:pointer;">
                 <td class="mono" x-text="r.run_id"></td>
                 <td x-text="r.biz_date"></td>
                 <td><span class="badge" :class="syncStatusClass(r.status)" x-text="syncStatusLabel(r.status)"></span></td>
                 <td x-text="`${r.account_success||0}/${r.account_failed||0}`"></td>
                 <td x-text="fmtTsFull(r.started_at)"></td>
                 <td>
-                  <button type="button" class="log-link-tag" @click.stop="loadSyncRunDetail(r.run_id)">
+                  <button type="button" class="log-link-tag" @click.stop="toggleSyncRunInlineDetail(r.run_id)">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                    查看日志
+                    <span x-text="syncRunInlineDetailId === r.run_id ? '收起日志' : '查看日志'"></span>
                   </button>
                 </td>
               </tr>
             </template>
           </tbody>
         </table>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px; gap:10px; flex-wrap:wrap;">
+        <div style="font-size:12px; color:var(--muted);" x-text="`第 ${syncRunsPage} / ${syncRunsTotalPages} 页，共 ${syncRuns.length} 条`"></div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsPrevPage()" :disabled="syncRunsPage<=1">上一页</button>
+          <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsNextPage()" :disabled="syncRunsPage>=syncRunsTotalPages">下一页</button>
+        </div>
+      </div>
+
+      <div x-show="syncRunInlineDetailId" style="margin-top:12px; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:12px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="mono" x-text="syncRunInlineDetail?.run_id || syncRunInlineDetailId"></span>
+            <span class="badge" :class="syncStatusClass(syncRunInlineDetail?.status)" x-text="syncStatusLabel(syncRunInlineDetail?.status)"></span>
+            <span style="font-size:12px; color:var(--muted);" x-text="`成功/失败 ${syncRunInlineDetail?.account_success||0}/${syncRunInlineDetail?.account_failed||0}`"></span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" @click="closeSyncRunInlineDetail()">收起</button>
+        </div>
+        <div x-show="syncRunInlineLoading" style="font-size:13px; color:var(--muted);">日志加载中...</div>
+        <div x-show="!syncRunInlineLoading">
+          <div x-show="syncRunInlineStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
+          <div x-show="syncRunInlineStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="sync-log-head">
+              <span>阶段</span>
+              <span>状态 / 时间 / 耗时</span>
+            </div>
+            <template x-for="(s, idx) in syncRunInlineStages" :key="`${s.id}-${s.ts}`">
+              <div>
+                <div class="stage-row">
+                  <span class="mono" x-text="syncStageLabel(s.stage)"></span>
+                  <span class="stage-meta">
+                    <span class="stage-status-text" :style="`color:${syncStatusColor(s.status)}`">
+                      <span class="dot" :style="`background:${syncStatusColor(s.status)}`"></span>
+                      <span x-text="syncStatusLabel(s.status)"></span>
+                    </span>
+                    <span x-text="fmtTsFull(s.ts)"></span>
+                    <span x-text="syncStageElapsedFrom(syncRunInlineStages, idx)"></span>
+                  </span>
+                </div>
+                <div class="stage-msg" x-show="!syncLogCompact && (s.message || '').trim().length > 0" x-text="s.message"></div>
+              </div>
+            </template>
+          </div>
+
+          <div style="margin-top:12px;">
+            <div style="font-size:13px; font-weight:600; margin-bottom:6px;">失败账号</div>
+            <div x-show="syncRunInlineFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
+            <div x-show="syncRunInlineFailedAccounts.length>0" class="overflow-x-auto">
+              <table>
+                <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
+                <tbody>
+                  <template x-for="a in syncRunInlineFailedAccounts" :key="a.id">
+                    <tr>
+                      <td class="mono" x-text="a.account_email"></td>
+                      <td
+                        style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                        :title="a.error_message || '-'"
+                        x-text="a.error_message || '-'"></td>
+                      <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2406,6 +2475,14 @@ function app() {
     syncStages: [],
     syncFailedAccounts: [],
     syncRuns: [],
+    syncRunsPage: 1,
+    syncRunsPageSize: 10,
+    syncRunInlineDetailId: '',
+    syncRunInlineDetail: null,
+    syncRunInlineStages: [],
+    syncRunInlineFailedAccounts: [],
+    syncRunInlineLoading: false,
+    syncInlineRunDetailTimer: null,
     syncTaskId: null,
     syncSubmittingDaily: false,
     syncSubmittingReplay: false,
@@ -2445,9 +2522,20 @@ function app() {
       if (liveStatus === 'running' || liveStatus === 'start') return true;
       return false;
     },
+    get syncRunsTotalPages() {
+      const total = Math.ceil((this.syncRuns?.length || 0) / this.syncRunsPageSize);
+      return Math.max(1, total);
+    },
+    get syncRunsPaged() {
+      const list = this.syncRuns || [];
+      const start = (this.syncRunsPage - 1) * this.syncRunsPageSize;
+      return list.slice(start, start + this.syncRunsPageSize);
+    },
 
     // ── 导航 ──
     goList() {
+      this._stopSyncRunDetailPolling();
+      this._stopSyncInlineRunDetailPolling();
       this.view = 'list';
       this.uploadPreview = [];
       this.uploadError = '';
@@ -2457,6 +2545,8 @@ function app() {
     },
 
     goUpload() {
+      this._stopSyncRunDetailPolling();
+      this._stopSyncInlineRunDetailPolling();
       this.view = 'upload';
       this.uploadPreview = [];
       this.uploadError = '';
@@ -2569,6 +2659,21 @@ function app() {
         this._requestSelectionBarSpacerSync();
       } catch {}
     },
+    _setSyncRuns(runs) {
+      this.syncRuns = Array.isArray(runs) ? runs : [];
+      const totalPages = this.syncRunsTotalPages;
+      if (this.syncRunsPage > totalPages) this.syncRunsPage = totalPages;
+      if (this.syncRunsPage < 1) this.syncRunsPage = 1;
+      if (this.syncRunInlineDetailId && !this.syncRuns.some(r => r.run_id === this.syncRunInlineDetailId)) {
+        this.closeSyncRunInlineDetail();
+      }
+    },
+    syncRunsPrevPage() {
+      this.syncRunsPage = Math.max(1, this.syncRunsPage - 1);
+    },
+    syncRunsNextPage() {
+      this.syncRunsPage = Math.min(this.syncRunsTotalPages, this.syncRunsPage + 1);
+    },
     async loadSyncRunsOnly() {
       try {
         const [runsRes, runningRes] = await Promise.all([
@@ -2577,7 +2682,7 @@ function app() {
         ]);
         if (runsRes.ok) {
           const d2 = await runsRes.json();
-          this.syncRuns = d2.runs || [];
+          this._setSyncRuns(d2.runs || []);
         }
         if (runningRes.ok) {
           const dr = await runningRes.json();
@@ -2616,7 +2721,7 @@ function app() {
         }
         if (runsRes.ok) {
           const d2 = await runsRes.json();
-          this.syncRuns = d2.runs || [];
+          this._setSyncRuns(d2.runs || []);
         }
         if (runningRes.ok) {
           const dr = await runningRes.json();
@@ -2651,6 +2756,74 @@ function app() {
         this.addLog('var(--danger)', `加载 run 详情失败：${e.message || e}`);
       }
     },
+    closeSyncRunInlineDetail() {
+      this.syncRunInlineDetailId = '';
+      this.syncRunInlineDetail = null;
+      this.syncRunInlineStages = [];
+      this.syncRunInlineFailedAccounts = [];
+      this.syncRunInlineLoading = false;
+      this._stopSyncInlineRunDetailPolling();
+    },
+    async toggleSyncRunInlineDetail(runId) {
+      if (!runId) return;
+      if (this.syncRunInlineDetailId === runId) {
+        this.closeSyncRunInlineDetail();
+        return;
+      }
+      await this._loadSyncRunInlineDetail(runId);
+    },
+    async _loadSyncRunInlineDetail(runId) {
+      if (!runId) return;
+      this.syncRunInlineDetailId = runId;
+      this.syncRunInlineLoading = true;
+      try {
+        const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+        const run = d.run || null;
+        this.syncRunInlineDetail = run;
+        this.syncRunInlineStages = d.stages || [];
+        this.syncRunInlineFailedAccounts = (d.accounts || []).filter(a => a.status === 'failed');
+        if (String(run?.status || '').toLowerCase() === 'running') {
+          this._startSyncInlineRunDetailPolling(runId);
+        } else {
+          this._stopSyncInlineRunDetailPolling();
+        }
+      } catch (e) {
+        this.addLog('var(--danger)', `加载行内日志失败：${e.message || e}`);
+      } finally {
+        this.syncRunInlineLoading = false;
+      }
+    },
+    _stopSyncInlineRunDetailPolling() {
+      if (this.syncInlineRunDetailTimer) {
+        clearInterval(this.syncInlineRunDetailTimer);
+        this.syncInlineRunDetailTimer = null;
+      }
+    },
+    _startSyncInlineRunDetailPolling(runId) {
+      if (!runId) return;
+      this._stopSyncInlineRunDetailPolling();
+      this.syncInlineRunDetailTimer = setInterval(async () => {
+        if (this.view !== 'sync' || this.syncRunInlineDetailId !== runId) {
+          this._stopSyncInlineRunDetailPolling();
+          return;
+        }
+        try {
+          const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          const run = d.run || null;
+          this.syncRunInlineDetail = run;
+          this.syncRunInlineStages = d.stages || [];
+          this.syncRunInlineFailedAccounts = (d.accounts || []).filter(a => a.status === 'failed');
+          this._upsertSyncRun(run);
+          if (String(run?.status || '').toLowerCase() !== 'running') {
+            this._stopSyncInlineRunDetailPolling();
+          }
+        } catch {}
+      }, 3000);
+    },
     _setSyncTaskNotice(title, message, color = 'var(--primary)') {
       this.syncTaskNotice = {
         title,
@@ -2681,6 +2854,10 @@ function app() {
       if (!runId) return;
       this._stopSyncRunDetailPolling();
       this.syncRunDetailTimer = setInterval(async () => {
+        if (this.view !== 'sync') {
+          this._stopSyncRunDetailPolling();
+          return;
+        }
         try {
           const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
           if (!res.ok) return;
@@ -2709,6 +2886,8 @@ function app() {
       if (this.syncRuns.length > 30) {
         this.syncRuns = this.syncRuns.slice(0, 30);
       }
+      const totalPages = this.syncRunsTotalPages;
+      if (this.syncRunsPage > totalPages) this.syncRunsPage = totalPages;
     },
     _pollSyncTask(taskId) {
       this._stopSyncRunDetailPolling();
@@ -2896,6 +3075,18 @@ function app() {
       if (!Number.isFinite(i) || i <= 0) return '耗时: -';
       const cur = Number(this.syncStages?.[i]?.ts || 0);
       const prev = Number(this.syncStages?.[i - 1]?.ts || 0);
+      if (!cur || !prev) return '耗时: -';
+      const sec = Math.max(0, cur - prev);
+      if (sec < 60) return `耗时: ${sec}s`;
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `耗时: ${m}m${s}s`;
+    },
+    syncStageElapsedFrom(stages, idx) {
+      const i = Number(idx);
+      if (!Number.isFinite(i) || i <= 0) return '耗时: -';
+      const cur = Number(stages?.[i]?.ts || 0);
+      const prev = Number(stages?.[i - 1]?.ts || 0);
       if (!cur || !prev) return '耗时: -';
       const sec = Math.max(0, cur - prev);
       if (sec < 60) return `耗时: ${sec}s`;

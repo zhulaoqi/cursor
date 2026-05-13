@@ -136,8 +136,10 @@ class TokenManager:
             rec = self.store.get(account.email) or TokenRecord(email=account.email)
 
             if rec.status == "disabled":
+                last_err = self.store.get_latest_error_detail(account.email)
+                suffix = f"；最近错误：{last_err}" if last_err else ""
                 raise TokenAcquisitionError(
-                    f"账号 {account.email} 已被标记 disabled（连续失败 {rec.consecutive_failures} 次）"
+                    f"账号 {account.email} 已被标记 disabled（连续失败 {rec.consecutive_failures} 次）{suffix}"
                 )
 
             if not force_refresh and _is_token_valid(rec):
