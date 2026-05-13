@@ -26,6 +26,21 @@ log = get("bi_sync")
 BJ_TZ = timezone(timedelta(hours=8))
 
 
+def _kv_message(**kwargs: Any) -> str:
+    parts: list[str] = []
+    for k, v in kwargs.items():
+        if v is None:
+            continue
+        text = str(v).replace("\n", " ").strip()
+        parts.append(f"{k}={text}")
+    return " ".join(parts)
+
+
+def _err(code: str, detail: str) -> str:
+    clean = str(detail).replace("\n", " ").strip()
+    return f"{code}: {clean}"
+
+
 @dataclass(frozen=True)
 class SnapshotAccount:
     account: Account
@@ -119,34 +134,43 @@ def _rows_from_usage_csv(
         )
         if event_time is None:
             continue
-        event_time_bj = event_time.astimezone(BJ_TZ)
         out.append(
             {
                 "dt": biz_date,
                 "run_id": run_id,
-                "source_file": "",
                 "account_email": email,
                 "event_time": event_time.replace(tzinfo=None),
-                "event_time_bj": event_time_bj.replace(tzinfo=None),
+                "first_api_request_id": _pick_value(
+                    row,
+                    ("first api request id", "first api req id", "request id", "request_id", "requestid", "id"),
+                ),
+                "environment": _pick_value(row, ("environment",)),
+                "kind": _pick_value(row, ("kind",)),
                 "model_name": _pick_value(row, ("model", "model_name")),
-                "request_id": _pick_value(row, ("request_id", "requestid", "id")),
-                "project_name": _pick_value(row, ("project", "project_name", "workspace")),
-                "message_role": _pick_value(row, ("role", "message_role")),
-                "input_tokens": _to_int(_pick_value(row, ("input_tokens", "inputtokens"))),
-                "output_tokens": _to_int(_pick_value(row, ("output_tokens", "outputtokens"))),
-                "cache_read_tokens": _to_int(
-                    _pick_value(row, ("cache_read_tokens", "cachereadtokens", "cache_read"))
+                "max_mode": _pick_value(row, ("max mode", "max_mode")),
+                "input_tokens_wo_cache_write": _to_int(
+                    _pick_value(
+                        row,
+                        ("input (w/o cache write)", "input_wo_cache_write"),
+                    )
                 ),
-                "cache_write_tokens": _to_int(
-                    _pick_value(row, ("cache_write_tokens", "cachewritetokens", "cache_write"))
+                "input_tokens_w_cache_write": _to_int(
+                    _pick_value(
+                        row,
+                        ("input (w/ cache write)", "input_w_cache_write"),
+                    )
                 ),
-                "total_tokens": _to_int(_pick_value(row, ("total_tokens", "totaltokens"))),
-                "cost_usd": _to_float(_pick_value(row, ("cost_usd", "cost", "total_cost_usd"))),
-                "billed_amount_usd": _to_float(
-                    _pick_value(row, ("billed_amount_usd", "charged_usd", "charged"))
+                "output_tokens": _to_int(
+                    _pick_value(
+                        row,
+                        ("output_tokens", "outputtokens", "output tokens", "output"),
+                    )
                 ),
-                "discount_percent": _to_float(
-                    _pick_value(row, ("discount_percent", "discount", "discountpercentoff"))
+                "total_tokens": _to_int(
+                    _pick_value(row, ("total_tokens", "totaltokens", "total tokens"))
+                ),
+                "cost_usd": _to_float(
+                    _pick_value(row, ("cost_usd", "cost", "total_cost_usd"))
                 ),
                 "raw_event_json": json.dumps(row, ensure_ascii=False),
             }
@@ -171,28 +195,30 @@ def _rows_from_usage_events(
         event_time = _parse_datetime_like(ts)
         if event_time is None:
             continue
-        event_time_bj = event_time.astimezone(BJ_TZ)
         token_usage = ev.get("tokenUsage") or {}
         rows.append(
             {
                 "dt": biz_date,
                 "run_id": run_id,
-                "source_file": "",
                 "account_email": email,
                 "event_time": event_time.replace(tzinfo=None),
-                "event_time_bj": event_time_bj.replace(tzinfo=None),
+                "first_api_request_id": ev.get("requestId") or ev.get("id"),
+                "environment": ev.get("environment"),
+                "kind": ev.get("kind"),
                 "model_name": ev.get("model"),
-                "request_id": ev.get("requestId") or ev.get("id"),
-                "project_name": ev.get("projectName") or ev.get("workspaceName"),
-                "message_role": ev.get("role"),
-                "input_tokens": _to_int(token_usage.get("inputTokens")),
+                "max_mode": ev.get("maxMode"),
+                "input_tokens_wo_cache_write": _to_int(
+                    token_usage.get("inputTokensWithoutCacheWrite")
+                    or token_usage.get("inputTokensWOCacheWrite")
+                ),
+                "input_tokens_w_cache_write": _to_int(
+                    token_usage.get("inputTokensWithCacheWrite")
+                    or token_usage.get("inputTokensWCacheWrite")
+                    or token_usage.get("inputTokens")
+                ),
                 "output_tokens": _to_int(token_usage.get("outputTokens")),
-                "cache_read_tokens": _to_int(token_usage.get("cacheReadTokens")),
-                "cache_write_tokens": _to_int(token_usage.get("cacheWriteTokens")),
                 "total_tokens": _to_int(token_usage.get("totalTokens")),
                 "cost_usd": _to_float(token_usage.get("totalCents")) / 100 if token_usage.get("totalCents") is not None else None,
-                "billed_amount_usd": _to_float(ev.get("chargedCents")) / 100 if ev.get("chargedCents") is not None else None,
-                "discount_percent": _to_float(token_usage.get("discountPercentOff")),
                 "raw_event_json": json.dumps(ev, ensure_ascii=False),
             }
         )
@@ -268,7 +294,8 @@ def run_daily_sync(
     )
     log_store.add_stage(run_id=run_id, stage="init", status="start")
     if snapshot_total == 0:
-        log_store.add_stage(run_id=run_id, stage="init", status="failed", message="账号快照为空")
+        msg = _err("E_SNAPSHOT_EMPTY", "account snapshot is empty")
+        log_store.add_stage(run_id=run_id, stage="init", status="failed", message=msg)
         log_store.finish_run(
             run_id=run_id,
             status="failed",
@@ -277,16 +304,21 @@ def run_daily_sync(
             event_total=0,
             ods_rows=0,
             dwd_rows=0,
-            error_summary="账号快照为空",
+            error_summary=msg,
         )
-        result = {"run_id": run_id, "biz_date": target_date, "status": "failed", "message": "账号为空"}
+        result = {"run_id": run_id, "biz_date": target_date, "status": "failed", "message": msg}
         send_alert(
             "BI 日同步失败",
-            f"run_id={run_id}\nbiz_date={target_date}\n原因=账号快照为空",
+            f"run_id={run_id}\nbiz_date={target_date}\nreason={msg}",
             level="error",
         )
         return result
-    log_store.add_stage(run_id=run_id, stage="init", status="success", message=f"snapshot={snapshot_total}")
+    log_store.add_stage(
+        run_id=run_id,
+        stage="init",
+        status="success",
+        message=_kv_message(snapshot_total=snapshot_total, new_account_count=new_account_count),
+    )
 
     all_rows: list[dict] = []
     ok_count = 0
@@ -297,15 +329,19 @@ def run_daily_sync(
     load_ok_count = 0
     ods_rows = 0
     dwd_rows = 0
-    log_store.add_stage(run_id=run_id, stage="fetch", status="start")
-    log_store.add_stage(run_id=run_id, stage="load_ods", status="start")
-    log_store.add_stage(run_id=run_id, stage="load_dwd", status="start")
+    log_store.add_stage(run_id=run_id, stage="prepare_partition", status="start")
     try:
         loader.ensure_tables()
+        loader.ensure_biz_date_partitions_ready(biz_date=target_date)
+        log_store.add_stage(
+            run_id=run_id,
+            stage="prepare_partition",
+            status="success",
+            message=_kv_message(biz_date=target_date, tables="ods,dwd"),
+        )
     except Exception as e:
-        msg = f"init_load_failed:{type(e).__name__}:{e}"
-        log_store.add_stage(run_id=run_id, stage="load_ods", status="failed", message=msg)
-        log_store.add_stage(run_id=run_id, stage="load_dwd", status="failed", message=msg)
+        msg = _err("E_PARTITION_PREPARE", f"{type(e).__name__}: {e}")
+        log_store.add_stage(run_id=run_id, stage="prepare_partition", status="failed", message=msg)
         log_store.finish_run(
             run_id=run_id,
             status="failed",
@@ -317,6 +353,8 @@ def run_daily_sync(
             error_summary=msg[:2000],
         )
         raise
+
+    log_store.add_stage(run_id=run_id, stage="fetch", status="start")
     for item in snapshot:
         acc = item.account
         acc_start = int(time.time())
@@ -333,7 +371,10 @@ def run_daily_sync(
                     end_ts=end_ts,
                 )
                 if snap.errors:
-                    last_err = ",".join(f"{k}:{v}" for k, v in snap.errors.items())
+                    last_err = _err(
+                        "E_FETCH_ACCOUNT",
+                        "; ".join(f"{k}={v}" for k, v in snap.errors.items()),
+                    )
                     continue
                 if snap.usage_csv_text:
                     account_rows = _rows_from_usage_csv(
@@ -351,7 +392,7 @@ def run_daily_sync(
                     )
                 break
             except Exception as e:
-                last_err = f"{type(e).__name__}: {e}"
+                last_err = _err("E_FETCH_EXCEPTION", f"{type(e).__name__}: {e}")
         acc_end = int(time.time())
         if account_rows or last_err == "":
             # 按账号+日期增量落库：账号拉完即入 ODS/DWD，避免整天全量在末尾一次性写入。
@@ -385,7 +426,7 @@ def run_daily_sync(
             except Exception as e:
                 fail_count += 1
                 load_fail_count += 1
-                err = f"{acc.email}:load_failed:{type(e).__name__}:{e}"
+                err = _err("E_LOAD_ACCOUNT", f"{type(e).__name__}: {e}")
                 error_messages.append(err)
                 log_store.add_account_log(
                     run_id=run_id,
@@ -397,13 +438,20 @@ def run_daily_sync(
                     ended_at=acc_end,
                     fetch_rows=len(account_rows),
                     load_rows=0,
-                    error_message=f"load_failed:{type(e).__name__}:{e}",
+                    error_message=err,
                 )
-                log.warning(f"[{run_id}] {err}")
+                log.warning(
+                    _kv_message(
+                        event="account_load_failed",
+                        run_id=run_id,
+                        account_email=acc.email,
+                        error=err,
+                    )
+                )
         else:
             fail_count += 1
             fetch_fail_count += 1
-            err = f"{acc.email}:{last_err}"
+            err = last_err
             error_messages.append(err)
             log_store.add_account_log(
                 run_id=run_id,
@@ -417,25 +465,45 @@ def run_daily_sync(
                 load_rows=0,
                 error_message=last_err,
             )
-            log.warning(f"[{run_id}] {err}")
+            log.warning(
+                _kv_message(
+                    event="account_fetch_failed",
+                    run_id=run_id,
+                    account_email=acc.email,
+                    error=err,
+                )
+            )
 
     log_store.add_stage(
         run_id=run_id,
         stage="fetch",
         status="success" if fetch_fail_count == 0 else "failed",
-        message=f"ok={ok_count},fail={fail_count},rows={len(all_rows)}",
+        message=_kv_message(
+            snapshot_total=snapshot_total,
+            fetch_ok=ok_count,
+            fetch_fail=fetch_fail_count,
+            fetched_rows=len(all_rows),
+        ),
     )
     log_store.add_stage(
         run_id=run_id,
         stage="load_ods",
         status="success" if load_fail_count == 0 else "failed",
-        message=f"ok={load_ok_count},fail={load_fail_count},rows={ods_rows}",
+        message=_kv_message(
+            load_ok=load_ok_count,
+            load_fail=load_fail_count,
+            ods_rows=ods_rows,
+        ),
     )
     log_store.add_stage(
         run_id=run_id,
         stage="load_dwd",
         status="success" if load_fail_count == 0 else "failed",
-        message=f"ok={load_ok_count},fail={load_fail_count},rows={dwd_rows}",
+        message=_kv_message(
+            load_ok=load_ok_count,
+            load_fail=load_fail_count,
+            dwd_rows=dwd_rows,
+        ),
     )
 
     if fail_count == 0:
@@ -444,7 +512,19 @@ def run_daily_sync(
         status = "partial_failed"
     else:
         status = "failed"
-    log_store.add_stage(run_id=run_id, stage="finalize", status="success", message=status)
+    log_store.add_stage(
+        run_id=run_id,
+        stage="finalize",
+        status="success",
+        message=_kv_message(
+            final_status=status,
+            account_success=ok_count,
+            account_failed=fail_count,
+            event_total=len(all_rows),
+            ods_rows=ods_rows,
+            dwd_rows=dwd_rows,
+        ),
+    )
     log_store.finish_run(
         run_id=run_id,
         status=status,
