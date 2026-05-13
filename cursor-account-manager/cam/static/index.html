@@ -25,9 +25,7 @@
     *, *::before, *::after { box-sizing: border-box; }
     body {
       font-family: 'Fira Sans', system-ui, sans-serif;
-      background:
-        radial-gradient(900px 420px at 100% -120px, rgba(29,78,216,.10), transparent 58%),
-        linear-gradient(180deg, #F8FBFF 0%, var(--bg) 44%, #F5F8FD 100%);
+      background: #F6F8FB;
       color: var(--text);
       font-size: 14px;
       line-height: 1.6;
@@ -47,12 +45,12 @@
       gap: 14px;
       cursor: pointer;
       transition: border-color 0.2s, background 0.2s, opacity 0.2s, box-shadow 0.2s;
-      background: linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%);
+      background: #fff;
     }
     .drop-zone:hover, .drop-zone.drag-over {
       border-color: var(--primary);
       background: #EFF6FF;
-      box-shadow: 0 12px 30px rgba(37,99,235,.12);
+      box-shadow: 0 2px 8px rgba(15,23,42,.08);
     }
 
     /* ── 进度条 ── */
@@ -124,6 +122,50 @@
       font-size: 13px;
       background: #fff;
     }
+    .sync-email-picker { position: relative; margin-bottom: 8px; }
+    .sync-email-picker-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 50;
+      background: #fff;
+      border: 1px solid #DDE4EE;
+      border-radius: 10px;
+      box-shadow: 0 8px 20px rgba(15,23,42,.12);
+      padding: 6px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .sync-email-option {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 8px;
+      padding: 7px 9px;
+      text-align: left;
+      cursor: pointer;
+      color: #1E293B;
+      font-size: 12.5px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .sync-email-option:hover {
+      background: #F8FAFD;
+      border-color: #D9E3F5;
+    }
+    .sync-email-option .tag {
+      color: #1D4ED8;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .sync-email-empty {
+      padding: 8px 10px;
+      color: #94A3B8;
+      font-size: 12px;
+    }
     .sync-date-plugin { position: relative; min-width: 190px; }
     .sync-date-trigger {
       width: 100%;
@@ -163,7 +205,7 @@
       background: #fff;
       border: 1px solid #E2E8F0;
       border-radius: 12px;
-      box-shadow: 0 16px 36px rgba(15,23,42,.14);
+      box-shadow: 0 8px 20px rgba(15,23,42,.12);
       padding: 10px;
       display: flex;
       flex-direction: column;
@@ -209,7 +251,7 @@
     .sync-date-day.is-selected {
       background: #2563EB;
       color: #fff;
-      box-shadow: 0 4px 10px rgba(37,99,235,.24);
+      box-shadow: none;
     }
     .sync-date-day.is-today:not(.is-selected) {
       border: 1px solid #BFDBFE;
@@ -250,21 +292,13 @@
       position: relative;
       padding: 20px;
       border-radius: 18px;
-      border: 1px solid #DCE5F3;
-      background: linear-gradient(180deg, #F7FAFF 0%, #F9FBFF 56%, #FFFFFF 100%);
-      box-shadow: 0 10px 26px rgba(15,23,42,.06), inset 0 1px 0 rgba(255,255,255,.7);
+      border: 1px solid #E3E8EF;
+      background: #F8FAFD;
+      box-shadow: none;
       overflow: hidden;
     }
     .sync-shell::before {
-      content: '';
-      position: absolute;
-      top: -88px;
-      right: -66px;
-      width: 240px;
-      height: 240px;
-      border-radius: 999px;
-      background: radial-gradient(circle, rgba(37,99,235,.14) 0%, rgba(37,99,235,0) 70%);
-      pointer-events: none;
+      content: none;
     }
     .sync-head {
       position: relative;
@@ -294,8 +328,8 @@
       padding: 18px 20px;
       border: 1px solid #DDE6F2;
       border-radius: 14px;
-      background: linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%);
-      box-shadow: 0 6px 18px rgba(15,23,42,.05);
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15,23,42,.05);
     }
     .sync-task-card.main { border-left: 4px solid #3B82F6; }
     .sync-task-card.replay { border-left: 4px solid #0EA5A4; }
@@ -305,7 +339,7 @@
       border-radius: 14px;
       border: 1px solid #DDE6F2;
       background: #fff;
-      box-shadow: 0 8px 22px rgba(15,23,42,.045);
+      box-shadow: 0 1px 3px rgba(15,23,42,.05);
       padding: 18px 22px;
       margin-bottom: 16px;
     }
@@ -335,7 +369,7 @@
       border: 1px solid #E3EAF5;
       border-radius: 11px;
       padding: 10px 12px;
-      background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFF 100%);
+      background: #fff;
     }
     .sync-meta-k { font-size:12px; color:#64748B; margin-bottom:2px; }
     .sync-meta-v { font-size:14px; font-weight:700; color:var(--text); }
@@ -420,12 +454,15 @@
       justify-content: center;
       letter-spacing: .01em;
     }
-    .btn:hover:not(:disabled) { opacity: 1; box-shadow: 0 8px 18px rgba(15,23,42,.10); transform: translateY(-1px); }
+    .btn:hover:not(:disabled) { opacity: 1; box-shadow: 0 1px 2px rgba(15,23,42,.10); transform: none; }
     .btn:active:not(:disabled) { transform: scale(0.97); box-shadow: none; }
     .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary  { background: linear-gradient(180deg, #3B82F6 0%, #1D4ED8 100%); color: #fff; border-color: #1D4ED8; box-shadow: 0 8px 18px rgba(37,99,235,.26); }
-    .btn-cta      { background: linear-gradient(180deg, #FB923C 0%, #EA580C 100%); color: #fff; border-color:#EA580C; box-shadow: 0 8px 18px rgba(249,115,22,.22); }
-    .btn-ghost    { background: #F8FBFF; color: var(--primary); border: 1px solid #BCD0F6; }
+    .btn-primary  { background: #1F6FEB; color: #fff; border-color: #1F6FEB; box-shadow: none; }
+    .btn-primary:hover:not(:disabled) { background: #1A63D8; border-color: #1A63D8; }
+    .btn-cta      { background: #F59E0B; color: #fff; border-color:#F59E0B; box-shadow: none; }
+    .btn-cta:hover:not(:disabled) { background: #D97706; border-color: #D97706; }
+    .btn-ghost    { background: #fff; color: #334155; border: 1px solid #D0D7E2; }
+    .btn-ghost:hover:not(:disabled) { background: #F8FAFC; border-color: #B6C0CF; color: #0F172A; }
     .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
     .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1.5px solid #FCA5A5; }
     .btn-warning:hover:not(:disabled) { background: #FEE2E2; border-color: #EF4444; }
@@ -433,10 +470,10 @@
 
     /* ── 卡片 ── */
     .card {
-      background: linear-gradient(180deg, #FFFFFF 0%, #FCFDFF 100%);
+      background: #fff;
       border-radius: 14px;
       border: 1px solid var(--border);
-      box-shadow: 0 8px 20px rgba(15,23,42,.055), 0 2px 6px rgba(15,23,42,.04);
+      box-shadow: 0 1px 2px rgba(15,23,42,.06);
     }
     /* ── 下载参数区 ── */
     .field-label {
@@ -448,7 +485,7 @@
     .filters-panel {
       padding: 12px 14px;
       margin-bottom: 12px;
-      background: linear-gradient(180deg, #FFFFFF 0%, #F9FBFF 100%);
+      background: #fff;
     }
     .filters-grid {
       display: grid;
@@ -590,7 +627,7 @@
       border: 1px solid #DDE6F3;
       border-radius: 12px;
       background: #fff;
-      box-shadow: 0 18px 48px rgba(15,23,42,.16), 0 6px 18px rgba(15,23,42,.08);
+      box-shadow: 0 10px 24px rgba(15,23,42,.12);
     }
     .month-popover-header {
       display: flex;
@@ -817,7 +854,7 @@
       border: 1px solid #BFDBFE;
       border-radius: 14px;
       background: rgba(255,255,255,.97);
-      box-shadow: 0 18px 45px rgba(15,23,42,.16), 0 3px 12px rgba(15,23,42,.08);
+      box-shadow: 0 8px 20px rgba(15,23,42,.12);
       backdrop-filter: blur(12px);
       will-change: opacity;
       contain: paint;
@@ -836,7 +873,7 @@
       height: 8px;
       border-radius: 999px;
       background: var(--primary);
-      box-shadow: 0 0 0 4px rgba(37,99,235,.12);
+      box-shadow: 0 0 0 2px rgba(37,99,235,.12);
       flex-shrink: 0;
     }
     .selection-bar-spacer {
@@ -862,7 +899,7 @@
       border: 1px solid #FECACA;
       border-radius: 16px;
       background: #fff;
-      box-shadow: 0 24px 70px rgba(15,23,42,.24), 0 6px 18px rgba(15,23,42,.12);
+      box-shadow: 0 16px 34px rgba(15,23,42,.18);
       overflow: hidden;
     }
     .danger-dialog-head {
@@ -1064,8 +1101,7 @@
       border: 1px solid #DDE6F3;
       border-radius: 14px;
       background: rgba(255,255,255,.98);
-      box-shadow: 0 18px 45px rgba(15,23,42,.14), 0 3px 10px rgba(15,23,42,.08);
-      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 24px rgba(15,23,42,.12);
     }
     .date-popover-header {
       display: flex;
@@ -1913,8 +1949,8 @@
               </div>
             </div>
           </span>
-          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingDaily" @click="triggerSyncRun()">
-            <span x-text="syncSubmittingDaily ? '提交中...' : '执行'"></span>
+          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingDaily || syncIsRunning" @click="triggerSyncRun()">
+            <span x-text="syncSubmittingDaily ? '提交中...' : (syncIsRunning ? '执行中...' : '执行')"></span>
           </button>
         </div>
       </div>
@@ -1995,13 +2031,32 @@
           </div>
           <div>
             <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">账号邮箱</div>
+            <div class="sync-email-picker" @click.outside="syncReplayPickerOpen = false">
+              <input type="text"
+                class="sync-input"
+                placeholder="搜索账号邮箱并选择（支持模糊）"
+                x-model="syncReplayEmailKeyword"
+                @focus="syncReplayPickerOpen = true"
+                @input="syncReplayPickerOpen = true" />
+              <div class="sync-email-picker-list" x-show="syncReplayPickerOpen" x-cloak x-transition>
+                <template x-for="email in syncReplayEmailCandidates()" :key="email">
+                  <button type="button" class="sync-email-option"
+                    @mousedown.prevent
+                    @click="addSyncReplayEmail(email)">
+                    <span x-text="email"></span>
+                    <span class="tag">添加</span>
+                  </button>
+                </template>
+                <div class="sync-email-empty" x-show="syncReplayEmailCandidates().length===0">无可选账号（可继续手动输入）</div>
+              </div>
+            </div>
             <textarea x-model="syncReplayEmails" rows="2" placeholder="a@xx.com,b@xx.com"
               class="sync-input" style="min-height:122px; resize:none;"></textarea>
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; margin-top:10px;">
-          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingReplay" @click="triggerSyncReplay()">
-            <span x-text="syncSubmittingReplay ? '提交中...' : '执行'"></span>
+          <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingReplay || syncIsRunning" @click="triggerSyncReplay()">
+            <span x-text="syncSubmittingReplay ? '提交中...' : (syncIsRunning ? '执行中...' : '执行')"></span>
           </button>
         </div>
       </div>
@@ -2362,6 +2417,9 @@ function app() {
     syncDailyDate: '',
     syncReplayDate: '',
     syncReplayEmails: '',
+    syncReplayEmailKeyword: '',
+    syncReplayPickerOpen: false,
+    syncServerRunning: false,
     syncLiveRun: null,
     syncLiveStages: [],
     syncLiveProgress: null,
@@ -2380,6 +2438,12 @@ function app() {
       const q = this.searchEmail.trim().toLowerCase();
       if (!q) return this.dbAccounts;
       return this.dbAccounts.filter(a => (a.email || '').toLowerCase().includes(q));
+    },
+    get syncIsRunning() {
+      if (this.syncServerRunning) return true;
+      const liveStatus = String(this.syncLiveRun?.status || '').toLowerCase();
+      if (liveStatus === 'running' || liveStatus === 'start') return true;
+      return false;
     },
 
     // ── 导航 ──
@@ -2507,10 +2571,17 @@ function app() {
     },
     async loadSyncRunsOnly() {
       try {
-        const runsRes = await fetch('/api/sync/runs?limit=30');
+        const [runsRes, runningRes] = await Promise.all([
+          fetch('/api/sync/runs?limit=30'),
+          fetch('/api/sync/running'),
+        ]);
         if (runsRes.ok) {
           const d2 = await runsRes.json();
           this.syncRuns = d2.runs || [];
+        }
+        if (runningRes.ok) {
+          const dr = await runningRes.json();
+          this.syncServerRunning = !!dr.running;
         }
       } catch (e) {
         this.addLog('var(--danger)', `加载运行列表失败：${e.message || e}`);
@@ -2518,9 +2589,10 @@ function app() {
     },
     async loadSyncDashboard() {
       try {
-        const [todayRes, runsRes] = await Promise.all([
+        const [todayRes, runsRes, runningRes] = await Promise.all([
           fetch('/api/sync/today'),
           fetch('/api/sync/runs?limit=30'),
+          fetch('/api/sync/running'),
         ]);
         if (todayRes.ok) {
           const d = await todayRes.json();
@@ -2545,6 +2617,10 @@ function app() {
         if (runsRes.ok) {
           const d2 = await runsRes.json();
           this.syncRuns = d2.runs || [];
+        }
+        if (runningRes.ok) {
+          const dr = await runningRes.json();
+          this.syncServerRunning = !!dr.running;
         }
         // 刷新后兜底：若“今日记录”为空，自动展示最近一条（优先运行中）
         if (!this.syncTodayRun && this.syncRuns.length > 0) {
@@ -2655,6 +2731,7 @@ function app() {
           }
           if (d.status === 'finished' || d.status === 'failed') {
             clearInterval(timer);
+            this.syncServerRunning = false;
             if (d.status === 'failed') {
               this.addLog('var(--danger)', `同步执行失败：${d.error || '未知错误'}`);
               this._setSyncTaskNotice('同步异常', d.error || '任务执行异常', 'var(--danger)');
@@ -2838,12 +2915,13 @@ function app() {
       return fallbackText || `HTTP ${res.status}`;
     },
     async triggerSyncRun() {
-      if (this.syncSubmittingDaily) return;
+      if (this.syncSubmittingDaily || this.syncIsRunning) return;
       if (!this._isValidBizDate(this.syncDailyDate)) {
         this.addLog('var(--warn)', '业务日期格式不正确，请使用 YYYY-MM-DD');
         return;
       }
       this.syncSubmittingDaily = true;
+      this.syncServerRunning = true;
       this.syncTaskNotice = null;
       try {
         const bizDate = this.syncDailyDate || this._yesterdayDateStr();
@@ -2905,8 +2983,27 @@ function app() {
         .filter(Boolean);
       return [...new Set(items)];
     },
+    syncReplayEmailCandidates() {
+      const keyword = String(this.syncReplayEmailKeyword || '').trim().toLowerCase();
+      const selected = new Set(this._parseReplayEmails().map(x => x.toLowerCase()));
+      const all = (this.dbAccounts || [])
+        .map(a => String(a?.email || '').trim().toLowerCase())
+        .filter(Boolean)
+        .filter(e => !selected.has(e));
+      const filtered = keyword ? all.filter(e => e.includes(keyword)) : all;
+      return filtered.slice(0, 30);
+    },
+    addSyncReplayEmail(email) {
+      const e = String(email || '').trim().toLowerCase();
+      if (!e) return;
+      const current = this._parseReplayEmails();
+      if (!current.includes(e)) current.push(e);
+      this.syncReplayEmails = current.join(',');
+      this.syncReplayEmailKeyword = '';
+      this.syncReplayPickerOpen = true;
+    },
     async triggerSyncReplay() {
-      if (this.syncSubmittingReplay) return;
+      if (this.syncSubmittingReplay || this.syncIsRunning) return;
       const emails = this._parseReplayEmails();
       if (!emails.length) {
         this.addLog('var(--warn)', '请先填写要补拉的账号邮箱');
@@ -2917,6 +3014,7 @@ function app() {
         return;
       }
       this.syncSubmittingReplay = true;
+      this.syncServerRunning = true;
       this.syncTaskNotice = null;
       try {
         const res = await fetch('/api/sync/run', {

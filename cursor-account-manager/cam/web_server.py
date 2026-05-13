@@ -857,6 +857,14 @@ async def sync_runs(limit: int = 30):
     return {"runs": store.list_runs(limit=limit)}
 
 
+@app.get("/api/sync/running")
+async def sync_running():
+    """服务内实时运行态（不依赖数据库历史状态）。"""
+    with _task_lock:
+        running_count = sum(1 for t in _sync_runtime.values() if t.get("status") == "running")
+    return {"running": running_count > 0, "running_count": running_count}
+
+
 @app.get("/api/sync/run/{run_id}")
 async def sync_run_detail(run_id: str):
     store = get_default_sync_log_store()
