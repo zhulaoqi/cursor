@@ -20,7 +20,7 @@
 - ✅ **批量 API 调用**：拉取 usage / plan / 配额 / 使用事件（全量分页）/ 订阅 / 发票，并发可控
 - ✅ **Excel 多 Sheet 导出**：账号概览 / 使用明细（含 token 数 / 成本 USD）/ 发票清单
 - ✅ **每账号独立目录**：`dump` 命令一键生成账号文件夹 + 发票 PDF + 全账号汇总
-- ✅ **BI 日同步（StarRocks）**：按日落库 ODS/DWD，支持失败账号补拉
+- ✅ **BI 日同步（StarRocks）**：按日落库 ODS 原始明细，支持失败账号补拉
 - ✅ **同步监控页**：查看今日同步状态、阶段时间、失败账号并一键补拉
 
 ---
@@ -52,13 +52,14 @@ cp .env.example .env
 ### `data/accounts.csv`
 
 ```csv
-email,imap_password,imap_host,imap_port
-cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993
-cursor184@eclicktech.com.cn,AnotherImapPwd,,
+email,imap_password,imap_host,imap_port,feishu_email
+cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993,owner@example.com
+cursor184@eclicktech.com.cn,AnotherImapPwd,,,owner@example.com
 ```
 
 每个飞书邮箱需要在飞书邮箱管理台 → 设置 → IMAP/SMTP → 生成**客户端专用密码**，把该密码填入 `imap_password` 列。
 
+> `feishu_email` 必填，用于账单同步 ODS 底表的归属字段。
 > `imap_host`、`imap_port` 不填则使用 `.env` 的默认值 `imap.feishu.cn:993`。
 
 ### `.env`
@@ -123,8 +124,8 @@ cd cursor-account-manager
 ### 账号表格式（CSV 示例）
 
 ```csv
-email,imap_password,imap_host,imap_port
-cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993
+email,imap_password,imap_host,imap_port,feishu_email
+cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993,owner@example.com
 ```
 
 页面内也提供"下载模板"按钮。
@@ -231,6 +232,16 @@ Web UI 中可点击“同步监控”查看：
 - 开始/结束时间
 - 阶段日志
 - 失败账号与一键补拉
+
+ODS 表新增字段 SQL：
+
+```sql
+ALTER TABLE dataeye_customer.ods_cursor_usage_events_di
+ADD COLUMN feishu_email VARCHAR(320) NULL COMMENT '飞书邮箱，来源于账号库上传或手动新增';
+
+ALTER TABLE dataeye_customer.ods_cursor_usage_events_di
+ADD COLUMN plan_amount DECIMAL(10,2) NULL COMMENT '套餐金额数字，来源于账号看板 Current Plan，例如 Ultra $20/mo 取 20';
+```
 
 ---
 

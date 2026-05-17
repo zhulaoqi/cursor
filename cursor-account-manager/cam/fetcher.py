@@ -133,55 +133,39 @@ def fetch_one(
             snap.usage_limit = _call("usage_limit", lambda: client.get_usage_limit_status() or {}) or {}
 
         if "usage_events" in what_set:
-            # ── 优先：CSV 端点，精度最高（含完整 token 用量） ──
-            csv_ok = False
-            try:
-                csv_text = client.export_usage_events_csv(
-                    start_ts=start_ts, end_ts=end_ts
-                )
-                # 校验：非空且是真正的 CSV（首行应有逗号，不是 HTML 错误页）
-                if csv_text and "," in csv_text[:500] and not csv_text.lstrip().startswith("<"):
-                    snap.usage_csv_text = csv_text
-                    lines = csv_text.strip().splitlines()
-                    log.info(
-                        f"[{account.email}] 使用明细 CSV: {max(0, len(lines)-1)} 行"
-                        f"（含表头 {lines[0][:80] if lines else ''}）"
+            # 使用明细只走 CSV 端点：CSV 字段最完整，API 降级会掩盖代理/端点失败并写成 0 条。
+            last_csv_err: Exception | None = None
+            for attempt in range(1, 4):
+                try:
+                    csv_text = client.export_usage_events_csv(
+                        start_ts=start_ts, end_ts=end_ts
                     )
-                    csv_ok = True
-                else:
-                    log.warning(
-                        f"[{account.email}] CSV 端点返回非 CSV 内容，降级 API: "
-                        f"{csv_text[:100]!r}"
-                    )
-            except Exception as csv_err:
-                log.info(f"[{account.email}] CSV 端点失败({csv_err})，尝试 API 端点")
-
-            # ── 降级：分页 API 端点 ──
-            if not csv_ok:
-                evs_result = _call(
-                    "usage_events",
-                    lambda: client.iter_all_usage_events(
-                        page_size=100,
-                        start_ts=start_ts,
-                        end_ts=end_ts,
-                    ),
-                )
-                if evs_result is not None:
-                    snap.usage_events = evs_result
-                    evs = snap.usage_events or []
-                    if evs:
-                        ts_vals = [int(e.get("timestamp") or 0) for e in evs if e.get("timestamp")]
-                        if ts_vals:
-                            import datetime as _dt
-                            fmt = lambda ms: _dt.datetime.utcfromtimestamp(ms / 1000).strftime("%Y-%m-%d")
-                            log.info(
-                                f"[{account.email}] 使用明细(API): {len(evs)} 条, "
-                                f"范围 {fmt(min(ts_vals))} ~ {fmt(max(ts_vals))}"
-                            )
-                        else:
-                            log.info(f"[{account.email}] 使用明细(API): {len(evs)} 条")
+                    # 校验：非空且是真正的 CSV（首行应有逗号，不是 HTML 错误页）
+                    if csv_text and "," in csv_text[:500] and not csv_text.lstrip().startswith("<"):
+                        snap.usage_csv_text = csv_text
+                        lines = csv_text.strip().splitlines()
+                        log.info(
+                            f"[{account.email}] 使用明细 CSV: {max(0, len(lines)-1)} 行"
+                            f"（含表头 {lines[0][:80] if lines else ''}）"
+                        )
+                        last_csv_err = None
+                        break
+                    preview = (csv_text or "")[:120]
+                    raise RuntimeError(f"CSV端点返回非CSV内容: {preview!r}")
+                except Exception as csv_err:
+                    last_csv_err = csv_err
+                    if attempt < 3:
+                        backoff = 2 ** attempt
+                        log.warning(
+                            f"[{account.email}] CSV 端点失败，{backoff}s 后重试"
+                            f"（{attempt}/2）：{csv_err}"
+                        )
+                        time.sleep(backoff)
                     else:
-                        log.info(f"[{account.email}] 使用明细: 0 条（CSV 和 API 均无数据）")
+                        log.warning(f"[{account.email}] CSV 端点重试 3 次失败：{csv_err}")
+
+            if last_csv_err is not None:
+                snap.errors["usage_events"] = f"CSV端点重试3次失败: {last_csv_err}"
 
         if "stripe" in what_set:
             snap.stripe = _call("stripe", lambda: client.get_stripe_info() or {}) or {}

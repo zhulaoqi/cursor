@@ -364,7 +364,7 @@ def main() -> None:
 @click.option("--trigger", default="manual", help="触发类型（manual/scheduler/retry）")
 @click.option("--email", "email", multiple=True, help="仅同步指定账号（可重复）")
 def cmd_sync_daily(biz_date: str, trigger: str, email: tuple[str, ...]) -> None:
-    """执行每日明细同步（CSV/API 拉取 -> StarRocks ODS/DWD）。"""
+    """执行每日明细同步（CSV/API 拉取 -> StarRocks ODS）。"""
     result = run_daily_sync(
         biz_date=biz_date or None,
         trigger_type=trigger or "manual",

@@ -74,9 +74,25 @@ class Settings:
     bi_sync_batch_size: int
     bi_sync_retry_times: int
     bi_sync_account_timeout_sec: int
+    bi_sync_db_connect_timeout_sec: int
+    bi_sync_db_read_timeout_sec: int
+    bi_sync_db_write_timeout_sec: int
+    bi_sync_db_query_timeout_sec: int
+    bi_sync_db_pool_min_cached: int
+    bi_sync_db_pool_max_cached: int
+    bi_sync_db_pool_max_connections: int
+    bi_sync_db_pool_blocking: bool
+    bi_sync_db_pool_ping: int
+    bi_sync_db_connect_retry_times: int
+    bi_sync_db_connect_retry_backoff_sec: int
     bi_sync_biz_tz: str
     bi_sync_cron: str
     bi_sync_lock_file: str
+    spending_refresh_enable: bool
+    spending_refresh_cron: str
+    spending_refresh_lock_file: str
+    spending_refresh_concurrency: int
+    spending_refresh_alert_enable: bool
     alert_bot_client_id: str
     alert_bot_secret: str
     alert_bot_provider: str
@@ -114,9 +130,34 @@ def load_settings() -> Settings:
         bi_sync_batch_size=_env_int("BI_SYNC_BATCH_SIZE", 5000),
         bi_sync_retry_times=_env_int("BI_SYNC_RETRY_TIMES", 3),
         bi_sync_account_timeout_sec=_env_int("BI_SYNC_ACCOUNT_TIMEOUT_SEC", 600),
+        bi_sync_db_connect_timeout_sec=_env_int("BI_SYNC_DB_CONNECT_TIMEOUT_SEC", 10),
+        bi_sync_db_read_timeout_sec=_env_int("BI_SYNC_DB_READ_TIMEOUT_SEC", 120),
+        bi_sync_db_write_timeout_sec=_env_int("BI_SYNC_DB_WRITE_TIMEOUT_SEC", 120),
+        bi_sync_db_query_timeout_sec=_env_int("BI_SYNC_DB_QUERY_TIMEOUT_SEC", 120),
+        bi_sync_db_pool_min_cached=_env_int("BI_SYNC_DB_POOL_MIN_CACHED", 1),
+        bi_sync_db_pool_max_cached=_env_int("BI_SYNC_DB_POOL_MAX_CACHED", 4),
+        bi_sync_db_pool_max_connections=_env_int("BI_SYNC_DB_POOL_MAX_CONNECTIONS", 8),
+        bi_sync_db_pool_blocking=_env_bool("BI_SYNC_DB_POOL_BLOCKING", True),
+        bi_sync_db_pool_ping=_env_int("BI_SYNC_DB_POOL_PING", 1),
+        bi_sync_db_connect_retry_times=_env_int("BI_SYNC_DB_CONNECT_RETRY_TIMES", 3),
+        bi_sync_db_connect_retry_backoff_sec=_env_int("BI_SYNC_DB_CONNECT_RETRY_BACKOFF_SEC", 2),
         bi_sync_biz_tz=os.environ.get("BI_SYNC_BIZ_TZ", "Asia/Shanghai").strip() or "Asia/Shanghai",
         bi_sync_cron=os.environ.get("BI_SYNC_CRON", "30 1 * * *").strip() or "30 1 * * *",
         bi_sync_lock_file=os.environ.get("BI_SYNC_LOCK_FILE", "/tmp/cam_bi_sync.lock").strip() or "/tmp/cam_bi_sync.lock",
+        spending_refresh_enable=_env_bool("SPENDING_REFRESH_ENABLE", True),
+        spending_refresh_cron=os.environ.get("SPENDING_REFRESH_CRON", "0 3 * * *").strip() or "0 3 * * *",
+        spending_refresh_lock_file=(
+            os.environ.get("SPENDING_REFRESH_LOCK_FILE", "/tmp/cam_spending_refresh.lock").strip()
+            or "/tmp/cam_spending_refresh.lock"
+        ),
+        spending_refresh_concurrency=max(
+            1,
+            _env_int(
+                "SPENDING_REFRESH_CONCURRENCY",
+                _env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 3),
+            ),
+        ),
+        spending_refresh_alert_enable=_env_bool("SPENDING_REFRESH_ALERT_ENABLE", True),
         alert_bot_client_id=os.environ.get("ALERT_BOT_CLIENT_ID", "").strip(),
         alert_bot_secret=os.environ.get("ALERT_BOT_SECRET", "").strip(),
         alert_bot_provider=os.environ.get("ALERT_BOT_PROVIDER", "feishu").strip() or "feishu",

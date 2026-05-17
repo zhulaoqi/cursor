@@ -49,7 +49,9 @@ class ConfigConcurrencyTests(unittest.TestCase):
                 "BI_SYNC_ENABLE": "",
                 "BI_SYNC_CRON": "",
                 "BI_SYNC_LOCK_FILE": "",
+                "BI_SYNC_DB_QUERY_TIMEOUT_SEC": "",
                 "ALERT_BOT_ENABLE": "",
+                "ALERT_TO_EMAILS": "",
             },
             clear=False,
         ):
@@ -58,6 +60,10 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertFalse(settings.bi_sync_enable)
         self.assertEqual(settings.bi_sync_cron, "30 1 * * *")
         self.assertEqual(settings.bi_sync_lock_file, "/tmp/cam_bi_sync.lock")
+        self.assertEqual(settings.bi_sync_db_query_timeout_sec, 120)
+        self.assertTrue(settings.spending_refresh_enable)
+        self.assertEqual(settings.spending_refresh_cron, "0 3 * * *")
+        self.assertEqual(settings.spending_refresh_lock_file, "/tmp/cam_spending_refresh.lock")
         self.assertFalse(settings.alert_bot_enable)
         self.assertEqual(settings.alert_to_emails, "")
 

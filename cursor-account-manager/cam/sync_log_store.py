@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS sync_job_run (
     account_failed          INTEGER DEFAULT 0,
     event_total             INTEGER DEFAULT 0,
     ods_rows                INTEGER DEFAULT 0,
-    dwd_rows                INTEGER DEFAULT 0,
     error_summary           TEXT DEFAULT '',
     created_at              INTEGER NOT NULL,
     updated_at              INTEGER NOT NULL
@@ -128,7 +127,6 @@ class SyncLogStore:
                     account_failed = 0,
                     event_total = 0,
                     ods_rows = 0,
-                    dwd_rows = 0,
                     error_summary = '',
                     updated_at = excluded.updated_at
                 """,
@@ -154,7 +152,6 @@ class SyncLogStore:
         account_failed: int,
         event_total: int,
         ods_rows: int,
-        dwd_rows: int,
         error_summary: str = "",
     ) -> None:
         now = int(time.time())
@@ -170,7 +167,7 @@ class SyncLogStore:
                 UPDATE sync_job_run
                 SET status = ?, ended_at = ?, duration_sec = ?,
                     account_success = ?, account_failed = ?,
-                    event_total = ?, ods_rows = ?, dwd_rows = ?,
+                    event_total = ?, ods_rows = ?,
                     error_summary = ?, updated_at = ?
                 WHERE run_id = ?
                 """,
@@ -182,7 +179,6 @@ class SyncLogStore:
                     account_failed,
                     event_total,
                     ods_rows,
-                    dwd_rows,
                     error_summary[:2000],
                     now,
                     run_id,
@@ -288,6 +284,18 @@ class SyncLogStore:
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def has_run_for_trigger(self, *, biz_date: str, trigger_type: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM sync_job_run
+                WHERE biz_date = ? AND trigger_type = ?
+                LIMIT 1
+                """,
+                (biz_date, trigger_type),
+            ).fetchone()
+            return row is not None
 
     def list_stage_logs(self, run_id: str) -> list[dict]:
         with self._conn() as conn:

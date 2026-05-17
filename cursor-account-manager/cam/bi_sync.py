@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import io
 import json
+import queue
+import re
 import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from . import fetcher
-from .account_store import load_accounts
 from .alerting import send_alert
 from .config import SETTINGS
 from .logger import get
 from .models import Account
+from .plan_scraper import PlanInfo, fetch_plan_info_from_dashboard
 from .starrocks_loader import StarRocksLoader
 from .sync_log_store import SyncLogStore, get_default_sync_log_store
 from .token_store import get_default_store
@@ -41,11 +45,32 @@ def _err(code: str, detail: str) -> str:
     return f"{code}: {clean}"
 
 
+def _sync_alert_title(trigger_type: str, status: str) -> str:
+    trigger = str(trigger_type or "").lower()
+    state = str(status or "").lower()
+    if trigger == "scheduler":
+        return "BI 调度同步成功" if state == "success" else "BI 调度同步失败"
+    return "BI 日同步成功" if state == "success" else "BI 日同步失败"
+
+
 @dataclass(frozen=True)
 class SnapshotAccount:
     account: Account
     source: str
     is_new: bool
+    feishu_email: str = ""
+
+
+@dataclass(frozen=True)
+class AccountFetchResult:
+    item: SnapshotAccount
+    started_at: int
+    ended_at: int
+    rows: list[dict]
+    error: str
+    plan_amount: Optional[Decimal] = None
+    plan_status: str = "unknown"
+    skip_reason: str = ""
 
 
 def _resolve_biz_date(biz_date: Optional[str]) -> str:
@@ -101,6 +126,35 @@ def _pick_value(record: dict[str, Any], candidates: tuple[str, ...]) -> Any:
     return None
 
 
+def _extract_plan_amount(value: Any) -> Optional[Decimal]:
+    text = str(value or "").strip()
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    try:
+        return Decimal(match.group(1))
+    except InvalidOperation:
+        return None
+
+
+def _extract_plan_text(plan: Any) -> str:
+    if not plan:
+        return ""
+    if isinstance(plan, str):
+        return plan
+    if isinstance(plan, dict):
+        current = _pick_value(
+            plan,
+            ("currentplan", "current_plan", "plan", "name", "planname", "subscription"),
+        )
+        if isinstance(current, dict):
+            nested = _pick_value(current, ("name", "planname", "displayname"))
+            return str(nested or "")
+        if current is not None:
+            return str(current)
+    return str(plan)
+
+
 def _to_int(value: Any) -> Optional[int]:
     if value in (None, ""):
         return None
@@ -124,6 +178,8 @@ def _rows_from_usage_csv(
     run_id: str,
     biz_date: str,
     email: str,
+    feishu_email: str,
+    plan_amount: Optional[Decimal],
     csv_text: str,
 ) -> list[dict]:
     reader = csv.DictReader(io.StringIO(csv_text.strip()))
@@ -139,12 +195,9 @@ def _rows_from_usage_csv(
                 "dt": biz_date,
                 "run_id": run_id,
                 "account_email": email,
+                "feishu_email": feishu_email,
+                "plan_amount": plan_amount,
                 "event_time": event_time.replace(tzinfo=None),
-                "first_api_request_id": _pick_value(
-                    row,
-                    ("first api request id", "first api req id", "request id", "request_id", "requestid", "id"),
-                ),
-                "environment": _pick_value(row, ("environment",)),
                 "kind": _pick_value(row, ("kind",)),
                 "model_name": _pick_value(row, ("model", "model_name")),
                 "max_mode": _pick_value(row, ("max mode", "max_mode")),
@@ -169,9 +222,7 @@ def _rows_from_usage_csv(
                 "total_tokens": _to_int(
                     _pick_value(row, ("total_tokens", "totaltokens", "total tokens"))
                 ),
-                "cost": _to_float(
-                    _pick_value(row, ("cost", "cost_usd", "total_cost_usd"))
-                ),
+                "cost": _pick_value(row, ("cost", "cost_usd", "total_cost_usd")),
                 "raw_event_json": json.dumps(row, ensure_ascii=False),
             }
         )
@@ -183,6 +234,8 @@ def _rows_from_usage_events(
     run_id: str,
     biz_date: str,
     email: str,
+    feishu_email: str,
+    plan_amount: Optional[Decimal],
     events: list[dict[str, Any]],
 ) -> list[dict]:
     rows: list[dict] = []
@@ -201,9 +254,9 @@ def _rows_from_usage_events(
                 "dt": biz_date,
                 "run_id": run_id,
                 "account_email": email,
+                "feishu_email": feishu_email,
+                "plan_amount": plan_amount,
                 "event_time": event_time.replace(tzinfo=None),
-                "first_api_request_id": ev.get("requestId") or ev.get("id"),
-                "environment": ev.get("environment"),
                 "kind": ev.get("kind"),
                 "model_name": ev.get("model"),
                 "max_mode": ev.get("maxMode"),
@@ -218,7 +271,11 @@ def _rows_from_usage_events(
                 ),
                 "output_tokens": _to_int(token_usage.get("outputTokens")),
                 "total_tokens": _to_int(token_usage.get("totalTokens")),
-                "cost": _to_float(token_usage.get("totalCents")) / 100 if token_usage.get("totalCents") is not None else None,
+                "cost": (
+                    str(_to_float(token_usage.get("totalCents")) / 100)
+                    if token_usage.get("totalCents") is not None
+                    else None
+                ),
                 "raw_event_json": json.dumps(ev, ensure_ascii=False),
             }
         )
@@ -243,6 +300,7 @@ def _snapshot_accounts(emails: Optional[tuple[str, ...]] = None, *, biz_date: st
             imap_password=str(row.get("imap_password") or ""),
             imap_host=str(row.get("imap_host") or SETTINGS.default_imap_host),
             imap_port=int(row.get("imap_port") or SETTINGS.default_imap_port),
+            feishu_email=str(row.get("feishu_email") or "").strip().lower(),
         )
         added_at = int(row.get("added_at") or 0)
         snap.append(
@@ -250,19 +308,153 @@ def _snapshot_accounts(emails: Optional[tuple[str, ...]] = None, *, biz_date: st
                 account=acc,
                 source=str(row.get("source") or "db"),
                 is_new=added_at >= day_start_ts if added_at else False,
+                feishu_email=acc.feishu_email,
             )
         )
     if snap:
         return snap
+    return []
 
-    # 兼容：账号库为空时回退 CSV
-    fallback = load_accounts()
-    out = []
-    for acc in fallback:
-        if wanted and acc.email.lower() not in wanted:
-            continue
-        out.append(SnapshotAccount(account=acc, source="csv", is_new=False))
-    return out
+
+def _update_account_plan_status(*, email: str, info: PlanInfo) -> None:
+    try:
+        get_default_store().update_account_plan(
+            email=email,
+            plan_status=info.status,
+            plan_amount=info.amount,
+            plan_error=info.error,
+        )
+    except Exception as e:
+        log.warning(
+            _kv_message(
+                event="account_plan_status_update_failed",
+                account_email=email,
+                plan_status=info.status,
+                error=f"{type(e).__name__}: {e}",
+            )
+        )
+
+
+def _fetch_account_usage_rows(
+    item: SnapshotAccount,
+    *,
+    run_id: str,
+    biz_date: str,
+    start_ts: int,
+    end_ts: int,
+) -> AccountFetchResult:
+    acc = item.account
+    acc_start = int(time.time())
+    feishu_email = str(item.feishu_email or getattr(acc, "feishu_email", "") or "").strip().lower()
+    if not feishu_email:
+        return AccountFetchResult(
+            item=item,
+            started_at=acc_start,
+            ended_at=int(time.time()),
+            rows=[],
+            error=_err("E_ACCOUNT_METADATA", "feishu_email is required"),
+        )
+    retry_times = max(1, SETTINGS.bi_sync_retry_times)
+    last_err = ""
+    account_rows: list[dict] = []
+    plan_info: Optional[PlanInfo] = None
+    plan_amount: Optional[Decimal] = None
+    plan_errors: list[str] = []
+    for attempt in range(1, retry_times + 1):
+        try:
+            plan_info = fetch_plan_info_from_dashboard(acc)
+            if plan_info.status == "not_enabled":
+                _update_account_plan_status(email=acc.email, info=plan_info)
+                return AccountFetchResult(
+                    item=item,
+                    started_at=acc_start,
+                    ended_at=int(time.time()),
+                    rows=[],
+                    error="",
+                    plan_amount=None,
+                    plan_status="not_enabled",
+                    skip_reason=plan_info.error or "plan not enabled",
+                )
+            if plan_info.status != "active" or plan_info.amount is None:
+                raise RuntimeError(plan_info.error or f"套餐状态异常: {plan_info.status}")
+            plan_amount = plan_info.amount
+            _update_account_plan_status(email=acc.email, info=plan_info)
+            last_err = ""
+            break
+        except Exception as e:
+            err_detail = f"attempt={attempt}/{retry_times} {type(e).__name__}: {e}"
+            plan_errors.append(err_detail)
+            last_err = _err("E_PLAN_AMOUNT", " | ".join(plan_errors))
+            log.warning(
+                _kv_message(
+                    event="plan_amount_fetch_failed",
+                    run_id=run_id,
+                    account_email=acc.email,
+                    attempt=attempt,
+                    retry_times=retry_times,
+                    error=f"{type(e).__name__}: {e}",
+                )
+            )
+    if plan_amount is None:
+        _update_account_plan_status(
+            email=acc.email,
+            info=PlanInfo(status="error", amount=None, error=last_err),
+        )
+        return AccountFetchResult(
+            item=item,
+            started_at=acc_start,
+            ended_at=int(time.time()),
+            rows=[],
+            error=last_err,
+            plan_amount=None,
+            plan_status="error",
+        )
+    for _ in range(retry_times):
+        try:
+            snap = fetcher.fetch_one(
+                acc,
+                what=("usage_events",),
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+            fatal_errors = dict(snap.errors)
+            if fatal_errors:
+                last_err = _err(
+                    "E_FETCH_ACCOUNT",
+                    "; ".join(f"{k}={v}" for k, v in fatal_errors.items()),
+                )
+                continue
+            if snap.usage_csv_text:
+                account_rows = _rows_from_usage_csv(
+                    run_id=run_id,
+                    biz_date=biz_date,
+                    email=acc.email,
+                    feishu_email=feishu_email,
+                    plan_amount=plan_amount,
+                    csv_text=snap.usage_csv_text,
+                )
+            else:
+                account_rows = _rows_from_usage_events(
+                    run_id=run_id,
+                    biz_date=biz_date,
+                    email=acc.email,
+                    feishu_email=feishu_email,
+                    plan_amount=plan_amount,
+                    events=snap.usage_events or [],
+                )
+            last_err = ""
+            break
+        except Exception as e:
+            last_err = _err("E_FETCH_EXCEPTION", f"{type(e).__name__}: {e}")
+    return AccountFetchResult(
+        item=item,
+        started_at=acc_start,
+        ended_at=int(time.time()),
+        rows=account_rows,
+        error=last_err,
+        plan_amount=plan_amount,
+        plan_status=plan_info.status if plan_info else "unknown",
+    )
 
 
 def run_daily_sync(
@@ -280,7 +472,6 @@ def run_daily_sync(
     start_ts, end_ts = _biz_date_range_utc_seconds(target_date)
     run_id = run_id or f"{target_date.replace('-', '')}_{secrets.token_hex(4)}"
     log_store = log_store or get_default_sync_log_store()
-    loader = StarRocksLoader()
     snapshot = _snapshot_accounts(emails, biz_date=target_date)
     snapshot_total = len(snapshot)
     new_account_count = sum(1 for s in snapshot if s.is_new)
@@ -303,13 +494,12 @@ def run_daily_sync(
             account_failed=0,
             event_total=0,
             ods_rows=0,
-            dwd_rows=0,
             error_summary=msg,
         )
         result = {"run_id": run_id, "biz_date": target_date, "status": "failed", "message": msg}
         send_alert(
-            "BI 日同步失败",
-            f"run_id={run_id}\nbiz_date={target_date}\nreason={msg}",
+            _sync_alert_title(trigger_type, "failed"),
+            f"trigger_type={trigger_type}\nrun_id={run_id}\nbiz_date={target_date}\nreason={msg}",
             level="error",
         )
         return result
@@ -324,20 +514,22 @@ def run_daily_sync(
     ok_count = 0
     fail_count = 0
     error_messages: list[str] = []
+    fetch_ok_count = 0
     fetch_fail_count = 0
     load_fail_count = 0
     load_ok_count = 0
     ods_rows = 0
-    dwd_rows = 0
     log_store.add_stage(run_id=run_id, stage="prepare_partition", status="start")
     try:
+        loader = StarRocksLoader()
+        loader.check_connection()
         loader.ensure_tables()
         loader.ensure_biz_date_partitions_ready(biz_date=target_date)
         log_store.add_stage(
             run_id=run_id,
             stage="prepare_partition",
             status="success",
-            message=_kv_message(biz_date=target_date, tables="ods,dwd"),
+            message=_kv_message(biz_date=target_date, tables="ods", starrocks_connection="ok"),
         )
     except Exception as e:
         msg = _err("E_PARTITION_PREPARE", f"{type(e).__name__}: {e}")
@@ -349,53 +541,74 @@ def run_daily_sync(
             account_failed=snapshot_total,
             event_total=0,
             ods_rows=0,
-            dwd_rows=0,
             error_summary=msg[:2000],
+        )
+        send_alert(
+            _sync_alert_title(trigger_type, "failed"),
+            f"trigger_type={trigger_type}\nrun_id={run_id}\nbiz_date={target_date}\nstage=prepare_partition\nerror={msg}",
+            level="error",
         )
         raise
 
-    log_store.add_stage(run_id=run_id, stage="fetch", status="start")
-    for item in snapshot:
+    fetch_workers = min(snapshot_total, max(1, int(SETTINGS.api_concurrency or 1)))
+    log_store.add_stage(
+        run_id=run_id,
+        stage="fetch",
+        status="start",
+        message=_kv_message(
+            fetch_workers=fetch_workers,
+            load_queue="single_writer",
+            writer_workers=1,
+        ),
+    )
+
+    def _handle_fetch_result(fetch_result: AccountFetchResult) -> None:
+        nonlocal ok_count, fail_count, fetch_ok_count, fetch_fail_count, load_fail_count
+        nonlocal load_ok_count, ods_rows
+        item = fetch_result.item
         acc = item.account
-        acc_start = int(time.time())
-        attempt = 0
-        last_err = ""
-        account_rows: list[dict] = []
-        while attempt < max(1, SETTINGS.bi_sync_retry_times):
-            attempt += 1
-            try:
-                snap = fetcher.fetch_one(
-                    acc,
-                    what=("usage_events",),
-                    start_ts=start_ts,
-                    end_ts=end_ts,
-                )
-                if snap.errors:
-                    last_err = _err(
-                        "E_FETCH_ACCOUNT",
-                        "; ".join(f"{k}={v}" for k, v in snap.errors.items()),
-                    )
-                    continue
-                if snap.usage_csv_text:
-                    account_rows = _rows_from_usage_csv(
-                        run_id=run_id,
-                        biz_date=target_date,
-                        email=acc.email,
-                        csv_text=snap.usage_csv_text,
-                    )
-                else:
-                    account_rows = _rows_from_usage_events(
-                        run_id=run_id,
-                        biz_date=target_date,
-                        email=acc.email,
-                        events=snap.usage_events or [],
-                    )
-                break
-            except Exception as e:
-                last_err = _err("E_FETCH_EXCEPTION", f"{type(e).__name__}: {e}")
-        acc_end = int(time.time())
+        account_rows = fetch_result.rows
+        last_err = fetch_result.error
+        if fetch_result.plan_status == "not_enabled":
+            fetch_ok_count += 1
+            ok_count += 1
+            msg = _kv_message(
+                event="account_plan_not_enabled",
+                run_id=run_id,
+                account_email=acc.email,
+                plan_status=fetch_result.plan_status,
+                reason=fetch_result.skip_reason,
+            )
+            log.info(msg)
+            log_store.add_account_log(
+                run_id=run_id,
+                account_email=acc.email,
+                account_source=item.source,
+                is_new_account=item.is_new,
+                status="skipped",
+                started_at=fetch_result.started_at,
+                ended_at=fetch_result.ended_at,
+                fetch_rows=0,
+                load_rows=0,
+                error_message=_kv_message(
+                    plan_status=fetch_result.plan_status,
+                    reason=fetch_result.skip_reason,
+                ),
+            )
+            return
         if account_rows or last_err == "":
-            # 按账号+日期增量落库：账号拉完即入 ODS/DWD，避免整天全量在末尾一次性写入。
+            fetch_ok_count += 1
+            # 按账号+日期覆盖写入 ODS；保留原始明细，避免额外派生表写入成本。
+            load_start = int(time.time())
+            log.info(
+                _kv_message(
+                    event="account_load_start",
+                    run_id=run_id,
+                    account_email=acc.email,
+                    fetch_rows=len(account_rows),
+                    queue="single_writer",
+                )
+            )
             try:
                 normalized = [loader.normalize_decimal_fields(r) for r in account_rows]
                 loaded_ods = loader.replace_ods_rows_for_account(
@@ -403,25 +616,30 @@ def run_daily_sync(
                     account_email=acc.email,
                     rows=normalized,
                 )
-                loaded_dwd = loader.rebuild_dwd_for_account_date(
-                    biz_date=target_date,
-                    account_email=acc.email,
-                )
                 ods_rows += loaded_ods
-                dwd_rows += loaded_dwd
                 load_ok_count += 1
                 ok_count += 1
                 all_rows.extend(account_rows)
+                load_end = int(time.time())
+                log.info(
+                    _kv_message(
+                        event="account_load_success",
+                        run_id=run_id,
+                        account_email=acc.email,
+                        ods_rows=loaded_ods,
+                        duration_sec=max(0, load_end - load_start),
+                    )
+                )
                 log_store.add_account_log(
                     run_id=run_id,
                     account_email=acc.email,
                     account_source=item.source,
                     is_new_account=item.is_new,
                     status="success",
-                    started_at=acc_start,
-                    ended_at=acc_end,
+                    started_at=fetch_result.started_at,
+                    ended_at=int(time.time()),
                     fetch_rows=len(account_rows),
-                    load_rows=loaded_dwd,
+                    load_rows=loaded_ods,
                 )
             except Exception as e:
                 fail_count += 1
@@ -434,8 +652,8 @@ def run_daily_sync(
                     account_source=item.source,
                     is_new_account=item.is_new,
                     status="failed",
-                    started_at=acc_start,
-                    ended_at=acc_end,
+                    started_at=fetch_result.started_at,
+                    ended_at=int(time.time()),
                     fetch_rows=len(account_rows),
                     load_rows=0,
                     error_message=err,
@@ -459,8 +677,8 @@ def run_daily_sync(
                 account_source=item.source,
                 is_new_account=item.is_new,
                 status="failed",
-                started_at=acc_start,
-                ended_at=acc_end,
+                started_at=fetch_result.started_at,
+                ended_at=fetch_result.ended_at,
                 fetch_rows=0,
                 load_rows=0,
                 error_message=last_err,
@@ -474,13 +692,79 @@ def run_daily_sync(
                 )
             )
 
+    result_queue: queue.Queue[
+        tuple[SnapshotAccount, Optional[AccountFetchResult], Optional[BaseException]]
+    ] = queue.Queue(maxsize=max(1, fetch_workers * 2))
+
+    def _enqueue_fetch_result(
+        future: concurrent.futures.Future[AccountFetchResult],
+        item: SnapshotAccount,
+    ) -> None:
+        try:
+            result_queue.put((item, future.result(), None))
+        except BaseException as e:
+            result_queue.put((item, None, e))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=fetch_workers) as pool:
+        for item in snapshot:
+            future = pool.submit(
+                _fetch_account_usage_rows,
+                item,
+                run_id=run_id,
+                biz_date=target_date,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+            future.add_done_callback(
+                lambda done_future, item=item: _enqueue_fetch_result(done_future, item)
+            )
+
+        for _ in range(snapshot_total):
+            item, fetch_result, fetch_exception = result_queue.get()
+            try:
+                if fetch_exception is not None:
+                    raise fetch_exception
+                if fetch_result is None:
+                    raise RuntimeError("fetch worker returned empty result")
+                _handle_fetch_result(fetch_result)
+            except Exception as e:
+                fail_count += 1
+                fetch_fail_count += 1
+                err = _err("E_FETCH_WORKER", f"{type(e).__name__}: {e}")
+                error_messages.append(err)
+                now = int(time.time())
+                log_store.add_account_log(
+                    run_id=run_id,
+                    account_email=item.account.email,
+                    account_source=item.source,
+                    is_new_account=item.is_new,
+                    status="failed",
+                    started_at=now,
+                    ended_at=now,
+                    fetch_rows=0,
+                    load_rows=0,
+                    error_message=err,
+                )
+                log.warning(
+                    _kv_message(
+                        event="account_fetch_worker_failed",
+                        run_id=run_id,
+                        account_email=item.account.email,
+                        error=err,
+                    )
+                )
+            finally:
+                result_queue.task_done()
+
     log_store.add_stage(
         run_id=run_id,
         stage="fetch",
         status="success" if fetch_fail_count == 0 else "failed",
         message=_kv_message(
             snapshot_total=snapshot_total,
-            fetch_ok=ok_count,
+            fetch_workers=fetch_workers,
+            load_queue="single_writer",
+            fetch_ok=fetch_ok_count,
             fetch_fail=fetch_fail_count,
             fetched_rows=len(all_rows),
         ),
@@ -490,22 +774,12 @@ def run_daily_sync(
         stage="load_ods",
         status="success" if load_fail_count == 0 else "failed",
         message=_kv_message(
+            load_mode="serial_queue",
             load_ok=load_ok_count,
             load_fail=load_fail_count,
             ods_rows=ods_rows,
         ),
     )
-    log_store.add_stage(
-        run_id=run_id,
-        stage="load_dwd",
-        status="success" if load_fail_count == 0 else "failed",
-        message=_kv_message(
-            load_ok=load_ok_count,
-            load_fail=load_fail_count,
-            dwd_rows=dwd_rows,
-        ),
-    )
-
     if fail_count == 0:
         status = "success"
     elif ok_count > 0:
@@ -522,7 +796,6 @@ def run_daily_sync(
             account_failed=fail_count,
             event_total=len(all_rows),
             ods_rows=ods_rows,
-            dwd_rows=dwd_rows,
         ),
     )
     log_store.finish_run(
@@ -532,7 +805,6 @@ def run_daily_sync(
         account_failed=fail_count,
         event_total=len(all_rows),
         ods_rows=ods_rows,
-        dwd_rows=dwd_rows,
         error_summary="; ".join(error_messages)[:2000],
     )
     result = {
@@ -544,23 +816,22 @@ def run_daily_sync(
         "account_failed": fail_count,
         "event_total": len(all_rows),
         "ods_rows": ods_rows,
-        "dwd_rows": dwd_rows,
     }
     if status == "success":
         send_alert(
-            "BI 日同步成功",
+            _sync_alert_title(trigger_type, status),
             (
-                f"run_id={run_id}\nbiz_date={target_date}\n"
+                f"trigger_type={trigger_type}\nrun_id={run_id}\nbiz_date={target_date}\n"
                 f"account_success={ok_count}\naccount_failed={fail_count}\n"
-                f"ods_rows={ods_rows}\ndwd_rows={dwd_rows}"
+                f"ods_rows={ods_rows}"
             ),
-            level="info",
+            level="success",
         )
     else:
         send_alert(
-            "BI 日同步异常",
+            _sync_alert_title(trigger_type, status),
             (
-                f"run_id={run_id}\nbiz_date={target_date}\nstatus={status}\n"
+                f"trigger_type={trigger_type}\nrun_id={run_id}\nbiz_date={target_date}\nstatus={status}\n"
                 f"account_success={ok_count}\naccount_failed={fail_count}\n"
                 f"errors={'; '.join(error_messages)[:1000]}"
             ),

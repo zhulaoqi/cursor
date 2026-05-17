@@ -21,7 +21,7 @@ def load_accounts(csv_path: Path | None = None) -> list[Account]:
     accounts: list[Account] = []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
-        required = {"email", "imap_password"}
+        required = {"email", "imap_password", "feishu_email"}
         missing = required - set((reader.fieldnames or []))
         if missing:
             raise ValueError(f"CSV 缺少必需列: {missing}")
@@ -33,6 +33,9 @@ def load_accounts(csv_path: Path | None = None) -> list[Account]:
                 continue
             host = (row.get("imap_host") or "").strip() or SETTINGS.default_imap_host
             port_raw = (row.get("imap_port") or "").strip()
+            feishu_email = (row.get("feishu_email") or "").strip().lower()
+            if not feishu_email:
+                raise ValueError(f"第 {i} 行 feishu_email 不能为空")
             try:
                 port = int(port_raw) if port_raw else SETTINGS.default_imap_port
             except ValueError:
@@ -43,6 +46,7 @@ def load_accounts(csv_path: Path | None = None) -> list[Account]:
                 imap_password=pwd,
                 imap_host=host,
                 imap_port=port,
+                feishu_email=feishu_email,
             ))
 
     return accounts

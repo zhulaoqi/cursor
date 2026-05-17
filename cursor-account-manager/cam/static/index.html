@@ -21,6 +21,8 @@
       --success:  #16A34A;
       --warn:     #D97706;
       --danger:   #DC2626;
+      --app-shell-width: 1600px;
+      --app-shell-gutter: 32px;
     }
     *, *::before, *::after { box-sizing: border-box; }
     body {
@@ -32,6 +34,10 @@
       margin: 0;
     }
     h1, h2, h3, .mono { font-family: 'Fira Code', monospace; }
+    .app-shell {
+      width: min(var(--app-shell-width), calc(100vw - var(--app-shell-gutter) * 2));
+      margin: 0 auto;
+    }
 
     /* ── 拖拽区域 ── */
     .drop-zone {
@@ -156,10 +162,22 @@
       background: #F8FAFD;
       border-color: #D9E3F5;
     }
+    .sync-email-option.is-selected {
+      color: #0F766E;
+      background: #ECFDF5;
+      border-color: #A7F3D0;
+    }
+    .sync-email-option.is-selected:hover {
+      background: #D1FAE5;
+      border-color: #5EEAD4;
+    }
     .sync-email-option .tag {
       color: #1D4ED8;
       font-size: 11px;
       font-weight: 700;
+    }
+    .sync-email-option.is-selected .tag {
+      color: #0F766E;
     }
     .sync-email-empty {
       padding: 8px 10px;
@@ -306,12 +324,12 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      margin-bottom:20px;
+      margin-bottom:12px;
       flex-wrap:wrap;
       gap:14px;
     }
     .sync-desc {
-      margin: 6px 0 0;
+      margin: 4px 0 0;
       color: #64748B;
       font-size: 13px;
       max-width: 720px;
@@ -415,6 +433,7 @@
       transition: border-color .15s, background .15s;
       vertical-align: middle;
     }
+    input[type="checkbox"]::after { content: none; }
     input[type="checkbox"]:hover:not(:disabled) { border-color: var(--primary); }
     input[type="checkbox"]:checked {
       background: var(--primary); border-color: var(--primary);
@@ -483,7 +502,7 @@
       white-space: nowrap;
     }
     .filters-panel {
-      padding: 12px 14px;
+      padding: 12px 18px 12px 24px;
       margin-bottom: 12px;
       background: #fff;
     }
@@ -817,12 +836,17 @@
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
     /* ── 大列表快捷操作 ── */
+    /* 账号库整页内容区：相对 shell 略向右收进，避免大屏下表格贴左、右侧空一大块 */
+    .account-list-view {
+      padding-left: 20px;
+      box-sizing: border-box;
+    }
     .account-list-card { overflow: visible; }
     .list-bulk-toolbar {
       position: sticky;
       top: 60px;
       z-index: 60;
-      padding: 12px 16px;
+      padding: 12px 18px 12px 24px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
@@ -834,10 +858,277 @@
       backdrop-filter: blur(8px);
     }
     .account-list-table-wrap {
+      width: 100%;
+      max-width: 100%;
       overflow-x: auto;
       border-radius: 0 0 12px 12px;
       box-shadow: inset 0 -1px 0 var(--border);
+      padding: 0 16px 4px 20px;
+      box-sizing: border-box;
+      -webkit-overflow-scrolling: touch;
     }
+    .account-list-table {
+      width: 100%;
+      min-width: 1180px;
+      table-layout: fixed;
+    }
+    /* 账号表：列宽合计 100%。飞书列按实际邮箱长度收拢，套餐/按量/Host 紧跟其后 */
+    .account-list-table col.select-col-width { width: 3%; }
+    .account-list-table col.email-col-width { width: 17%; }
+    .account-list-table col.feishu-col-width { width: 19%; }
+    .account-list-table col.current-plan-col-width { width: 6%; }
+    .account-list-table col.on-demand-col-width { width: 8%; }
+    .account-list-table col.host-col-width { width: 9%; }
+    .account-list-table col.port-col-width { width: 3%; }
+    .account-list-table col.source-col-width { width: 4%; }
+    .account-list-table col.status-col-width { width: 4%; }
+    .account-list-table col.data-updated-col-width { width: 6%; }
+    .account-list-table col.actions-col-width { width: 10%; }
+    .account-list-table th,
+    .account-list-table td {
+      padding: 10px 8px;
+      vertical-align: middle;
+    }
+    .account-list-table th:nth-child(7),
+    .account-list-table td:nth-child(7),
+    .account-list-table th:nth-child(8),
+    .account-list-table td:nth-child(8),
+    .account-list-table th:nth-child(9),
+    .account-list-table td:nth-child(9),
+    .account-list-table th:nth-child(10),
+    .account-list-table td:nth-child(10) {
+      padding: 10px 4px;
+    }
+    .account-list-table th:nth-child(11),
+    .account-list-table td:nth-child(11) {
+      padding: 10px 8px;
+    }
+    .account-list-table th:nth-child(5),
+    .account-list-table td:nth-child(5) {
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+    .account-list-table th:nth-child(6),
+    .account-list-table td:nth-child(6) {
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .account-list-table td {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .account-list-table th {
+      white-space: nowrap;
+    }
+    .account-list-table .account-col-center {
+      text-align: center;
+    }
+    .account-list-table td.account-col-center .mono-cell {
+      display: inline-block;
+      max-width: 100%;
+      text-align: center;
+    }
+    .account-list-table .mono-cell {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* 飞书邮箱：完整展示，不截断（悬停 title 仍保留作复制参考） */
+    .account-list-table th.feishu-col,
+    .account-list-table td.feishu-col {
+      overflow: visible;
+      padding-left: 8px;
+      padding-right: 4px;
+    }
+    .account-list-table th.plan-block-col,
+    .account-list-table td.plan-block-col {
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .account-list-table td.feishu-col .mono-cell {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .account-list-table th.compact-col,
+    .account-list-table td.compact-col {
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .account-list-table .select-col {
+      padding-left: 6px;
+      padding-right: 4px;
+      text-align: center;
+    }
+    .account-list-table .select-col input[type="checkbox"] {
+      display: inline-block;
+      margin: 0;
+      vertical-align: middle;
+    }
+    .account-list-table .on-demand-cell {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      padding-left: 8px !important;
+      padding-right: 8px !important;
+      box-sizing: border-box;
+    }
+    .account-list-table .on-demand-cell.od-yes { color: var(--danger); }
+    .account-list-table .on-demand-cell.od-no { color: var(--success); }
+    .account-list-table .on-demand-cell.od-was { color: var(--warn); }
+    .on-demand-cell-inner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .on-demand-cell-inner > span:first-child {
+      flex-shrink: 0;
+      min-width: 2.5em;
+    }
+    .on-demand-refresh-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .on-demand-refresh-btn:hover:not(:disabled) {
+      background: rgba(15, 23, 42, 0.06);
+      border-color: var(--border);
+      color: var(--primary);
+    }
+    .on-demand-refresh-btn:disabled {
+      cursor: default;
+      opacity: 0.9;
+    }
+    .on-demand-refresh-btn.is-remote-locked:disabled {
+      opacity: 0.72;
+      color: var(--muted);
+    }
+    .on-demand-th-inner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+    .on-demand-th-inner > span {
+      flex-shrink: 0;
+      letter-spacing: 0.02em;
+    }
+    .on-demand-th-inner .on-demand-refresh-btn {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .account-list-table thead .on-demand-cell {
+      overflow: visible;
+    }
+    .on-demand-th-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 2px 0;
+    }
+    .on-demand-progress-popover {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      left: auto;
+      transform: none;
+      z-index: 120;
+      min-width: 248px;
+      max-width: min(300px, 42vw);
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+      text-align: left;
+      pointer-events: none;
+    }
+    .on-demand-progress-popover::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      right: 14px;
+      left: auto;
+      transform: rotate(45deg);
+      width: 10px;
+      height: 10px;
+      background: #fff;
+      border-left: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+    }
+    .on-demand-progress-popover .odp-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0 0 8px;
+    }
+    .on-demand-progress-popover .odp-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: #E2E8F0;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .on-demand-progress-popover .odp-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--primary);
+      transition: width 0.25s ease;
+    }
+    .on-demand-progress-popover .odp-meta {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0;
+    }
+    .on-demand-progress-popover .odp-email {
+      font-size: 11px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin-top: 6px;
+      word-break: break-all;
+    }
+    .plan-pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .plan-pill.active { background: #E0F2FE; color: #0369A1; }
+    .plan-pill.not-enabled { background: #F1F5F9; color: #64748B; }
+    .plan-pill.error { background: #FEE2E2; color: #B91C1C; }
+    .plan-pill.unknown { background: #FEF9C3; color: #A16207; }
     .sticky-selection-bar {
       position: fixed;
       left: 20px;
@@ -991,6 +1282,7 @@
       opacity: .55;
     }
     @media (max-width: 720px) {
+      :root { --app-shell-gutter: 16px; }
       .sticky-selection-bar {
         align-items: stretch;
         flex-direction: column;
@@ -1003,14 +1295,14 @@
     .row-new td { background: #F0FDF4 !important; }
 
     /* ── 表格行内图标按钮（重置/删除）──
-       触摸目标 32×32px（紧凑型表格），具备 hover/active/focus 反馈和焦点环。
+       触摸目标约 36×36px，间距 6px；具备 hover/active/focus 反馈和焦点环。
        使用语义色 token：默认 muted、重置 warn、删除 danger。 */
     .table-row-action {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 32px;
-      min-height: 32px;
+      min-width: 36px;
+      min-height: 36px;
       padding: 0;
       border: 1px solid transparent;
       border-radius: 8px;
@@ -1040,9 +1332,12 @@
       border-color: rgba(239,68,68,.35);
     }
     .table-row-actions {
-      display: inline-flex;
+      display: flex;
       align-items: center;
+      justify-content: center;
+      width: 100%;
       gap: 6px;
+      flex-wrap: nowrap;
     }
 
     /* ── 输入框 focus ring ── */
@@ -1246,7 +1541,7 @@
 
 <!-- ── 顶部导航 ─────────────────────────────────────────────── -->
 <header class="card" style="border-radius:0; border-left:none; border-right:none; border-top:none; position:sticky; top:0; z-index:100; backdrop-filter:blur(8px); background:rgba(255,255,255,.95);">
-  <div style="max-width:1280px; margin:0 auto; padding:0 32px; height:60px; display:flex; align-items:center; justify-content:space-between;">
+  <div class="app-shell" style="height:60px; display:flex; align-items:center; justify-content:space-between;">
     <div style="display:flex; align-items:center; gap:10px;">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -1260,7 +1555,7 @@
         <template x-if="view !== 'list'">
           <span style="display:flex;align-items:center;gap:6px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            <span x-text="view === 'upload' ? '上传账号' : (view === 'sync' ? '拉取日志&补偿拉取' : '拉取进度')"></span>
+            <span x-text="view === 'upload' ? '上传账号' : (view === 'sync' ? '账单调度' : '拉取进度')"></span>
           </span>
         </template>
       </div>
@@ -1272,13 +1567,13 @@
   </div>
 </header>
 
-<main style="max-width:1280px; margin:0 auto; padding:36px 32px; display:flex; flex-direction:column; gap:28px; transition: opacity 0.15s ease;"
+<main class="app-shell" style="padding:36px 0; display:flex; flex-direction:column; gap:28px; transition: opacity 0.15s ease;"
       :style="{ opacity: _ready ? 1 : 0, pointerEvents: _ready ? 'auto' : 'none' }">
 
   <!-- ══════════════════════════════════════════════════════════════
        VIEW: 账号库列表
   ═══════════════════════════════════════════════════════════════ -->
-  <div x-show="view === 'list'" x-cloak x-transition>
+  <div class="account-list-view" x-show="view === 'list'" x-cloak x-transition>
 
     <!-- 页头 -->
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
@@ -1307,7 +1602,7 @@
         </button>
         <button class="btn btn-ghost" @click="goSync()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg>
-          日志与补拉
+          账单调度
         </button>
       </div>
     </div>
@@ -1477,40 +1772,118 @@
           </div>
 
           <div class="account-list-table-wrap">
-            <table>
+            <table class="account-list-table">
+              <colgroup>
+                <col class="select-col-width">
+                <col class="email-col-width">
+                <col class="feishu-col-width">
+                <col class="current-plan-col-width">
+                <col class="on-demand-col-width">
+                <col class="host-col-width">
+                <col class="port-col-width">
+                <col class="source-col-width">
+                <col class="status-col-width">
+                <col class="data-updated-col-width">
+                <col class="actions-col-width">
+              </colgroup>
               <thead>
                 <tr>
-                  <th style="width:32px;"></th>
+                  <th class="select-col"></th>
                   <th>邮箱</th>
-                  <th>IMAP 密码</th>
-                  <th>IMAP Host</th>
-                  <th>Port</th>
-                  <th>来源</th>
-                  <th>添加时间</th>
-                  <th style="width:80px;">状态</th>
-                  <th style="width:80px;"></th>
+                  <th class="feishu-col">飞书邮箱</th>
+                  <th class="compact-col plan-block-col">当前套餐</th>
+                  <th class="on-demand-cell account-col-center plan-block-col">
+                    <div class="on-demand-th-wrap"
+                      @mouseenter="onDemandProgressHover = true; fetchSpendingRefreshStatus()"
+                      @mouseleave="onDemandProgressHover = false">
+                    <div class="on-demand-th-inner">
+                      <span>按量付费</span>
+                      <button type="button"
+                        class="on-demand-refresh-btn"
+                        :class="{ 'is-remote-locked': spendingRemoteBusy && !spendingBulkLoading }"
+                        :disabled="spendingRefreshLocked"
+                        @click="refreshAllAccountsSpending()"
+                        :title="spendingBulkLoading
+                          ? '正在本页发起全库消费页解析，请稍候…'
+                          : (spendingRemoteBusy
+                            ? '其他浏览器会话或本服务另一进程正在执行全库/行内消费页解析，请稍后再试'
+                            : '对账号库全部邮箱依次打开 Spending 页解析；进行中时本列与表头不可点；完成后会清空「行内已点过」状态')"
+                        :aria-busy="spendingBulkLoading ? 'true' : 'false'"
+                        aria-label="全局刷新按量付费与消费页">
+                        <template x-if="spendingBulkLoading">
+                          <svg class="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                        </template>
+                        <template x-if="!spendingBulkLoading">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </template>
+                      </button>
+                    </div>
+                    <div class="on-demand-progress-popover"
+                      x-show="onDemandProgressHover && spendingRefreshLocked"
+                      x-cloak>
+                      <p class="odp-title" x-text="spendingProgressTitle()"></p>
+                      <template x-if="spendingProgress && spendingProgress.running && spendingProgress.total > 0">
+                        <div class="odp-bar">
+                          <div class="odp-bar-fill" :style="`width:${spendingProgressPercent()}%`"></div>
+                        </div>
+                        <p class="odp-meta" x-text="spendingProgressMeta()"></p>
+                        <p class="odp-email" x-show="spendingProgress.current_email" x-text="spendingProgress.current_email"></p>
+                      </template>
+                      <template x-if="!spendingProgress || !spendingProgress.running || !(spendingProgress.total > 0)">
+                        <p class="odp-meta" x-text="spendingProgressLockedHint()"></p>
+                      </template>
+                    </div>
+                    </div>
+                  </th>
+                  <th class="compact-col plan-block-col">IMAP Host</th>
+                  <th class="account-col-center compact-col">Port</th>
+                  <th class="account-col-center compact-col">来源</th>
+                  <th class="account-col-center compact-col">状态</th>
+                  <th class="account-col-center compact-col">更新时间</th>
+                  <th class="actions-col account-col-center"></th>
                 </tr>
               </thead>
               <tbody>
                 <template x-for="a in filteredDbAccounts" :key="a.email">
                   <tr :class="accountDbStatus[a.email]?.status === 'disabled' ? 'opacity-60' : ''">
-                    <td>
+                    <td class="select-col">
                       <input type="checkbox" :checked="selectedEmails.has(a.email)"
                         @change="toggleOne(a.email, $event)" style="cursor:pointer;" />
                     </td>
-                    <td class="mono" style="font-size:13px;" x-text="a.email"></td>
-                    <td>
-                      <span class="mono" style="font-size:12px; color:var(--muted);"
-                        x-text="a.imap_password ? a.imap_password.slice(0,4) + '••••' : '-'"></span>
+                    <td><span class="mono mono-cell" style="font-size:13px;" x-text="a.email" :title="a.email"></span></td>
+                    <td class="feishu-col"><span class="mono mono-cell" x-text="a.feishu_email || '-'" :title="a.feishu_email || '-'"></span></td>
+                    <td class="compact-col plan-block-col" :title="currentPlanTooltip(a)">
+                      <span class="plan-pill" :class="planPillClass(a)" x-text="currentPlanDisplay(a)"></span>
                     </td>
-                    <td style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'"></td>
-                    <td style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
-                    <td style="color:var(--muted); font-size:12px;">
+                    <td class="on-demand-cell plan-block-col"
+                      :class="{ 'od-yes': onDemandLabel(a) === '是', 'od-no': onDemandLabel(a) === '否', 'od-was': onDemandLabel(a) === '曾开通' }"
+                      :title="onDemandRowTitle(a)">
+                      <div class="on-demand-cell-inner">
+                        <span x-text="onDemandLabel(a)"></span>
+                        <template x-if="!spendingRefreshLocked && !spendingRefreshDone.has((a.email || '').toLowerCase())">
+                          <button type="button"
+                            class="on-demand-refresh-btn"
+                            :disabled="spendingRefreshLoading.has((a.email || '').toLowerCase())"
+                            @click.stop="refreshAccountSpending(a.email)"
+                            title="从 Cursor Spending 页解析本账号按需开关（本页每行仅可手动点一次；整页刷新或表头全库刷新结束后会再次出现；任意会话正在全库/行内解析时本列不显示）"
+                            :aria-label="`刷新 ${a.email} 的按量付费状态`">
+                            <template x-if="spendingRefreshLoading.has((a.email || '').toLowerCase())">
+                              <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                            </template>
+                            <template x-if="!spendingRefreshLoading.has((a.email || '').toLowerCase())">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            </template>
+                          </button>
+                        </template>
+                      </div>
+                    </td>
+                    <td class="compact-col plan-block-col"><span class="mono-cell" style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'" :title="a.imap_host || 'imap.feishu.cn'"></span></td>
+                    <td class="account-col-center compact-col" style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
+                    <td class="account-col-center compact-col" style="color:var(--muted); font-size:12px;">
                       <span :style="`padding:2px 8px;border-radius:4px;font-size:11px;background:${a.source==='manual'?'#EFF6FF':a.source==='upload'?'#F0FDF4':'#F1F5F9'};color:${a.source==='manual'?'var(--primary)':a.source==='upload'?'var(--success)':'var(--muted)'}`"
                         x-text="a.source || '-'"></span>
                     </td>
-                    <td style="color:var(--muted); font-size:12px;" x-text="fmtTs(a.added_at)"></td>
-                    <td>
+                    <td class="account-col-center compact-col">
                       <template x-if="accountDbStatus[a.email]">
                         <span :style="`font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:${accountDbStatus[a.email].status==='disabled'?'#FEE2E2':accountDbStatus[a.email].status==='active'?'#DCFCE7':'#F1F5F9'};color:${accountDbStatus[a.email].status==='disabled'?'var(--danger)':accountDbStatus[a.email].status==='active'?'var(--success)':'var(--muted)'}`"
                           x-text="accountDbStatus[a.email].status==='disabled'?`锁定(${accountDbStatus[a.email].failures}次)`:accountDbStatus[a.email].status==='active'?'正常':'未知'">
@@ -1520,7 +1893,12 @@
                         <span style="font-size:11px;color:var(--muted);">-</span>
                       </template>
                     </td>
-                    <td>
+                    <td class="account-col-center compact-col">
+                      <span class="mono-cell" style="color:var(--muted); font-size:12px;"
+                        x-text="a.updated_at ? fmtTs(a.updated_at) : '-'"
+                        :title="a.updated_at ? ('数据更新时间：' + fmtTs(a.updated_at)) : '尚无账号数据更新记录'"></span>
+                    </td>
+                    <td class="actions-col account-col-center">
                       <div class="table-row-actions">
                         <button type="button"
                           class="table-row-action"
@@ -1559,7 +1937,7 @@
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
       <div>
         <h2 style="margin:0 0 4px; font-size:22px; font-weight:700; letter-spacing:-.3px;">上传账号</h2>
-        <p style="margin:0; color:var(--muted); font-size:13.5px;">支持 CSV 或 Excel，需包含 <code>email</code>、<code>imap_password</code> 两列（可选 <code>imap_host</code>、<code>imap_port</code>）</p>
+        <p style="margin:0; color:var(--muted); font-size:13.5px;">支持 CSV 或 Excel，需包含 <code>email</code>、<code>imap_password</code>、<code>feishu_email</code> 三列（可选 <code>imap_host</code>、<code>imap_port</code>）</p>
       </div>
       <button class="btn btn-ghost btn-sm" @click="goList()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -1597,6 +1975,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           下载 CSV 模板
         </button>
+        <button class="btn btn-ghost btn-sm" @click="downloadExcelTemplate()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h8M8 9h2"/></svg>
+          下载 Excel 模板
+        </button>
         <span style="font-size:13px; color:var(--muted); margin-left:8px;">或手动添加 →</span>
         <button class="btn btn-ghost btn-sm" @click="showManualAdd=!showManualAdd">手动添加账号</button>
       </div>
@@ -1613,6 +1995,11 @@
           <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:180px;">
             <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">IMAP 密码 *</label>
             <input type="text" x-model="manualPwd" placeholder="专用密码" style="width:100%;"
+              @keydown.enter="addManualAccount()" />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:200px;">
+            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">飞书邮箱 *</label>
+            <input type="text" x-model="manualFeishuEmail" placeholder="owner@example.com" style="width:100%;"
               @keydown.enter="addManualAccount()" />
           </div>
         </div>
@@ -1670,6 +2057,7 @@
               <tr>
                 <th style="width:60px;">状态</th>
                 <th>邮箱</th>
+                <th>飞书邮箱</th>
                 <th>IMAP 密码</th>
                 <th>IMAP Host</th>
                 <th>Port</th>
@@ -1685,6 +2073,7 @@
                       style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:#DCFCE7;color:var(--success);">新增</span>
                   </td>
                   <td class="mono" style="font-size:13px;" x-text="a.email"></td>
+                  <td class="mono" style="font-size:12px; color:var(--muted);" x-text="a.feishu_email || '-'"></td>
                   <td>
                     <span class="mono" style="font-size:12px; color:var(--muted);" x-text="a.imap_password.slice(0,4) + '••••'"></span>
                   </td>
@@ -1867,13 +2256,13 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════
-       VIEW: 拉取日志&补偿拉取
+       VIEW: 账单调度
   ═══════════════════════════════════════════════════════════════ -->
   <div x-show="view === 'sync'" x-cloak x-transition class="sync-shell">
     <div class="sync-head">
       <div>
-        <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">拉取日志&补偿拉取</h2>
-        <p class="sync-desc">每日主任务固定拉取昨日全量账号；补拉作为并行功能单独触发。</p>
+        <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">账单调度</h2>
+        <p class="sync-desc">每日主任务固定拉取昨日全量账号；补拉作为并行功能单独触发。按量付费字段另有独立静默定时任务（见下方说明）。</p>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
         <button class="btn btn-ghost" @click="goList()">
@@ -1882,6 +2271,16 @@
         </button>
         <button class="btn btn-ghost" @click="loadSyncDashboard()">刷新</button>
       </div>
+    </div>
+
+    <div class="sync-task-card" style="margin: 0 0 12px; border-style: dashed;"
+      x-show="schedulerMeta.spending_refresh_enable">
+      <div style="font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text);">消费页 / 按量付费（定时调度）</div>
+      <p style="margin:0; font-size:12px; color:var(--muted); line-height:1.55;">
+        服务端按 cron <code class="mono" style="font-size:11px;" x-text="schedulerMeta.spending_refresh_cron || '0 3 * * *'"></code>
+        自动全库刷新套餐档位与按量开关（与 BI 主同步<strong>不同锁</strong>，可并行；与账号库表头全库刷新<strong>不共用长时间文件锁</strong>）。完成后会发飞书汇总（与 BI 调度成功卡片类似）；失败原因亦写入各账号「消费页错误」，可在账号库悬停「当前套餐」查看。
+        BI 主链路 cron 为 <code class="mono" style="font-size:11px;" x-text="schedulerMeta.bi_sync_cron || '-'"></code>。
+      </p>
     </div>
 
     <div class="sync-task-grid">
@@ -2036,18 +2435,20 @@
                 class="sync-input"
                 placeholder="搜索账号邮箱并选择（支持模糊）"
                 x-model="syncReplayEmailKeyword"
-                @focus="syncReplayPickerOpen = true"
-                @input="syncReplayPickerOpen = true" />
+                @focus="openSyncReplayEmailPicker()"
+                @input="scheduleSyncReplayEmailSearch()" />
               <div class="sync-email-picker-list" x-show="syncReplayPickerOpen" x-cloak x-transition>
-                <template x-for="email in syncReplayEmailCandidates()" :key="email">
+                <template x-for="item in syncReplayEmailCandidates()" :key="item.email">
                   <button type="button" class="sync-email-option"
+                    :class="{ 'is-selected': item.selected }"
                     @mousedown.prevent
-                    @click="addSyncReplayEmail(email)">
-                    <span x-text="email"></span>
-                    <span class="tag">添加</span>
+                    @click="toggleSyncReplayEmail(item.email)">
+                    <span x-text="item.email"></span>
+                    <span class="tag" x-text="item.selected ? '取消' : '添加'"></span>
                   </button>
                 </template>
-                <div class="sync-email-empty" x-show="syncReplayEmailCandidates().length===0">无可选账号（可继续手动输入）</div>
+                <div class="sync-email-empty" x-show="syncReplayEmailLoading">正在查询账号库...</div>
+                <div class="sync-email-empty" x-show="!syncReplayEmailLoading && syncReplayEmailCandidates().length===0">账号库无匹配账号（可继续手动输入）</div>
               </div>
             </div>
             <textarea x-model="syncReplayEmails" rows="2" placeholder="a@xx.com,b@xx.com"
@@ -2137,12 +2538,13 @@
       <div class="sync-section-title" style="margin-bottom:10px;">最近运行</div>
       <div class="overflow-x-auto">
         <table>
-          <thead><tr><th>run_id</th><th>日期</th><th>状态</th><th>成功/失败</th><th>开始</th><th>操作</th></tr></thead>
-          <tbody>
-            <template x-for="r in syncRunsPaged" :key="r.run_id">
+          <thead><tr><th>run_id</th><th>日期</th><th>触发方式</th><th>状态</th><th>成功/失败</th><th>开始</th><th>操作</th></tr></thead>
+          <template x-for="r in syncRunsPaged" :key="r.run_id">
+            <tbody>
               <tr @click="toggleSyncRunInlineDetail(r.run_id)" style="cursor:pointer;">
                 <td class="mono" x-text="r.run_id"></td>
                 <td x-text="r.biz_date"></td>
+                <td><span class="badge badge-neutral" x-text="syncTriggerLabel(r.trigger_type)"></span></td>
                 <td><span class="badge" :class="syncStatusClass(r.status)" x-text="syncStatusLabel(r.status)"></span></td>
                 <td x-text="`${r.account_success||0}/${r.account_failed||0}`"></td>
                 <td x-text="fmtTsFull(r.started_at)"></td>
@@ -2153,8 +2555,71 @@
                   </button>
                 </td>
               </tr>
-            </template>
-          </tbody>
+              <tr x-show="syncRunInlineDetailId === r.run_id" x-cloak>
+                <td colspan="7" style="padding:0 12px 14px 12px; background:#fff;">
+                  <div style="margin-top:8px; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:12px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span class="mono" x-text="syncRunInlineDetail?.run_id || syncRunInlineDetailId"></span>
+                        <span class="badge badge-neutral" x-show="syncRunInlineDetail?.trigger_type" x-text="syncTriggerLabel(syncRunInlineDetail?.trigger_type)"></span>
+                        <span class="badge" :class="syncStatusClass(syncRunInlineDetail?.status)" x-text="syncStatusLabel(syncRunInlineDetail?.status)"></span>
+                        <span style="font-size:12px; color:var(--muted);" x-text="`成功/失败 ${syncRunInlineDetail?.account_success||0}/${syncRunInlineDetail?.account_failed||0}`"></span>
+                      </div>
+                      <button type="button" class="btn btn-ghost btn-sm" @click.stop="closeSyncRunInlineDetail()">收起</button>
+                    </div>
+                    <div x-show="syncRunInlineLoading" style="font-size:13px; color:var(--muted);">日志加载中...</div>
+                    <div x-show="syncRunInlineError" class="danger-dialog-error" style="margin:8px 0;" x-text="syncRunInlineError"></div>
+                    <div x-show="!syncRunInlineLoading">
+                      <div x-show="syncRunInlineStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
+                      <div x-show="syncRunInlineStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
+                        <div class="sync-log-head">
+                          <span>阶段</span>
+                          <span>状态 / 时间 / 耗时</span>
+                        </div>
+                        <template x-for="(s, idx) in syncRunInlineStages" :key="`${s.id}-${s.ts}`">
+                          <div>
+                            <div class="stage-row">
+                              <span class="mono" x-text="syncStageLabel(s.stage)"></span>
+                              <span class="stage-meta">
+                                <span class="stage-status-text" :style="`color:${syncStatusColor(s.status)}`">
+                                  <span class="dot" :style="`background:${syncStatusColor(s.status)}`"></span>
+                                  <span x-text="syncStatusLabel(s.status)"></span>
+                                </span>
+                                <span x-text="fmtTsFull(s.ts)"></span>
+                                <span x-text="syncStageElapsedFrom(syncRunInlineStages, idx)"></span>
+                              </span>
+                            </div>
+                            <div class="stage-msg" x-show="!syncLogCompact && (s.message || '').trim().length > 0" x-text="s.message"></div>
+                          </div>
+                        </template>
+                      </div>
+                      <div style="margin-top:12px;">
+                        <div style="font-size:13px; font-weight:600; margin-bottom:6px;">失败账号</div>
+                        <div x-show="syncRunInlineFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
+                        <div x-show="syncRunInlineFailedAccounts.length>0" class="overflow-x-auto">
+                          <table>
+                            <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
+                            <tbody>
+                              <template x-for="a in syncRunInlineFailedAccounts" :key="a.id">
+                                <tr>
+                                  <td class="mono" x-text="a.account_email"></td>
+                                  <td
+                                    style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                                    :title="a.error_message || '-'"
+                                    x-text="a.error_message || '-'"></td>
+                                  <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </template>
         </table>
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px; gap:10px; flex-wrap:wrap;">
@@ -2162,65 +2627,6 @@
         <div style="display:flex; gap:6px; align-items:center;">
           <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsPrevPage()" :disabled="syncRunsPage<=1">上一页</button>
           <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsNextPage()" :disabled="syncRunsPage>=syncRunsTotalPages">下一页</button>
-        </div>
-      </div>
-
-      <div x-show="syncRunInlineDetailId" style="margin-top:12px; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:12px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
-          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            <span class="mono" x-text="syncRunInlineDetail?.run_id || syncRunInlineDetailId"></span>
-            <span class="badge" :class="syncStatusClass(syncRunInlineDetail?.status)" x-text="syncStatusLabel(syncRunInlineDetail?.status)"></span>
-            <span style="font-size:12px; color:var(--muted);" x-text="`成功/失败 ${syncRunInlineDetail?.account_success||0}/${syncRunInlineDetail?.account_failed||0}`"></span>
-          </div>
-          <button type="button" class="btn btn-ghost btn-sm" @click="closeSyncRunInlineDetail()">收起</button>
-        </div>
-        <div x-show="syncRunInlineLoading" style="font-size:13px; color:var(--muted);">日志加载中...</div>
-        <div x-show="!syncRunInlineLoading">
-          <div x-show="syncRunInlineStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
-          <div x-show="syncRunInlineStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
-            <div class="sync-log-head">
-              <span>阶段</span>
-              <span>状态 / 时间 / 耗时</span>
-            </div>
-            <template x-for="(s, idx) in syncRunInlineStages" :key="`${s.id}-${s.ts}`">
-              <div>
-                <div class="stage-row">
-                  <span class="mono" x-text="syncStageLabel(s.stage)"></span>
-                  <span class="stage-meta">
-                    <span class="stage-status-text" :style="`color:${syncStatusColor(s.status)}`">
-                      <span class="dot" :style="`background:${syncStatusColor(s.status)}`"></span>
-                      <span x-text="syncStatusLabel(s.status)"></span>
-                    </span>
-                    <span x-text="fmtTsFull(s.ts)"></span>
-                    <span x-text="syncStageElapsedFrom(syncRunInlineStages, idx)"></span>
-                  </span>
-                </div>
-                <div class="stage-msg" x-show="!syncLogCompact && (s.message || '').trim().length > 0" x-text="s.message"></div>
-              </div>
-            </template>
-          </div>
-
-          <div style="margin-top:12px;">
-            <div style="font-size:13px; font-weight:600; margin-bottom:6px;">失败账号</div>
-            <div x-show="syncRunInlineFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
-            <div x-show="syncRunInlineFailedAccounts.length>0" class="overflow-x-auto">
-              <table>
-                <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
-                <tbody>
-                  <template x-for="a in syncRunInlineFailedAccounts" :key="a.id">
-                    <tr>
-                      <td class="mono" x-text="a.account_email"></td>
-                      <td
-                        style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-                        :title="a.error_message || '-'"
-                        x-text="a.error_message || '-'"></td>
-                      <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -2387,11 +2793,12 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <pre style="background:var(--bg);padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;border:1px solid var(--border);">email,imap_password,imap_host,imap_port
-cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993
-cursor184@eclicktech.com.cn,AnotherPass,,</pre>
+      <pre style="background:var(--bg);padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;border:1px solid var(--border);">email,imap_password,imap_host,imap_port,feishu_email
+cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993,owner@example.com
+cursor184@eclicktech.com.cn,AnotherPass,,,owner@example.com</pre>
       <p style="margin:12px 0 0; font-size:13px; color:var(--muted);">
-        • <strong>email</strong>、<strong>imap_password</strong> 必填<br/>
+        • <strong>email</strong>、<strong>imap_password</strong>、<strong>feishu_email</strong> 必填<br/>
+        • feishu_email 用于账单同步底表归属字段<br/>
         • imap_host 不填则用默认 <code>imap.feishu.cn</code><br/>
         • imap_port 不填则用默认 <code>993</code>
       </p>
@@ -2436,11 +2843,24 @@ function app() {
     showFormatHelp: false,
     manualEmail: '',
     manualPwd: '',
+    manualFeishuEmail: '',
     manualHost: '',
     manualPort: '',
     uploadPreview: [],     // 解析/手动添加的预览列表
     uploadConflicts: [],   // 已在 DB 中存在的邮箱
     showConflictModal: false,
+    spendingRefreshLoading: new Set(),
+    spendingRefreshDone: new Set(),
+    spendingBulkLoading: false,
+    spendingRemoteBusy: false,
+    spendingProgress: null,
+    onDemandProgressHover: false,
+    _spendingBusyPollTimer: null,
+    schedulerMeta: {
+      bi_sync_cron: '',
+      spending_refresh_enable: true,
+      spending_refresh_cron: '',
+    },
 
     // ── 日期 / 选项 ──
     selectedMonth: new Date().toISOString().slice(0, 7),
@@ -2482,6 +2902,7 @@ function app() {
     syncRunInlineStages: [],
     syncRunInlineFailedAccounts: [],
     syncRunInlineLoading: false,
+    syncRunInlineError: '',
     syncInlineRunDetailTimer: null,
     syncTaskId: null,
     syncSubmittingDaily: false,
@@ -2496,10 +2917,14 @@ function app() {
     syncReplayEmails: '',
     syncReplayEmailKeyword: '',
     syncReplayPickerOpen: false,
+    syncReplayEmailOptions: [],
+    syncReplayEmailLoading: false,
+    _syncReplayEmailSearchTimer: null,
     syncServerRunning: false,
     syncLiveRun: null,
     syncLiveStages: [],
     syncLiveProgress: null,
+    syncTaskPollTimer: null,
     syncRunDetailTimer: null,
     syncTaskNotice: null,
     syncLogCompact: true,
@@ -2531,6 +2956,9 @@ function app() {
       const start = (this.syncRunsPage - 1) * this.syncRunsPageSize;
       return list.slice(start, start + this.syncRunsPageSize);
     },
+    get spendingRefreshLocked() {
+      return this.spendingBulkLoading || this.spendingRemoteBusy;
+    },
 
     // ── 导航 ──
     goList() {
@@ -2553,6 +2981,7 @@ function app() {
     },
     goSync() {
       this.view = 'sync';
+      this.loadAccounts();
       this.loadSyncDashboard();
     },
 
@@ -2560,7 +2989,20 @@ function app() {
     async init() {
       this.setDatePreset('30d');
       this.selectedMonth = new Date().toISOString().slice(0, 7);
-      fetch('/api/status').then(r => r.ok && (this.serverOk = true)).catch(() => {});
+      fetch('/api/status')
+        .then(async (r) => {
+          if (!r.ok) return;
+          this.serverOk = true;
+          try {
+            const j = await r.json();
+            this.schedulerMeta = {
+              bi_sync_cron: j.bi_sync_cron || '',
+              spending_refresh_enable: j.spending_refresh_enable !== false,
+              spending_refresh_cron: j.spending_refresh_cron || '',
+            };
+          } catch {}
+        })
+        .catch(() => {});
 
       // 加载账号库
       await this.loadAccounts();
@@ -2658,6 +3100,231 @@ function app() {
         this.selectedEmails = new Set([...this.selectedEmails].filter(e => emailSet.has(e)));
         this._requestSelectionBarSpacerSync();
       } catch {}
+      finally {
+        await this.fetchSpendingRefreshStatus();
+        if (this.spendingRefreshLocked) {
+          this._ensureSpendingBusyPoll();
+        } else {
+          this._clearSpendingBusyPoll();
+          this.spendingProgress = null;
+        }
+      }
+    },
+
+    async fetchSpendingRefreshStatus() {
+      try {
+        const res = await fetch('/api/accounts/spending-refresh-status');
+        if (!res.ok) {
+          this.spendingRemoteBusy = false;
+          this.spendingProgress = null;
+          return;
+        }
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          this.spendingRemoteBusy = false;
+          this.spendingProgress = null;
+          return;
+        }
+        const b = data && Object.prototype.hasOwnProperty.call(data, 'busy') ? data.busy : false;
+        this.spendingRemoteBusy = b === true || b === 'true';
+        this.spendingProgress = data.progress || null;
+      } catch {
+        this.spendingRemoteBusy = false;
+        this.spendingProgress = null;
+      }
+    },
+
+    spendingProgressPercent() {
+      const p = this.spendingProgress;
+      if (!p || !p.total) return 0;
+      return Math.min(100, Math.round((Number(p.done) || 0) * 100 / Number(p.total)));
+    },
+
+    spendingProgressTitle() {
+      const p = this.spendingProgress;
+      if (p && p.phase === 'alerting') return '消费页解析 · 发送告警';
+      if (this.spendingBulkLoading) return '消费页解析 · 本页全库刷新';
+      if (this.spendingRemoteBusy) return '消费页解析 · 进行中';
+      return '消费页解析';
+    },
+
+    spendingProgressMeta() {
+      const p = this.spendingProgress;
+      if (!p) return '';
+      const msg = (p.message || '').trim();
+      const ok = Number(p.ok) || 0;
+      const fail = Number(p.failed) || 0;
+      const done = Number(p.done) || 0;
+      const total = Number(p.total) || 0;
+      const base = msg || (total ? `已完成 ${done}/${total}` : '');
+      if (ok || fail) return `${base} · 成功 ${ok} · 失败 ${fail}`.trim();
+      return base;
+    },
+
+    spendingProgressLockedHint() {
+      if (this.spendingBulkLoading && !(this.spendingProgress && this.spendingProgress.running)) {
+        return '正在连接服务端并排队获取解析锁，请稍候…';
+      }
+      if (this.spendingRemoteBusy) {
+        return '其它浏览器或进程正在解析消费页；若长时间无进度，请查看服务日志或稍后重试。';
+      }
+      return '当前无进行中的消费页解析任务。';
+    },
+
+    _ensureSpendingBusyPoll() {
+      if (this._spendingBusyPollTimer != null) return;
+      this._spendingBusyPollTimer = setInterval(async () => {
+        await this.fetchSpendingRefreshStatus();
+        if (!this.spendingRefreshLocked) {
+          this._clearSpendingBusyPoll();
+          this.spendingProgress = null;
+          await this.loadAccounts();
+        }
+      }, 1500);
+    },
+
+    _clearSpendingBusyPoll() {
+      if (this._spendingBusyPollTimer != null) {
+        clearInterval(this._spendingBusyPollTimer);
+        this._spendingBusyPollTimer = null;
+      }
+    },
+    currentPlanDisplay(a) {
+      const st = a.plan_status || 'unknown';
+      if (st === 'not_enabled') return '未开通';
+      if (st === 'error') return '套餐失败';
+      const name = (a.plan_name || '').trim();
+      const amt = (a.plan_amount != null && String(a.plan_amount).trim() !== '') ? String(a.plan_amount).trim() : '';
+      if (name && amt) return `${name} · $${amt}`;
+      if (name) return name;
+      if (amt) return `$${amt}`;
+      if (st === 'active') return '已开通';
+      return '待刷新';
+    },
+    planPillClass(a) {
+      const status = a.plan_status || 'unknown';
+      if (status === 'active') return 'active';
+      if (status === 'not_enabled') return 'not-enabled';
+      if (status === 'error') return 'error';
+      return 'unknown';
+    },
+    currentPlanTooltip(a) {
+      const od = this.onDemandLabel(a);
+      const spendErr = (a.spending_error || '').trim();
+      const spendNote = spendErr ? `消费页错误：${spendErr}` : '';
+      const dataUpd = a.updated_at ? `数据更新：${this.fmtTs(a.updated_at)}` : '尚无数据更新记录';
+      const perr = (a.plan_error || '').trim();
+      const planNote = perr ? `套餐错误：${perr}` : '';
+      return `按量付费：${od}（以消费页 On-demand 为准）${spendNote ? '；' + spendNote : ''}；${dataUpd}${planNote ? '；' + planNote : ''}`;
+    },
+    onDemandLabel(a) {
+      if (a.on_demand_enabled === 1 || a.on_demand_enabled === true) return '是';
+      if (a.on_demand_historical === 1 || a.on_demand_historical === true) return '曾开通';
+      if (a.on_demand_enabled === 0 || a.on_demand_enabled === false) return '否';
+      return '未知';
+    },
+    onDemandRowTitle(a) {
+      const err = (a.spending_error || '').trim();
+      const extra = err ? ` 消费页错误：${err}` : '';
+      const od = this.onDemandLabel(a);
+      let hint = '';
+      if (od === '是') hint = ' 当前：Monthly Limit 为 Fixed/Unlimited（或旧版 Enabled/On），按需月限额未关。';
+      else if (od === '曾开通') hint = ' 当前已关，但 On-Demand Spending 行仍有正金额，表示曾产生按需消费。';
+      else if (od === '否') hint = ' 当前关且无历史按需金额（或未解析到）。';
+      return this.onDemandTooltip() + hint + extra;
+    },
+    onDemandTooltip() {
+      return '列含义：「是」= 当前按需未关（Monthly Limit 为 Fixed / Unlimited，或旧版 Enabled/On）；「曾开通」= 当前为 Disabled 但 On-Demand Spending 行仍有美元金额；「否」= Disabled 且无该金额。其它浏览器或进程正在执行全库/行内消费页 Web 解析时，表头与行内刷新会暂时锁定（刷新页面后会自动探测）。同页会顺带更新套餐档位与金额。服务端另有每日静默全库（与手动刷新不共用长时间文件锁，见「账单调度」）。';
+    },
+    async refreshAccountSpending(email) {
+      const e = (email || '').trim();
+      const key = e.toLowerCase();
+      if (this.spendingRefreshLocked) return;
+      if (!key || this.spendingRefreshDone.has(key)) return;
+      if (this.spendingRefreshLoading.has(key)) return;
+      this.spendingRefreshLoading.add(key);
+      this.spendingRefreshLoading = new Set(this.spendingRefreshLoading);
+      let skipDone = false;
+      try {
+        const res = await fetch('/api/accounts/refresh-spending', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails: [e] }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 423) {
+          const msg = (data && data.detail) || '消费页解析进行中，请稍后再试';
+          this.addLog('var(--warn)', `[${e}] ${msg}`);
+          this.spendingRemoteBusy = true;
+          this._ensureSpendingBusyPoll();
+          skipDone = true;
+          return;
+        }
+        if (!res.ok) throw new Error((data && data.detail) || '刷新失败');
+        const row = (data.results || []).find((r) => (r.email || '').toLowerCase() === key);
+        if (row && row.ok === false) throw new Error(row.error || '刷新失败');
+        await this.loadAccounts();
+      } catch (err) {
+        this.addLog('var(--danger)', `[${e}] 按量付费状态刷新失败：${err.message || err}`);
+        await this.loadAccounts();
+      } finally {
+        this.spendingRefreshLoading.delete(key);
+        this.spendingRefreshLoading = new Set(this.spendingRefreshLoading);
+        if (!skipDone) {
+          this.spendingRefreshDone.add(key);
+          this.spendingRefreshDone = new Set(this.spendingRefreshDone);
+        }
+      }
+    },
+    async refreshAllAccountsSpending() {
+      if (this.spendingRefreshLocked) return;
+      this.spendingBulkLoading = true;
+      this._ensureSpendingBusyPoll();
+      try {
+        const res = await fetch('/api/accounts/refresh-spending', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails: [] }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 423) {
+          const msg = (data && data.detail) || '消费页解析进行中，请稍后再试';
+          this.addLog('var(--warn)', msg);
+          this.spendingRemoteBusy = true;
+          this._ensureSpendingBusyPoll();
+          return;
+        }
+        if (!res.ok) throw new Error((data && data.detail) || '刷新失败');
+        const totalOk = data.ok || 0;
+        const totalFail = data.failed || 0;
+        const errAgg = {};
+        for (const row of (data.error_summary || [])) {
+          const k = row.error || '（无详情）';
+          errAgg[k] = (errAgg[k] || 0) + (row.count || 0);
+        }
+        const topErrs = Object.entries(errAgg).sort((a, b) => b[1] - a[1]).slice(0, 2);
+        const errHint = topErrs.length
+          ? ` 失败样例：${topErrs.map(([e, c]) => `${String(e).slice(0, 100)}（×${c}）`).join('；')}`
+          : '';
+        this.addLog(
+          totalFail > 0 ? 'var(--warn)' : 'var(--success)',
+          `全库消费页/按量刷新完成：成功 ${totalOk}，失败 ${totalFail}。${errHint}`.trim(),
+        );
+        await this.loadAccounts();
+      } catch (e) {
+        this.addLog('var(--danger)', `全库消费页刷新失败：${e.message || e}`);
+      } finally {
+        this.spendingBulkLoading = false;
+        this.spendingRefreshDone = new Set();
+        await this.fetchSpendingRefreshStatus();
+        if (this.spendingRefreshLocked) {
+          this._ensureSpendingBusyPoll();
+        } else {
+          this.spendingProgress = null;
+        }
+      }
     },
     _setSyncRuns(runs) {
       this.syncRuns = Array.isArray(runs) ? runs : [];
@@ -2762,6 +3429,7 @@ function app() {
       this.syncRunInlineStages = [];
       this.syncRunInlineFailedAccounts = [];
       this.syncRunInlineLoading = false;
+      this.syncRunInlineError = '';
       this._stopSyncInlineRunDetailPolling();
     },
     async toggleSyncRunInlineDetail(runId) {
@@ -2776,9 +3444,10 @@ function app() {
       if (!runId) return;
       this.syncRunInlineDetailId = runId;
       this.syncRunInlineLoading = true;
+      this.syncRunInlineError = '';
       try {
         const res = await fetch(`/api/sync/run/${encodeURIComponent(runId)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(await this._readApiError(res, `HTTP ${res.status}`));
         const d = await res.json();
         const run = d.run || null;
         this.syncRunInlineDetail = run;
@@ -2790,7 +3459,8 @@ function app() {
           this._stopSyncInlineRunDetailPolling();
         }
       } catch (e) {
-        this.addLog('var(--danger)', `加载行内日志失败：${e.message || e}`);
+        this.syncRunInlineError = `加载日志失败：${e.message || e}`;
+        this.addLog('var(--danger)', this.syncRunInlineError);
       } finally {
         this.syncRunInlineLoading = false;
       }
@@ -2850,6 +3520,12 @@ function app() {
         this.syncRunDetailTimer = null;
       }
     },
+    _stopSyncTaskPolling() {
+      if (this.syncTaskPollTimer) {
+        clearInterval(this.syncTaskPollTimer);
+        this.syncTaskPollTimer = null;
+      }
+    },
     _startSyncRunDetailPolling(runId) {
       if (!runId) return;
       this._stopSyncRunDetailPolling();
@@ -2890,10 +3566,19 @@ function app() {
       if (this.syncRunsPage > totalPages) this.syncRunsPage = totalPages;
     },
     _pollSyncTask(taskId) {
+      this._stopSyncTaskPolling();
       this._stopSyncRunDetailPolling();
-      const timer = setInterval(async () => {
+      this.syncTaskPollTimer = setInterval(async () => {
         try {
           const res = await fetch(`/api/sync/task/${encodeURIComponent(taskId)}`);
+          if (res.status === 404 || res.status === 410) {
+            this._stopSyncTaskPolling();
+            this.syncServerRunning = false;
+            this.syncTaskId = null;
+            this._setSyncTaskNotice('任务状态已失效', '当前同步任务已不存在，可能是服务重启或任务状态已清理；请查看最近运行确认结果。', 'var(--warn)');
+            this.loadSyncDashboard();
+            return;
+          }
           if (!res.ok) return;
           const d = await res.json();
           if (d.live) {
@@ -2909,7 +3594,7 @@ function app() {
             }
           }
           if (d.status === 'finished' || d.status === 'failed') {
-            clearInterval(timer);
+            this._stopSyncTaskPolling();
             this.syncServerRunning = false;
             if (d.status === 'failed') {
               this.addLog('var(--danger)', `同步执行失败：${d.error || '未知错误'}`);
@@ -3041,6 +3726,15 @@ function app() {
       if (s === 'start') return '开始';
       return s || '-';
     },
+    syncTriggerLabel(trigger) {
+      const t = String(trigger || '').toLowerCase();
+      if (t === 'scheduler') return '调度执行';
+      if (t === 'manual') return '手动执行';
+      if (t === 'retry') return '失败补拉';
+      if (t === 'replay') return '自定义补偿';
+      if (t === 'daily') return '每日同步';
+      return t || '-';
+    },
     syncStatusClass(status) {
       const s = String(status || '').toLowerCase();
       if (s === 'success') return 'badge-ok';
@@ -3065,7 +3759,6 @@ function app() {
         prepare_partition: '分区准备',
         fetch: '账号拉取',
         load_ods: '写入 ODS',
-        load_dwd: '构建 DWD',
         finalize: '收尾汇总',
       };
       const k = String(stage || '').toLowerCase();
@@ -3175,21 +3868,54 @@ function app() {
         .filter(Boolean);
       return [...new Set(items)];
     },
+    async loadSyncReplayEmailOptions() {
+      this.syncReplayEmailLoading = true;
+      try {
+        const keyword = String(this.syncReplayEmailKeyword || '').trim();
+        const params = new URLSearchParams({ limit: '500' });
+        if (keyword) params.set('q', keyword);
+        const res = await fetch(`/api/accounts?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        this.syncReplayEmailOptions = Array.isArray(data.accounts) ? data.accounts : [];
+      } catch (e) {
+        this.syncReplayEmailOptions = [];
+      } finally {
+        this.syncReplayEmailLoading = false;
+      }
+    },
+    openSyncReplayEmailPicker() {
+      this.syncReplayPickerOpen = true;
+      this.loadSyncReplayEmailOptions();
+    },
+    scheduleSyncReplayEmailSearch() {
+      this.syncReplayPickerOpen = true;
+      if (this._syncReplayEmailSearchTimer) clearTimeout(this._syncReplayEmailSearchTimer);
+      this._syncReplayEmailSearchTimer = setTimeout(() => {
+        this.loadSyncReplayEmailOptions();
+      }, 180);
+    },
     syncReplayEmailCandidates() {
-      const keyword = String(this.syncReplayEmailKeyword || '').trim().toLowerCase();
       const selected = new Set(this._parseReplayEmails().map(x => x.toLowerCase()));
-      const all = (this.dbAccounts || [])
+      const all = (this.syncReplayEmailOptions || [])
         .map(a => String(a?.email || '').trim().toLowerCase())
         .filter(Boolean)
-        .filter(e => !selected.has(e));
-      const filtered = keyword ? all.filter(e => e.includes(keyword)) : all;
-      return filtered.slice(0, 30);
+        .filter((email, idx, arr) => arr.indexOf(email) === idx);
+      return all.map(email => ({
+        email,
+        selected: selected.has(email),
+      }));
     },
-    addSyncReplayEmail(email) {
+    toggleSyncReplayEmail(email) {
       const e = String(email || '').trim().toLowerCase();
       if (!e) return;
       const current = this._parseReplayEmails();
-      if (!current.includes(e)) current.push(e);
+      const idx = current.indexOf(e);
+      if (idx >= 0) {
+        current.splice(idx, 1);
+      } else {
+        current.push(e);
+      }
       this.syncReplayEmails = current.join(',');
       this.syncReplayEmailKeyword = '';
       this.syncReplayPickerOpen = true;
@@ -3466,12 +4192,26 @@ function app() {
     },
 
     addManualAccount() {
-      if (!this.manualEmail || !this.manualPwd) return;
+      const email = (this.manualEmail || '').trim().toLowerCase();
+      const feishuEmail = (this.manualFeishuEmail || '').trim().toLowerCase();
+      if (!email || !this.manualPwd) {
+        this.uploadError = '邮箱和 IMAP 密码不能为空';
+        return;
+      }
+      if (!feishuEmail) {
+        this.uploadError = '飞书邮箱不能为空';
+        return;
+      }
+      if (!feishuEmail.includes('@')) {
+        this.uploadError = '飞书邮箱格式不正确';
+        return;
+      }
       const host = this.manualHost.trim() || null;
       const port = this.manualPort ? parseInt(this.manualPort) || null : null;
       const acc = {
-        email:         this.manualEmail.trim(),
+        email,
         imap_password: this.manualPwd.trim(),
+        feishu_email:  feishuEmail,
         imap_host:     host,
         imap_port:     port,
       };
@@ -3479,7 +4219,8 @@ function app() {
         this.uploadPreview.push(acc);
         this._refreshConflicts();
       }
-      this.manualEmail = this.manualPwd = this.manualHost = this.manualPort = '';
+      this.uploadError = '';
+      this.manualEmail = this.manualPwd = this.manualFeishuEmail = this.manualHost = this.manualPort = '';
     },
 
     _refreshConflicts() {
@@ -3493,6 +4234,11 @@ function app() {
     // ── 冲突处理 & 保存 ──
     saveWithConflictCheck() {
       if (this.uploadPreview.length === 0) return;
+      const missing = this.uploadPreview.find(a => !(a.feishu_email || '').trim());
+      if (missing) {
+        this.uploadError = `${missing.email || '账号'} 缺少飞书邮箱`;
+        return;
+      }
       this._refreshConflicts();
       if (this.uploadConflicts.length > 0) {
         this.showConflictModal = true;
@@ -3519,6 +4265,7 @@ function app() {
           body: JSON.stringify({ accounts, overwrite, source: 'upload' }),
         });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         this.addLog('var(--success)', `账号库已更新：保存 ${data.saved} 个，跳过 ${data.skipped} 个`);
         this.goList();
       } catch (e) {
@@ -3704,6 +4451,7 @@ function app() {
           accounts: selected.map(a => ({
             email: a.email,
             imap_password: a.imap_password,
+            feishu_email: a.feishu_email,
             imap_host: a.imap_host,
             imap_port: a.imap_port,
           })),
@@ -3780,6 +4528,7 @@ function app() {
             accounts: [{
               email: account.email,
               imap_password: account.imap_password,
+              feishu_email: account.feishu_email,
               imap_host: account.imap_host,
               imap_port: account.imap_port,
             }],
@@ -3969,12 +4718,15 @@ function app() {
     },
 
     downloadTemplate() {
-      const csv = 'email,imap_password\ncursor183@eclicktech.com.cn,YourImapPassword\n';
+      const csv = 'email,imap_password,imap_host,imap_port,feishu_email\ncursor183@eclicktech.com.cn,YourImapPassword,imap.feishu.cn,993,owner@example.com\n';
       const blob = new Blob([csv], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'cursor_accounts_template.csv';
       a.click();
+    },
+    downloadExcelTemplate() {
+      window.open('/api/accounts/template.xlsx', '_blank');
     },
 
     fmtTs(ts) {

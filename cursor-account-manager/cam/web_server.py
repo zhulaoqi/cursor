@@ -24,6 +24,7 @@ import secrets
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,12 +39,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import exporter, fetcher
+from .alerting import send_alert
 from .bi_sync import run_daily_sync
 from .account_store import load_accounts
 from .config import SETTINGS
 from .logger import get
 from .models import Account, AccountSnapshot
+from .plan_scraper import fetch_spending_panel_from_dashboard
+from .scheduler import _try_lock, run_scheduler_loop
+from .spending_refresh import persist_spending_panel
 from .sync_log_store import get_default_sync_log_store
+from .token_store import get_default_store
 
 log = get("web")
 
@@ -97,10 +103,51 @@ _tasks: Dict[str, Dict[str, Any]] = {}
 _download_files: Dict[str, Path] = {}
 _task_lock = threading.Lock()
 _sync_runtime: Dict[str, Dict[str, Any]] = {}
+_scheduler_started = False
+
+_spending_progress_lock = threading.Lock()
+_spending_refresh_progress: Dict[str, Any] = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "current_email": "",
+    "ok": 0,
+    "failed": 0,
+    "phase": "idle",
+    "scope": "",
+    "started_at": 0,
+    "updated_at": 0,
+    "message": "",
+}
 
 IMAP_HOST_DEFAULT = SETTINGS.default_imap_host
 IMAP_PORT_DEFAULT = SETTINGS.default_imap_port
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+@app.on_event("startup")
+async def _start_embedded_scheduler() -> None:
+    """Web 服务启动时同步启动 BI 调度循环。"""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    if not SETTINGS.bi_sync_enable and not SETTINGS.spending_refresh_enable:
+        log.info("BI 与套餐/按量定时刷新均未启用，跳过调度器启动")
+        return
+    _scheduler_started = True
+    t = threading.Thread(
+        target=run_scheduler_loop,
+        kwargs={"poll_interval_sec": 30},
+        name="cam-bi-scheduler",
+        daemon=True,
+    )
+    t.start()
+    log.info(
+        "调度器已随 Web 服务启动 bi_cron=%s spending_cron=%s spending_alert=%s",
+        SETTINGS.bi_sync_cron,
+        SETTINGS.spending_refresh_cron,
+        SETTINGS.spending_refresh_alert_enable,
+    )
 
 
 # ─── 数据模型 ─────────────────────────────────────────────────────
@@ -108,6 +155,7 @@ BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 class AccountRow(BaseModel):
     email: str
     imap_password: str
+    feishu_email: str
     imap_host: Optional[str] = None
     imap_port: Optional[int] = None
 
@@ -125,6 +173,10 @@ class RunRequest(BaseModel):
 class SyncRunRequest(BaseModel):
     biz_date: Optional[str] = None
     trigger: str = "manual"
+    emails: List[str] = []
+
+
+class RefreshAccountPlanRequest(BaseModel):
     emails: List[str] = []
 
 
@@ -191,11 +243,27 @@ def _normalize_email(email: str) -> str:
     return s
 
 
+def _normalize_feishu_email(email: str) -> str:
+    return _normalize_email(email)
+
+
+def _validate_required_feishu_email(value: str, *, label: str) -> str:
+    feishu_email = _normalize_feishu_email(value)
+    if not feishu_email:
+        raise ValueError(f"{label} feishu_email 不能为空")
+    if "@" not in feishu_email:
+        raise ValueError(f"{label} feishu_email 格式不正确")
+    return feishu_email
+
+
 def _parse_csv_bytes(data: bytes) -> List[AccountRow]:
     text = data.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
+    headers = {str(h).strip().lower() for h in (reader.fieldnames or []) if h is not None}
+    if "feishu_email" not in headers and "飞书邮箱" not in headers:
+        raise ValueError("CSV 缺少必需列: feishu_email")
     rows: List[AccountRow] = []
-    for r in reader:
+    for line_no, r in enumerate(reader, start=2):
         # CSV 列名兼容：大小写/前后空白
         d = {(str(k).strip().lower() if k is not None else ""): (v or "") for k, v in r.items()}
         email = _normalize_email(d.get("email", ""))
@@ -207,10 +275,22 @@ def _parse_csv_bytes(data: bytes) -> List[AccountRow]:
         ).strip()
         if not email or not pw:
             continue
+        feishu_email = _validate_required_feishu_email(
+            d.get("feishu_email") or d.get("飞书邮箱") or "",
+            label=f"第 {line_no} 行",
+        )
         host = (d.get("imap_host") or "").strip() or None
         port_raw = (d.get("imap_port") or "").strip()
         port = int(port_raw) if port_raw.isdigit() else None
-        rows.append(AccountRow(email=email, imap_password=pw, imap_host=host, imap_port=port))
+        rows.append(
+            AccountRow(
+                email=email,
+                imap_password=pw,
+                feishu_email=feishu_email,
+                imap_host=host,
+                imap_port=port,
+            )
+        )
     return rows
 
 
@@ -234,6 +314,8 @@ def _parse_excel_bytes(data: bytes) -> List[AccountRow]:
                 # 必须包含 email 列才认为是数据表头
                 if "email" not in headers:
                     break
+                if "feishu_email" not in headers and "飞书邮箱" not in headers:
+                    raise ValueError("Excel 缺少必需列: feishu_email")
                 continue
             d = dict(zip(headers, row))
             email = _normalize_email(str(d.get("email") or ""))
@@ -242,11 +324,23 @@ def _parse_excel_bytes(data: bytes) -> List[AccountRow]:
             ).strip()
             if not email or not pw or email.lower() in ("none", "email"):
                 continue
+            feishu_email = _validate_required_feishu_email(
+                str(d.get("feishu_email") or d.get("飞书邮箱") or ""),
+                label=f"第 {row_idx + 1} 行",
+            )
             host_v = d.get("imap_host")
             host = str(host_v).strip() if host_v and str(host_v).strip() not in ("None", "") else None
             port_v = d.get("imap_port")
             port = int(port_v) if port_v and str(port_v).strip().isdigit() else None
-            rows.append(AccountRow(email=email, imap_password=pw, imap_host=host, imap_port=port))
+            rows.append(
+                AccountRow(
+                    email=email,
+                    imap_password=pw,
+                    feishu_email=feishu_email,
+                    imap_host=host,
+                    imap_port=port,
+                )
+            )
         if len(rows) > len(best_rows):
             best_rows = rows
         log.debug(f"Excel sheet '{sheet_name}': 解析到 {len(rows)} 个账号")
@@ -328,7 +422,6 @@ def _build_runtime_run_fallback(run_id: str) -> Optional[dict[str, Any]]:
             "account_failed": int(result.get("account_failed") or 0),
             "event_total": int(result.get("event_total") or 0),
             "ods_rows": int(result.get("ods_rows") or 0),
-            "dwd_rows": int(result.get("dwd_rows") or 0),
             "error_summary": str(t.get("error") or result.get("message") or ""),
             "created_at": int(t.get("started_at") or int(time.time())),
             "updated_at": int(t.get("finished_at") or int(time.time())),
@@ -367,6 +460,43 @@ async def upload_accounts(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail="未解析到有效账号，请检查文件格式")
 
     return {"count": len(rows), "accounts": [r.model_dump() for r in rows]}
+
+
+@app.get("/api/accounts/template.xlsx")
+async def download_accounts_excel_template():
+    """下载账号上传 Excel 模板。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "accounts"
+    headers = ["email", "imap_password", "imap_host", "imap_port", "feishu_email"]
+    example = [
+        "cursor183@eclicktech.com.cn",
+        "YourImapPassword",
+        "imap.feishu.cn",
+        993,
+        "owner@example.com",
+    ]
+    ws.append(headers)
+    ws.append(example)
+    header_fill = PatternFill(fill_type="solid", fgColor="EAF2FF")
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+    for idx, width in enumerate((32, 24, 24, 10, 32), start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="cursor_accounts_template.xlsx"'},
+    )
 
 
 @app.post("/api/run")
@@ -408,6 +538,7 @@ async def run_task(req: RunRequest):
                 imap_password=a.imap_password,
                 imap_host=a.imap_host or IMAP_HOST_DEFAULT,
                 imap_port=a.imap_port or IMAP_PORT_DEFAULT,
+                feishu_email=a.feishu_email,
             )
             for a in req.accounts
         ]
@@ -733,17 +864,349 @@ async def download_zip(task_id: str):
 # ─── 账号库 CRUD ───────────────────────────────────────────────────
 
 @app.get("/api/accounts")
-async def list_accounts_api():
-    """返回账号库中所有账号（含 token 状态）。"""
-    from .token_store import get_default_store
+async def list_accounts_api(q: str = "", limit: int = 0):
+    """返回账号库账号（含 token 状态），支持按邮箱关键词查询。"""
     store = get_default_store()
-    accounts = store.list_accounts()
+    accounts = (
+        store.search_accounts(q, limit or 30)
+        if q.strip() or limit
+        else store.list_accounts()
+    )
     token_rows = {r.email: r for r in store.list_all()}
     for acc in accounts:
         rec = token_rows.get(acc["email"])
         acc["token_status"] = rec.status if rec else "unknown"
         acc["token_failures"] = rec.consecutive_failures if rec else 0
     return {"accounts": accounts}
+
+
+def _summarize_account_refresh_errors(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """聚合失败原因，便于前端提示与排查（不截断单条，由前端展示时裁剪）。"""
+    from collections import Counter
+
+    c = Counter((r.get("error") or "").strip() for r in results if not r.get("ok"))
+    return [{"error": k, "count": v} for k, v in c.most_common(8) if k]
+
+
+def _on_demand_currently_open_flag(value: object) -> bool:
+    """与账号库展示一致：bool True 或整型 1 视为「按需已开」（避免 ``1 is True`` 为假导致漏告警）。"""
+    if value is True:
+        return True
+    if value == 1:
+        return True
+    if isinstance(value, str) and value.strip().lower() in ("true", "1", "yes"):
+        return True
+    return False
+
+
+def _format_on_demand_alert_table(
+    entries: list[tuple[str, str]],
+    *,
+    body_max_chars: int = 12000,
+) -> str:
+    """按需告警：Markdown 表格，便于飞书卡片扫读。"""
+    if not entries:
+        return ""
+    total = len(entries)
+    lines = [
+        f"**共 {total} 个账号**",
+        "",
+        "| # | 账号邮箱 | 飞书邮箱 |",
+        "| :---: | :--- | :--- |",
+    ]
+    nchars = sum(len(s) for s in lines) + max(0, len(lines) - 1)
+    shown = 0
+    for i, (email, feishu) in enumerate(entries, start=1):
+        fei = (feishu or "").strip() or "—"
+        row = f"| {i} | {email} | {fei} |"
+        if nchars + len(row) + 1 > body_max_chars:
+            break
+        lines.append(row)
+        nchars += len(row) + 1
+        shown += 1
+    out = "\n".join(lines)
+    if shown < total:
+        out += (
+            f"\n\n… 共 **{total}** 个账号，上表仅展示 **{shown}** 个（已截断以适配飞书长度）；"
+            "完整列表请在账号库筛选「按量付费」列查看。"
+        )
+    return out
+
+
+def _spending_refresh_workers(*, account_count: int) -> int:
+    cap = max(1, SETTINGS.spending_refresh_concurrency)
+    return min(cap, max(1, account_count))
+
+
+def _refresh_account_spending_row(
+    store: Any,
+    row: dict[str, Any],
+) -> tuple[dict[str, Any], bool, Optional[tuple[str, str]], Optional[tuple[str, str]]]:
+    """解析单账号消费页。返回 (result, ok, open_alert, hist_alert)。"""
+    email = _normalize_email(row.get("email", ""))
+    if not email:
+        return ({"email": "", "ok": False, "error": "empty email"}, False, None, None)
+    try:
+        acc = Account(
+            email=email,
+            imap_password=str(row.get("imap_password") or ""),
+            imap_host=str(row.get("imap_host") or IMAP_HOST_DEFAULT),
+            imap_port=int(row.get("imap_port") or IMAP_PORT_DEFAULT),
+            feishu_email=str(row.get("feishu_email") or "").strip().lower(),
+        )
+        info = fetch_spending_panel_from_dashboard(acc)
+        persist_spending_panel(store, email, info)
+        row_out: dict[str, Any] = {
+            "email": email,
+            "ok": True,
+            "plan_name": info.plan_name,
+            "on_demand_enabled": info.on_demand_enabled,
+            "on_demand_historical": bool(info.on_demand_historical),
+        }
+        if info.plan_snapshot is not None:
+            row_out["plan_status"] = info.plan_snapshot.status
+            row_out["plan_amount"] = (
+                str(info.plan_snapshot.amount) if info.plan_snapshot.amount is not None else ""
+            )
+            row_out["plan_error"] = info.plan_snapshot.error or ""
+        fei = str(row.get("feishu_email") or "").strip()
+        open_entry: Optional[tuple[str, str]] = None
+        hist_entry: Optional[tuple[str, str]] = None
+        if _on_demand_currently_open_flag(info.on_demand_enabled):
+            open_entry = (email, fei)
+        elif bool(info.on_demand_historical):
+            hist_entry = (email, fei)
+        return (row_out, True, open_entry, hist_entry)
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
+        store.update_account_spending_snapshot(
+            email=email,
+            plan_name="",
+            on_demand_enabled=None,
+            on_demand_historical=None,
+            spending_error=err,
+        )
+        return (
+            {
+                "email": email,
+                "ok": False,
+                "plan_name": "",
+                "on_demand_enabled": None,
+                "error": err,
+            },
+            False,
+            None,
+            None,
+        )
+
+
+@app.get("/api/accounts/spending-refresh-busy")
+async def spending_refresh_busy_api():
+    """探测 Web 端消费页解析文件锁是否被占用（兼容旧前端，仅返回 busy）。"""
+    status = await asyncio.to_thread(_spending_refresh_status_sync)
+    return {"busy": status["busy"]}
+
+
+@app.get("/api/accounts/spending-refresh-status")
+async def spending_refresh_status_api():
+    """消费页解析占用与进度（全库/行内 Web 刷新持锁期间可轮询）。"""
+    return await asyncio.to_thread(_spending_refresh_status_sync)
+
+
+def _spending_refresh_busy_sync() -> dict[str, bool]:
+    return {"busy": _spending_refresh_status_sync()["busy"]}
+
+
+def _spending_refresh_status_sync() -> dict[str, Any]:
+    with _try_lock(SETTINGS.spending_refresh_lock_file) as got:
+        busy = not got
+    progress = _spending_progress_snapshot()
+    return {"busy": busy, "progress": progress}
+
+
+def _spending_progress_snapshot() -> dict[str, Any]:
+    with _spending_progress_lock:
+        p = dict(_spending_refresh_progress)
+    total = int(p.get("total") or 0)
+    done = int(p.get("done") or 0)
+    p["percent"] = round(done * 100 / total) if total > 0 else 0
+    return p
+
+
+def _spending_progress_start(*, total: int, scope: str) -> None:
+    now = int(time.time())
+    with _spending_progress_lock:
+        _spending_refresh_progress.update(
+            {
+                "running": True,
+                "total": total,
+                "done": 0,
+                "current_email": "",
+                "ok": 0,
+                "failed": 0,
+                "phase": "running",
+                "scope": scope,
+                "started_at": now,
+                "updated_at": now,
+                "message": "正在解析消费页…" if total else "无待解析账号",
+            }
+        )
+
+
+def _spending_progress_before_email(email: str, *, index: int, total: int) -> None:
+    with _spending_progress_lock:
+        _spending_refresh_progress["current_email"] = email
+        _spending_refresh_progress["updated_at"] = int(time.time())
+        _spending_refresh_progress["message"] = f"正在解析 {index + 1}/{total}"
+
+
+def _spending_progress_after_email(*, ok: bool) -> None:
+    with _spending_progress_lock:
+        _spending_refresh_progress["done"] = int(_spending_refresh_progress.get("done") or 0) + 1
+        if ok:
+            _spending_refresh_progress["ok"] = int(_spending_refresh_progress.get("ok") or 0) + 1
+        else:
+            _spending_refresh_progress["failed"] = int(_spending_refresh_progress.get("failed") or 0) + 1
+        _spending_refresh_progress["updated_at"] = int(time.time())
+
+
+def _spending_progress_alerting() -> None:
+    with _spending_progress_lock:
+        _spending_refresh_progress["phase"] = "alerting"
+        _spending_refresh_progress["message"] = "汇总按需账号并发送飞书告警…"
+        _spending_refresh_progress["updated_at"] = int(time.time())
+
+
+def _spending_progress_finish() -> None:
+    with _spending_progress_lock:
+        total = int(_spending_refresh_progress.get("total") or 0)
+        done = int(_spending_refresh_progress.get("done") or 0)
+        _spending_refresh_progress.update(
+            {
+                "running": False,
+                "phase": "done",
+                "done": max(done, total),
+                "current_email": "",
+                "message": "解析完成",
+                "updated_at": int(time.time()),
+            }
+        )
+
+
+def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict[str, Any]:
+    """同步执行消费页解析（Playwright）；须在线程池中调用以免阻塞 asyncio 事件循环。"""
+    with _try_lock(SETTINGS.spending_refresh_lock_file) as lock_ok:
+        if not lock_ok:
+            raise HTTPException(
+                status_code=423,
+                detail="消费页解析任务正在进行中（全库/行内或其它浏览器会话），请结束后再试。",
+            )
+        store = get_default_store()
+        requested = {_normalize_email(e) for e in (req.emails or []) if _normalize_email(e)}
+        rows = store.list_accounts()
+        targets = [r for r in rows if not requested or _normalize_email(r.get("email", "")) in requested]
+        work_emails = [
+            _normalize_email(row.get("email", ""))
+            for row in targets
+            if _normalize_email(row.get("email", ""))
+        ]
+        scope = "web_bulk" if not requested else "web_partial"
+        _spending_progress_start(total=len(work_emails), scope=scope)
+        results: list[dict[str, Any]] = []
+        on_demand_alert_open: list[tuple[str, str]] = []
+        on_demand_alert_hist: list[tuple[str, str]] = []
+        work_rows = [
+            row
+            for row in targets
+            if _normalize_email(row.get("email", ""))
+        ]
+        workers = _spending_refresh_workers(account_count=len(work_rows))
+        progress_lock = threading.Lock()
+        try:
+
+            def _run_one(row: dict[str, Any], index: int) -> None:
+                email = _normalize_email(row.get("email", ""))
+                with progress_lock:
+                    _spending_progress_before_email(email, index=index, total=len(work_emails))
+                row_out, row_ok, open_entry, hist_entry = _refresh_account_spending_row(store, row)
+                with progress_lock:
+                    if open_entry:
+                        on_demand_alert_open.append(open_entry)
+                    if hist_entry:
+                        on_demand_alert_hist.append(hist_entry)
+                    results.append(row_out)
+                    _spending_progress_after_email(ok=row_ok)
+
+            if workers <= 1 or len(work_rows) <= 1:
+                for idx, row in enumerate(work_rows):
+                    _run_one(row, idx)
+            else:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [
+                        pool.submit(_run_one, row, idx)
+                        for idx, row in enumerate(work_rows)
+                    ]
+                    for fut in as_completed(futures):
+                        fut.result()
+            on_demand_alert_open.sort(key=lambda x: x[0].lower())
+            on_demand_alert_hist.sort(key=lambda x: x[0].lower())
+            results.sort(key=lambda r: str(r.get("email") or "").lower())
+            if on_demand_alert_open or on_demand_alert_hist:
+                parts: list[str] = []
+                if on_demand_alert_open:
+                    body = _format_on_demand_alert_table(
+                        on_demand_alert_open, body_max_chars=12000
+                    )
+                    parts.append(
+                        "**【当前按需已开启】**\n"
+                        "以下账号在消费页为按需开启状态，请及时关注。\n\n"
+                        + body
+                    )
+                if on_demand_alert_hist:
+                    body = _format_on_demand_alert_table(
+                        on_demand_alert_hist, body_max_chars=12000
+                    )
+                    parts.append(
+                        "**【曾有按需消费，当前已关闭】**\n"
+                        "以下账号 On-Demand Spending 仍有金额且 Monthly Limit 为 Disabled，"
+                        "表示曾产生过按需消费。\n\n"
+                        + body
+                    )
+                combined = "\n\n".join(parts)
+                log.info(
+                    "消费页按需告警汇总（单条发送）：按需开=%s 曾按需=%s 正文约 %s 字",
+                    len(on_demand_alert_open),
+                    len(on_demand_alert_hist),
+                    len(combined),
+                )
+                _spending_progress_alerting()
+                send_alert(
+                    "按量付费（On-demand）相关账号",
+                    combined,
+                    level="on_demand",
+                )
+            return {
+                "total": len(results),
+                "ok": sum(1 for r in results if r["ok"]),
+                "failed": sum(1 for r in results if not r["ok"]),
+                "results": results,
+                "error_summary": _summarize_account_refresh_errors(results),
+            }
+        finally:
+            _spending_progress_finish()
+
+
+@app.post("/api/accounts/refresh-spending")
+async def refresh_account_spending_api(req: RefreshAccountPlanRequest):
+    """从 Spending 页解析按需开关、套餐档位名；同页全文可解析时顺带更新 plan_status / plan_amount。
+
+    使用 ``SETTINGS.spending_refresh_lock_file``：同一时刻仅允许一个 Web 解析请求（全库或行内批量）；
+    其它 Web 请求返回 423。静默定时全库走 ``run_daily_spending_refresh_silent``，不再占用此文件锁，
+    Playwright 并发由 ``plan_scraper`` 内信号量约束。
+
+    解析在默认线程池执行，避免 Playwright 阻塞 asyncio 事件循环（否则刷新页面时其它 API 无法响应）。
+    """
+    return await asyncio.to_thread(_run_refresh_account_spending_locked, req)
 
 
 class SaveAccountsRequest(BaseModel):
@@ -773,6 +1236,7 @@ async def save_accounts_api(req: SaveAccountsRequest):
         latest_by_email[norm] = AccountRow(
             email=norm,
             imap_password=acc.imap_password,
+            feishu_email=acc.feishu_email,
             imap_host=acc.imap_host,
             imap_port=acc.imap_port,
         )
@@ -780,6 +1244,12 @@ async def save_accounts_api(req: SaveAccountsRequest):
     saved: List[str] = []
     skipped: List[str] = []
     for norm_email, acc in latest_by_email.items():
+        try:
+            if not _normalize_feishu_email(acc.feishu_email):
+                raise ValueError(f"{norm_email} 缺少飞书邮箱")
+            feishu_email = _validate_required_feishu_email(acc.feishu_email, label=norm_email)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         existing_email = existing_ci.get(norm_email)
         if existing_email and not req.overwrite:
             skipped.append(norm_email)
@@ -792,6 +1262,7 @@ async def save_accounts_api(req: SaveAccountsRequest):
             imap_password=acc.imap_password,
             imap_host=acc.imap_host or IMAP_HOST_DEFAULT,
             imap_port=acc.imap_port or IMAP_PORT_DEFAULT,
+            feishu_email=feishu_email,
             source=req.source,
         )
         saved.append(norm_email)
@@ -853,7 +1324,14 @@ async def api_status():
     with _task_lock:
         running = sum(1 for t in _tasks.values() if t["status"] == "running")
         finished = sum(1 for t in _tasks.values() if t["status"] == "finished")
-    return {"running": running, "finished": finished, "total_tasks": len(_tasks)}
+    return {
+        "running": running,
+        "finished": finished,
+        "total_tasks": len(_tasks),
+        "bi_sync_cron": SETTINGS.bi_sync_cron,
+        "spending_refresh_enable": SETTINGS.spending_refresh_enable,
+        "spending_refresh_cron": SETTINGS.spending_refresh_cron,
+    }
 
 
 # ─── 每日同步监控 API ───────────────────────────────────────────────
@@ -956,6 +1434,11 @@ async def sync_run(req: SyncRunRequest):
                 _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
+            send_alert(
+                "BI 同步任务异常",
+                f"run_id={sync_run_id}\nbiz_date={target_biz_date}\ntrigger={trigger_type or 'manual'}\nerror={err}",
+                level="error",
+            )
             try:
                 store.add_stage(run_id=sync_run_id, stage="init", status="failed", message=err)
                 store.finish_run(
@@ -965,7 +1448,6 @@ async def sync_run(req: SyncRunRequest):
                     account_failed=0,
                     event_total=0,
                     ods_rows=0,
-                    dwd_rows=0,
                     error_summary=err,
                 )
             except Exception:
@@ -1042,6 +1524,11 @@ async def sync_retry(run_id: str, biz_date: Optional[str] = None):
                 _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
+            send_alert(
+                "BI 补拉任务异常",
+                f"run_id={sync_run_id}\nsource_run_id={run_id}\nbiz_date={target_biz_date}\nerror={err}",
+                level="error",
+            )
             try:
                 store.add_stage(run_id=sync_run_id, stage="init", status="failed", message=err)
                 store.finish_run(
@@ -1051,7 +1538,6 @@ async def sync_retry(run_id: str, biz_date: Optional[str] = None):
                     account_failed=0,
                     event_total=0,
                     ods_rows=0,
-                    dwd_rows=0,
                     error_summary=err,
                 )
             except Exception:

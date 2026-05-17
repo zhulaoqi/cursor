@@ -13,6 +13,7 @@ class Account:
     imap_password: str
     imap_host: str
     imap_port: int
+    feishu_email: str = ""
 
 
 @dataclass
