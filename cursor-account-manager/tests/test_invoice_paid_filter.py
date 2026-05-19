@@ -1,6 +1,7 @@
 import unittest
 
 from cam.exporter import (
+    _BILLING_LIST_JS,
     _BILLING_URLS,
     _BILLING_MONTH_PROBE_SELECT_JS,
     _BILLING_MONTH_REFRESH_STATE_JS,
@@ -12,6 +13,8 @@ from cam.exporter import (
     _filter_paid_billing_items,
     _month_distance_descending,
 )
+
+_BILLING_PARSE_SCRIPTS = frozenset({_STATUS_JS, _BILLING_LIST_JS})
 
 
 class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
@@ -138,9 +141,15 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
                 self.calls.append(("wait_for_timeout", timeout))
 
             async def evaluate(self, script, *args):
-                if script == _STATUS_JS:
+                if script in _BILLING_PARSE_SCRIPTS:
                     self.calls.append(("parse_rows", None))
-                    return [{"url": "https://invoice.stripe.com/i/test", "status": "Paid", "date": "2026年1月30日"}]
+                    return [{
+                        "url": "https://invoice.stripe.com/i/test",
+                        "status": "Paid",
+                        "date": "2026年1月30日",
+                        "description": "",
+                        "amountText": "10.00 USD",
+                    }]
                 raise AssertionError(f"unexpected script: {script[:30]}")
 
         page = FakePage()
@@ -186,7 +195,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
             async def evaluate(self, script, *args):
-                if script == _STATUS_JS:
+                if script in _BILLING_PARSE_SCRIPTS:
                     self.parsed = True
                     return []
                 raise AssertionError(f"unexpected script: {script[:30]}")
@@ -273,7 +282,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         import inspect
         from cam import exporter
 
-        fn_src = inspect.getsource(exporter._fetch_billing_items_in_ctx)
+        fn_src = inspect.getsource(exporter._fetch_billing_list_in_ctx)
         self.assertIn("_wait_billing_page_ready", fn_src)
         self.assertNotIn('wait_for_selector("button, a[href]"', fn_src)
 

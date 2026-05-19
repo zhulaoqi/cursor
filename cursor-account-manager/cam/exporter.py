@@ -865,6 +865,45 @@ _STATUS_JS = """
 }
 """
 
+_BILLING_LIST_JS = """
+() => {
+  const out = [];
+  const STATUS_KEYS = ['paid','open','refunded','void','uncollectible','draft',
+    '已支付','待支付','未支付','退款','草稿','作废','无法收款'];
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const amountColRe = /^\\d+(?:\\.\\d+)?\\s*USD$/i;
+  const statusLike = t => {
+    const lower = (t || '').toLowerCase();
+    return STATUS_KEYS.some(k => lower.includes(k.toLowerCase()));
+  };
+  for (const tr of document.querySelectorAll('tr')) {
+    const a = tr.querySelector('a[href*="invoice.stripe.com"]');
+    if (!a) continue;
+    const tds = [...tr.querySelectorAll('td')].map(td => norm(td.innerText || td.textContent));
+    if (!tds.length) continue;
+    const date = tds[0] || '';
+    const description = tds[1] || '';
+    let status = tds[2] || '';
+    let amountText = tds[3] || '';
+    if (!statusLike(status)) {
+      for (const t of tds) {
+        if (statusLike(t)) { status = t; break; }
+      }
+    }
+    if (!amountColRe.test(amountText)) {
+      for (const t of tds) {
+        if (amountColRe.test(t) || (/USD/i.test(t) && /\\d/.test(t) && t !== status && !/refunded\\s*\\(/i.test(t))) {
+          amountText = t;
+          break;
+        }
+      }
+    }
+    out.push({ url: a.href || '', date, description, status, amountText });
+  }
+  return out;
+}
+"""
+
 _BILLING_MONTH_SELECT_JS = """
 async (target) => {
   if (!target || !target.value || !Array.isArray(target.labels)) return false;
@@ -1351,9 +1390,8 @@ async def _select_billing_month_in_ctx(page, invoice_month: str) -> bool:
         return False
 
 
-async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tuple[str, str, str]]:
-    """在已有 page 对象上抓取账单页状态列表，返回 [(url, status, date), ...]。"""
-    items: list[tuple[str, str, str]] = []
+async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict]:
+    """抓取 Billing Invoices 五列表格，返回含 date/description/status/amountText/url 的 dict 列表。"""
     requested_month = _billing_month_key(invoice_month)
     for billing_url in _BILLING_URLS:
         try:
@@ -1368,23 +1406,41 @@ async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tup
                     continue
         except Exception:
             continue
-        found_rows: list[dict] = await page.evaluate(_STATUS_JS)
+        found_rows: list[dict] = await page.evaluate(_BILLING_LIST_JS)
         items = [
-            (
-                r["url"],
-                _normalize_status_text(str(r.get("status", ""))),
-                str(r.get("date", "")),
-            )
+            {
+                "url": str(r.get("url", "")),
+                "date": str(r.get("date", "")),
+                "description": str(r.get("description", "")),
+                "status": str(r.get("status", "")),
+                "amountText": str(r.get("amountText", "")),
+            }
             for r in (found_rows or [])
-            if isinstance(r, dict)
-            and str(r.get("url", "")).startswith("http")
-            and _normalize_status_text(str(r.get("status", "")))
+            if isinstance(r, dict) and str(r.get("url", "")).startswith("http")
         ]
         log.info(f"账单页 {billing_url}: {len(found_rows or [])} 行, 可用 {len(items)}")
         if items:
-            for u, s, d in items:
-                log.info(f"  date={d!r} status={s!r} url={u[:70]}")
-            break
+            for row in items[:8]:
+                log.info(
+                    f"  date={row['date']!r} status={row['status']!r} "
+                    f"amount={row['amountText']!r} url={row['url'][:70]}"
+                )
+            return items
+    return []
+
+
+async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tuple[str, str, str]]:
+    """在已有 page 对象上抓取账单页状态列表，返回 [(url, status, date), ...]。"""
+    raw = await _fetch_billing_list_in_ctx(page, invoice_month=invoice_month)
+    items: list[tuple[str, str, str]] = [
+        (
+            r["url"],
+            _normalize_status_text(str(r.get("status", ""))),
+            str(r.get("date", "")),
+        )
+        for r in raw
+        if _normalize_status_text(str(r.get("status", "")))
+    ]
     return items
 
 

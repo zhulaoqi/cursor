@@ -92,6 +92,8 @@ class Settings:
     spending_refresh_cron: str
     spending_refresh_lock_file: str
     spending_refresh_concurrency: int
+    billing_ledger_retry_times: int
+    billing_ledger_retry_backoff_sec: int
     spending_refresh_alert_enable: bool
     alert_bot_client_id: str
     alert_bot_secret: str
@@ -112,9 +114,9 @@ def load_settings() -> Settings:
         default_imap_host=os.environ.get("DEFAULT_IMAP_HOST", "imap.feishu.cn"),
         default_imap_port=_env_int("DEFAULT_IMAP_PORT", 993),
         proxy=os.environ.get("PROXY", "").strip(),
-        browser_login_concurrency=_env_int("BROWSER_LOGIN_CONCURRENCY", 5),
-        invoice_download_concurrency=_env_int("INVOICE_DOWNLOAD_CONCURRENCY", 4),
-        invoice_active_context_limit=_env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 3),
+        browser_login_concurrency=_env_int("BROWSER_LOGIN_CONCURRENCY", 8),
+        invoice_download_concurrency=_env_int("INVOICE_DOWNLOAD_CONCURRENCY", 10),
+        invoice_active_context_limit=_env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 6),
         api_concurrency=_env_int("API_CONCURRENCY", 30),
         capsolver_api_key=os.environ.get("CAPSOLVER_API_KEY", "").strip(),
         twocaptcha_api_key=os.environ.get("TWOCAPTCHA_API_KEY", "").strip(),
@@ -154,9 +156,11 @@ def load_settings() -> Settings:
             1,
             _env_int(
                 "SPENDING_REFRESH_CONCURRENCY",
-                _env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 3),
+                _env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 6),
             ),
         ),
+        billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 3),
+        billing_ledger_retry_backoff_sec=_env_int("BILLING_LEDGER_RETRY_BACKOFF_SEC", 2),
         spending_refresh_alert_enable=_env_bool("SPENDING_REFRESH_ALERT_ENABLE", True),
         alert_bot_client_id=os.environ.get("ALERT_BOT_CLIENT_ID", "").strip(),
         alert_bot_secret=os.environ.get("ALERT_BOT_SECRET", "").strip(),

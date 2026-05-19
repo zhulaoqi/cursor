@@ -485,6 +485,17 @@
     .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
     .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1.5px solid #FCA5A5; }
     .btn-warning:hover:not(:disabled) { background: #FEE2E2; border-color: #EF4444; }
+    .btn-download {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      box-shadow: none;
+    }
+    .btn-download:hover:not(:disabled) {
+      background: #1E40AF;
+      border-color: #1E40AF;
+      box-shadow: 0 2px 8px rgba(29, 78, 216, 0.22);
+    }
     .btn-sm       { height: 36px; padding: 0 14px; font-size: 13px; }
 
     /* ── 卡片 ── */
@@ -1129,47 +1140,138 @@
     .plan-pill.not-enabled { background: #F1F5F9; color: #64748B; }
     .plan-pill.error { background: #FEE2E2; color: #B91C1C; }
     .plan-pill.unknown { background: #FEF9C3; color: #A16207; }
-    .sticky-selection-bar {
+    /* 批量操作浮条：固定定位与入场动效分离，避免 transform 冲突导致卡顿 */
+    .selection-dock {
       position: fixed;
-      left: 20px;
-      right: 20px;
-      bottom: 20px;
+      left: 50%;
+      bottom: 18px;
       z-index: 120;
-      width: min(720px, calc(100vw - 40px));
-      margin-inline: auto;
-      padding: 12px 14px 12px 18px;
+      width: min(680px, calc(100vw - var(--app-shell-gutter) * 2 - 40px));
+      transform: translateX(calc(-50% + 10px));
+      pointer-events: none;
+    }
+    .selection-dock-panel {
+      pointer-events: auto;
+      will-change: transform, opacity;
+    }
+    .selection-dock-panel-enter {
+      transition: opacity 0.2s ease-out, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .selection-dock-panel-enter-start {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    .selection-dock-panel-enter-end {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .selection-dock-panel-leave {
+      transition: opacity 0.12s ease-in, transform 0.12s ease-in;
+    }
+    .selection-dock-panel-leave-start {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .selection-dock-panel-leave-end {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .selection-dock-panel-enter,
+      .selection-dock-panel-leave {
+        transition: opacity 0.12s ease !important;
+      }
+      .selection-dock-panel-enter-start,
+      .selection-dock-panel-leave-end {
+        transform: none !important;
+      }
+    }
+    .sticky-selection-bar {
+      position: relative;
+      left: auto;
+      bottom: auto;
+      width: 100%;
+      transform: none;
+      padding: 10px 16px;
+      min-height: 52px;
       display: flex;
+      flex-direction: row;
       align-items: center;
       justify-content: space-between;
-      gap: 14px;
-      border: 1px solid #BFDBFE;
+      gap: 20px;
+      border: 1px solid #CBD5E1;
       border-radius: 14px;
-      background: rgba(255,255,255,.97);
-      box-shadow: 0 8px 20px rgba(15,23,42,.12);
-      backdrop-filter: blur(12px);
-      will-change: opacity;
-      contain: paint;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
     }
     .sticky-selection-meta {
       display: flex;
       align-items: center;
       gap: 10px;
       min-width: 0;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 600;
+      flex: 0 1 auto;
     }
-    .sticky-selection-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--primary);
-      box-shadow: 0 0 0 2px rgba(37,99,235,.12);
+    .sticky-selection-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 32px;
+      height: 32px;
+      padding: 0 8px;
+      border-radius: 8px;
+      background: #EFF6FF;
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
       flex-shrink: 0;
     }
-    .selection-bar-spacer {
-      height: 104px;
-      pointer-events: none;
+    .sticky-selection-count {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .sticky-selection-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      flex-wrap: nowrap;
+    }
+    .sticky-selection-divider {
+      width: 1px;
+      height: 24px;
+      margin: 0 2px;
+      background: #E2E8F0;
+      flex-shrink: 0;
+    }
+    .sticky-selection-bar .btn-sm {
+      height: 34px;
+      padding: 0 12px;
+      font-size: 12.5px;
+      white-space: nowrap;
+    }
+    .sticky-selection-bar .btn-clear-selection {
+      color: var(--muted);
+    }
+    .sticky-selection-bar .btn-clear-selection:hover:not(:disabled) {
+      color: var(--text);
+    }
+    .account-list-view .account-list-table-wrap {
+      scroll-padding-bottom: 84px;
+    }
+    .sticky-selection-bar .btn-ledger {
+      background: #EFF6FF;
+      color: #1D4ED8;
+      border: 1px solid #93C5FD;
+      box-shadow: none;
+    }
+    .sticky-selection-bar .btn-ledger:hover:not(:disabled) {
+      background: #DBEAFE;
+      border-color: #60A5FA;
+      color: #1E40AF;
     }
     .delete-confirm-modal {
       position: fixed;
@@ -1281,13 +1383,32 @@
       cursor: not-allowed;
       opacity: .55;
     }
-    @media (max-width: 720px) {
-      :root { --app-shell-gutter: 16px; }
-      .sticky-selection-bar {
-        align-items: stretch;
-        flex-direction: column;
+    @media (max-width: 900px) {
+      .selection-dock {
+        width: calc(100vw - var(--app-shell-gutter) * 2 - 24px);
+        transform: translateX(-50%);
       }
-      .sticky-selection-bar .btn { justify-content: center; }
+    }
+    @media (max-width: 640px) {
+      :root { --app-shell-gutter: 16px; }
+      .selection-dock {
+        width: calc(100vw - 32px);
+        bottom: 12px;
+        transform: translateX(-50%);
+      }
+      .sticky-selection-bar {
+        flex-wrap: wrap;
+        padding: 12px;
+        gap: 12px;
+      }
+      .sticky-selection-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 8px;
+      }
+      .sticky-selection-divider { display: none; }
+      .sticky-selection-bar .btn-cta { flex: 1 1 100%; }
     }
 
     /* ── 冲突行高亮 ── */
@@ -1510,12 +1631,50 @@
 
     /* ── 完成状态下载区域 ── */
     .download-ready {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
       background: #fff;
       border: 1px solid #E2E8F0;
       border-left: 4px solid var(--success);
+      border-radius: 12px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+    .download-ready-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .download-ready-icon {
+      width: 40px;
+      height: 40px;
       border-radius: 10px;
-      padding: 20px 24px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.04);
+      background: #ECFDF5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .download-ready-title {
+      margin: 0;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+    }
+    .download-ready-sub {
+      margin: 4px 0 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .download-ready-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
     }
 
     /* ── details/summary 箭头 ── */
@@ -1922,9 +2081,62 @@
               </tbody>
             </table>
           </div>
-          <div class="selection-bar-spacer" x-show="needsSelectionBarSpacer" x-cloak></div>
         </div>
       </template>
+    </div>
+
+    <div class="selection-dock">
+      <div class="selection-dock-panel"
+           x-show="view === 'list' && selectedEmails.size > 0"
+           x-cloak
+           x-transition:enter="selection-dock-panel-enter"
+           x-transition:enter-start="selection-dock-panel-enter-start"
+           x-transition:enter-end="selection-dock-panel-enter-end"
+           x-transition:leave="selection-dock-panel-leave"
+           x-transition:leave-start="selection-dock-panel-leave-start"
+           x-transition:leave-end="selection-dock-panel-leave-end">
+      <div class="sticky-selection-bar" role="region" aria-label="批量操作">
+        <div class="sticky-selection-meta" aria-live="polite" :aria-label="`已选择 ${selectedEmails.size} 个账号`">
+          <span class="sticky-selection-badge" x-text="selectedEmails.size"></span>
+          <span class="sticky-selection-count">已选</span>
+        </div>
+        <div class="sticky-selection-actions">
+          <button type="button" class="btn btn-ghost btn-sm btn-clear-selection" @click="clearSelection()" title="清空选择">清空</button>
+          <button type="button"
+            class="btn btn-warning btn-sm"
+            @click="bulkDeleteSelectedAccounts()"
+            :disabled="isDeletingSelected || selectedEmails.size === 0"
+            :aria-busy="isDeletingSelected"
+            :aria-label="`删除选中的 ${selectedEmails.size} 个账号`">
+            <template x-if="isDeletingSelected">
+              <svg class="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            </template>
+            <template x-if="!isDeletingSelected">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+            </template>
+            <span x-text="isDeletingSelected ? '删除中' : '删除'"></span>
+          </button>
+          <span class="sticky-selection-divider" aria-hidden="true"></span>
+          <button type="button"
+            class="btn btn-ledger btn-sm"
+            @click="startBillingLedgerExport()"
+            :disabled="selectedEmails.size===0"
+            :aria-label="`导出账期净支出，共 ${selectedEmails.size} 个账号`"
+            :title="`导出账期净支出（${selectedEmails.size} 个）`">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>导出净支出</span>
+          </button>
+          <button type="button"
+            class="btn btn-cta btn-sm"
+            @click="startRun()"
+            :aria-label="`开始拉取，共 ${selectedEmails.size} 个账号`"
+            :title="`开始拉取（${selectedEmails.size} 个）`">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span>开始拉取</span>
+          </button>
+        </div>
+      </div>
+      </div>
     </div>
   </div>
 
@@ -2147,10 +2359,10 @@
                       'badge-ok':      item.phase === 'done' || item.phase === 'warn_done',
                       'badge-warn':    item.phase === 'warn' || item.phase === 'fetched_warn',
                       'badge-error':   item.phase === 'error',
-                      'badge-running': ['fetching','fetched','invoice','excel','retrying'].includes(item.phase),
+                      'badge-running': ['fetching','fetched','invoice','excel','ledger','retrying'].includes(item.phase),
                       'badge-pending': item.phase === 'pending',
                     }">
-                    <template x-if="['fetching','fetched','invoice','excel','retrying'].includes(item.phase)">
+                    <template x-if="['fetching','fetched','invoice','excel','ledger','retrying'].includes(item.phase)">
                       <svg class="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
                     </template>
                     <span x-text="({
@@ -2159,6 +2371,7 @@
                       fetched:      '已拉取',
                       fetched_warn: '拉取警告',
                       invoice:      '下载账单',
+                      ledger:       '解析账单',
                       excel:        '生成报表',
                       retrying:     '重试中',
                       done:         '成功',
@@ -2217,26 +2430,34 @@
       </details>
 
       <!-- 完成后下载 -->
-      <div x-show="runFinished && (downloadToken || hasZip)" class="download-ready" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
-        <div style="display:flex; align-items:center; gap:14px;">
-          <div style="width:36px;height:36px;border-radius:50%;background:#DCFCE7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <div x-show="runFinished && (downloadToken || hasZip)" class="download-ready">
+        <div class="download-ready-meta">
+          <div class="download-ready-icon" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div>
-            <p style="margin:0; font-weight:700; font-size:15px; color:var(--text);">数据已就绪</p>
-            <p style="margin:3px 0 0; font-size:13px; color:var(--muted);" x-text="`成功 ${runOkCount} 个账号 · 失败 ${runFailCount} 个`"></p>
+            <p class="download-ready-title">数据已就绪</p>
+            <p class="download-ready-sub" x-text="`成功 ${runOkCount} 个账号 · 失败 ${runFailCount} 个`"></p>
           </div>
         </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <button x-show="hasZip" class="btn btn-cta" @click="downloadZip()" title="下载本次生成的 ZIP 压缩包">
+        <div class="download-ready-actions">
+          <button x-show="downloadToken"
+            class="btn"
+            :class="runMode === 'billing_ledger' ? 'btn-download' : 'btn-ghost'"
+            @click="downloadFile()"
+            :title="runMode === 'billing_ledger' ? '下载账期净支出 Excel' : '仅下载汇总 Excel'">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span x-text="runMode === 'billing_ledger' ? '下载账期净支出 Excel' : '仅 Excel'"></span>
+          </button>
+          <button x-show="hasZip"
+            class="btn"
+            :class="runMode === 'billing_ledger' ? 'btn-ghost' : 'btn-cta'"
+            @click="downloadZip()"
+            title="下载本次生成的 ZIP 压缩包">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span x-text="downloadZipLabel()"></span>
           </button>
-          <button x-show="downloadToken" class="btn btn-ghost" @click="downloadFile()" title="仅下载汇总 Excel">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            仅 Excel
-          </button>
-          <button class="btn btn-ghost" style="color:var(--muted); border-color:var(--border);" @click="goList()">
+          <button class="btn btn-ghost" @click="goList()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
             返回列表
           </button>
@@ -2634,36 +2855,6 @@
 
 </main>
 
-<!-- ── 选中后吸附操作条 ───────────────────────────────────────── -->
-<div class="sticky-selection-bar"
-     x-show="view === 'list' && selectedEmails.size > 0"
-     x-cloak
-     x-transition.opacity.duration.150ms>
-  <div class="sticky-selection-meta" aria-live="polite">
-    <span class="sticky-selection-dot"></span>
-    <span x-text="`已选 ${selectedEmails.size} 个账号`"></span>
-    <span style="color:var(--muted);font-weight:500;" x-text="`当前列表 ${filteredDbAccounts.length} 个`"></span>
-  </div>
-  <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
-    <button class="btn btn-ghost btn-sm" @click="clearSelection()">
-      清空选择
-    </button>
-    <button class="btn btn-warning btn-sm" @click="bulkDeleteSelectedAccounts()" :disabled="isDeletingSelected || selectedEmails.size === 0">
-      <template x-if="isDeletingSelected">
-        <svg class="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-      </template>
-      <template x-if="!isDeletingSelected">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-      </template>
-      <span x-text="isDeletingSelected ? '删除中' : '删除选中'"></span>
-    </button>
-    <button class="btn btn-cta" @click="startRun()">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      <span x-text="`开始拉取 (${selectedEmails.size})`"></span>
-    </button>
-  </div>
-</div>
-
 <!-- ── 删除选中确认弹窗 ───────────────────────────────────────── -->
 <div class="delete-confirm-modal" x-show="showDeleteConfirm" x-cloak x-transition.opacity>
   <div class="modal-scrim" @click="!isDeletingSelected && (showDeleteConfirm=false)">
@@ -2832,8 +3023,6 @@ function app() {
     deleteAccountTarget: '',
     isDeletingAccount: false,
     deleteAccountError: '',
-    needsSelectionBarSpacer: false,
-    _selectionBarSpacerRaf: null,
 
     // ── 上传预览 ──
     isDragging: false,
@@ -2887,6 +3076,7 @@ function app() {
     globalPhaseMsg: '',
     downloadToken: null,
     hasZip: false,
+    runMode: 'default', // 'default' | 'billing_ledger'
     retryingEmails: new Set(),
     retryResolvedEmails: new Set(),
     retryDownloads: {},
@@ -2969,7 +3159,6 @@ function app() {
       this.uploadError = '';
       this.showManualAdd = false;
       this.loadAccounts();
-      this._requestSelectionBarSpacerSync();
     },
 
     goUpload() {
@@ -3008,9 +3197,6 @@ function app() {
       await this.loadAccounts();
       await this.loadSyncDashboard();
       this._ready = true;
-      window.addEventListener('scroll', () => this._requestSelectionBarSpacerSync(), { passive: true });
-      window.addEventListener('resize', () => this._requestSelectionBarSpacerSync(), { passive: true });
-      this._requestSelectionBarSpacerSync();
 
       // 尝试从 sessionStorage 恢复运行中任务
       try {
@@ -3098,7 +3284,6 @@ function app() {
         // 清理已删除账号的选中状态
         const emailSet = new Set(this.dbAccounts.map(a => a.email));
         this.selectedEmails = new Set([...this.selectedEmails].filter(e => emailSet.has(e)));
-        this._requestSelectionBarSpacerSync();
       } catch {}
       finally {
         await this.fetchSpendingRefreshStatus();
@@ -4318,7 +4503,6 @@ function app() {
       } else {
         const removed = new Set(targetEmails);
         this.selectedEmails = new Set([...this.selectedEmails].filter(email => !removed.has(email)));
-        this._requestSelectionBarSpacerSync();
       }
     },
     toggleOne(email, e) {
@@ -4327,13 +4511,11 @@ function app() {
       else next.delete(email);
       this.selectedEmails = next;
       if (e.target.checked) this._ensureSelectionBarClearance(e.target);
-      else this._requestSelectionBarSpacerSync();
     },
     clearSelection() {
       this.selectedEmails = new Set();
       this.showDeleteConfirm = false;
       this.deleteSelectionError = '';
-      this.needsSelectionBarSpacer = false;
     },
     bulkDeleteSelectedAccounts() {
       if (this.selectedEmails.size === 0 || this.isDeletingSelected) return;
@@ -4376,37 +4558,18 @@ function app() {
           const barRect = bar.getBoundingClientRect();
           const overlap = rowRect.bottom - barRect.top + 12;
           if (overlap > 0) window.scrollBy({ top: overlap, left: 0, behavior: 'auto' });
-          this._syncSelectionBarSpacer();
         });
       });
-    },
-    _requestSelectionBarSpacerSync() {
-      if (this._selectionBarSpacerRaf) cancelAnimationFrame(this._selectionBarSpacerRaf);
-      this._selectionBarSpacerRaf = requestAnimationFrame(() => this._syncSelectionBarSpacer());
-    },
-    _syncSelectionBarSpacer() {
-      this._selectionBarSpacerRaf = null;
-      if (this.view !== 'list' || this.selectedEmails.size === 0) {
-        this.needsSelectionBarSpacer = false;
-        return;
-      }
-      const card = document.querySelector('.account-list-card');
-      const bar = document.querySelector('.sticky-selection-bar');
-      if (!card || !bar) {
-        this.needsSelectionBarSpacer = false;
-        return;
-      }
-      const cardRect = card.getBoundingClientRect();
-      const barRect = bar.getBoundingClientRect();
-      this.needsSelectionBarSpacer = cardRect.bottom > barRect.top;
     },
 
     // ── 拉取 ──
     get runStatusText() {
       if (this.runFinished) return `成功 ${this.runOkCount} 个 · 失败 ${this.runFailCount} 个`;
       const done = Object.values(this.runItems).filter(i => ['done','warn_done','warn','error'].includes(i.phase)).length;
+      const ledger = Object.values(this.runItems).filter(i => i.phase === 'ledger').length;
       const invoice = Object.values(this.runItems).filter(i => i.phase === 'invoice').length;
       const excel = Object.values(this.runItems).filter(i => i.phase === 'excel').length;
+      if (this.runMode === 'billing_ledger' && ledger > 0) return `${ledger} 个账号解析账单列表中…`;
       if (excel > 0) return `${excel} 个账号生成报表中…`;
       if (invoice > 0) return `${invoice} 个账号下载账单中…`;
       const fetching = Object.values(this.runItems).filter(i => ['fetching','fetched'].includes(i.phase)).length;
@@ -4424,10 +4587,66 @@ function app() {
       return '下载 ZIP';
     },
 
+    async startBillingLedgerExport() {
+      const selected = this.dbAccounts.filter(a => this.selectedEmails.has(a.email));
+      if (!selected.length) return;
+      if (!this.selectedMonth || !/^\d{4}-\d{2}$/.test(this.selectedMonth)) {
+        alert('请先选择账单月份');
+        return;
+      }
+
+      this.runMode = 'billing_ledger';
+      this.runItems = {};
+      selected.forEach(a => { this.runItems[a.email] = { phase: 'pending', msg: '' }; });
+      this.runTotal = selected.length;
+      this.runDone = 0;
+      this.runOkCount = 0;
+      this.runFailCount = 0;
+      this.runFinished = false;
+      this.downloadToken = null;
+      this.hasZip = false;
+      this.retryingEmails = new Set();
+      this.retryResolvedEmails = new Set();
+      this.retryDownloads = {};
+      this.retryTaskIds = {};
+      this.logLines = [];
+      this.view = 'run';
+
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accounts: selected.map(a => ({
+            email: a.email,
+            imap_password: a.imap_password,
+            feishu_email: a.feishu_email,
+            imap_host: a.imap_host,
+            imap_port: a.imap_port,
+          })),
+          month: this.selectedMonth,
+          with_billing_ledger: true,
+          with_invoices: false,
+          with_summary: false,
+          with_raw: false,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || '启动失败');
+        this.view = 'list';
+        return;
+      }
+      const { task_id } = await res.json();
+      this.taskId = task_id;
+      this._saveState();
+      this.listenSSE(task_id);
+    },
+
     async startRun() {
       const selected = this.dbAccounts.filter(a => this.selectedEmails.has(a.email));
       if (!selected.length) return;
 
+      this.runMode = 'default';
       this.runItems = {};
       selected.forEach(a => { this.runItems[a.email] = { phase: 'pending', msg: '' }; });
       this.runTotal = selected.length;
@@ -4621,10 +4840,11 @@ function app() {
         if (item && !keepRetryResult) { item.phase = d.phase; item.msg = d.msg || ''; }
 
         const phaseLabel = {
-          fetching:     '拉取中',
+          fetching:     this.runMode === 'billing_ledger' ? '登录中' : '拉取中',
           fetched:      '已拉取',
           fetched_warn: '拉取警告',
           invoice:      '下载账单中',
+          ledger:       '解析账单列表',
           excel:        '生成报表中',
           done:         '完成',
           warn_done:    '部分完成',
@@ -4644,7 +4864,10 @@ function app() {
           // 中间态：仅打日志，不计入进度（后续 warn_done 才是终态）
           this.addLog('var(--warn)', `${d.email}：${d.msg || phaseLabel}`);
         } else if (d.phase === 'fetching') {
-          this.addLog('var(--primary)', `${d.email}：拉取中…`);
+          const lbl = this.runMode === 'billing_ledger' ? '获取登录态…' : '拉取中…';
+          this.addLog('var(--primary)', `${d.email}：${lbl}`);
+        } else if (d.phase === 'ledger') {
+          this.addLog('var(--muted)', `${d.email}：解析账单列表…`);
         } else if (d.phase === 'invoice') {
           this.addLog('var(--muted)', `${d.email}：下载账单中…`);
         }
@@ -4653,7 +4876,10 @@ function app() {
 
       es.addEventListener('global_phase', e => {
         const d = JSON.parse(e.data);
-        const labels = { summary: '生成汇总报表中…', zip_ready: '' };
+        const labels = {
+          summary: this.runMode === 'billing_ledger' ? '生成账期净支出 Excel…' : '生成汇总报表中…',
+          zip_ready: '',
+        };
         const msg = labels[d.phase] ?? d.msg;
         if (d.phase === 'zip_ready') {
           this.globalPhaseMsg = '';
@@ -4668,8 +4894,12 @@ function app() {
         const d = JSON.parse(e.data);
         this.downloadToken = d.download_token;
         this.hasZip = !!d.has_zip;
+        if (d.run_mode) this.runMode = d.run_mode;
         this.globalPhaseMsg = '';
-        this.addLog('var(--success)', '文件已生成，可以下载');
+        const readyMsg = this.runMode === 'billing_ledger'
+          ? '账期净支出 Excel 已生成，可以下载'
+          : '文件已生成，可以下载';
+        this.addLog('var(--success)', readyMsg);
         this._saveState();
       });
 

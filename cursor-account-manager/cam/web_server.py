@@ -168,6 +168,7 @@ class RunRequest(BaseModel):
     with_invoices: bool = True
     with_summary: bool = True
     with_raw: bool = False
+    with_billing_ledger: bool = False   # 账期净支出 Excel（独立任务，与 PDF 并存）
 
 
 class SyncRunRequest(BaseModel):
@@ -206,8 +207,11 @@ def _fetch_targets_for_run(
     with_summary: bool,
     with_invoices: bool,
     with_raw: bool,
+    with_billing_ledger: bool = False,
 ) -> tuple[str, ...]:
     """根据导出选项决定本次需要拉取的 API 数据项。"""
+    if with_billing_ledger:
+        return ()
     if with_raw:
         return fetcher.DEFAULT_WHAT
 
@@ -499,11 +503,21 @@ async def download_accounts_excel_template():
     )
 
 
+_BILLING_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
 @app.post("/api/run")
 async def run_task(req: RunRequest):
     """启动拉取任务，返回 task_id，前端用 /api/stream/{task_id} 监听进度。"""
     if not req.accounts:
         raise HTTPException(status_code=400, detail="账号列表为空")
+
+    if req.with_billing_ledger:
+        if not req.month or not _BILLING_MONTH_RE.match(req.month.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail="导出账期净支出需选择有效账单月份（YYYY-MM）",
+            )
 
     task_id = secrets.token_hex(8)
     with _task_lock:
@@ -519,10 +533,93 @@ async def run_task(req: RunRequest):
             "finished_at": None,
         }
 
+    def _run_billing_ledger_job() -> None:
+        """账期净支出：仅浏览器抓 Billing 列表 + 写 Excel。"""
+        from .billing_ledger import export_billing_ledger_workbook, scrape_billing_ledger_batch
+        from .token_manager import get_default_manager
+
+        task = _tasks[task_id]
+        month = (req.month or "").strip()
+        accounts = [
+            Account(
+                email=a.email,
+                imap_password=a.imap_password,
+                imap_host=a.imap_host or IMAP_HOST_DEFAULT,
+                imap_port=a.imap_port or IMAP_PORT_DEFAULT,
+                feishu_email=a.feishu_email,
+            )
+            for a in req.accounts
+        ]
+        mgr = get_default_manager()
+        task_lock = threading.Lock()
+
+        def _export_cb(email: str, phase: str, msg: str = "") -> None:
+            if not email:
+                _push(task_id, "global_phase", {"phase": phase, "msg": msg})
+                return
+            if phase == "done":
+                with task_lock:
+                    task["ok"].append(email)
+                    task["done"] += 1
+                _push(task_id, "progress", {"email": email, "phase": "done", "msg": msg})
+            elif phase == "error":
+                with task_lock:
+                    task["done"] += 1
+                    task["fail"].append({"email": email, "error": msg or "失败"})
+                _push(task_id, "progress", {"email": email, "phase": "error", "msg": msg})
+            else:
+                _push(task_id, "progress", {"email": email, "phase": phase, "msg": msg})
+
+        try:
+            summaries, detail_rows = scrape_billing_ledger_batch(
+                accounts,
+                month,
+                manager=mgr,
+                progress_cb=_export_cb,
+            )
+            _purge_old_tmp(max_age_sec=3600)
+            out_dir = Path(tempfile.mkdtemp(prefix="cam_ledger_"))
+            xlsx_name = f"账期净支出_{month}.xlsx"
+            xlsx_path = out_dir / xlsx_name
+            _export_cb("", "summary", "生成账期净支出 Excel…")
+            export_billing_ledger_workbook(xlsx_path, summaries, detail_rows)
+
+            dl_token: Optional[str] = None
+            if summaries:
+                dl_token = secrets.token_hex(12)
+                with _task_lock:
+                    _download_files[dl_token] = xlsx_path
+
+            with task_lock:
+                task["download_token"] = dl_token
+                task["out_dir"] = str(out_dir)
+                task["has_zip"] = False
+
+            _push(task_id, "ready", {
+                "download_token": dl_token,
+                "has_zip": False,
+                "label": month,
+                "run_mode": "billing_ledger",
+            })
+        except Exception as e:
+            log.exception("账期净支出导出失败")
+            _push(task_id, "error", {"msg": f"生成 Excel 失败: {e}"})
+
+        task["status"] = "finished"
+        task["finished_at"] = time.time()
+        _push(task_id, "finished", {
+            "ok": len(task["ok"]),
+            "fail": len(task["fail"]),
+        })
+
     def _worker():
         task = _tasks[task_id]
         task["status"] = "running"
         _push(task_id, "start", {"total": len(req.accounts)})
+
+        if req.with_billing_ledger:
+            _run_billing_ledger_job()
+            return
 
         # 解析日期范围 → Unix 秒时间戳
         start_ts: Optional[int] = None
@@ -561,6 +658,7 @@ async def run_task(req: RunRequest):
             with_summary=req.with_summary,
             with_invoices=req.with_invoices,
             with_raw=req.with_raw,
+            with_billing_ledger=req.with_billing_ledger,
         )
 
         def _summarize_snapshot_errors(errors: dict[str, str]) -> str:
