@@ -41,7 +41,8 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertEqual(settings.invoice_download_concurrency, 10)
         self.assertEqual(settings.invoice_active_context_limit, 6)
         self.assertEqual(settings.api_concurrency, 30)
-        self.assertEqual(settings.billing_ledger_retry_times, 3)
+        self.assertEqual(settings.billing_ledger_retry_times, 4)
+        self.assertEqual(settings.billing_ledger_concurrency, 3)
 
     def test_bi_sync_related_defaults(self):
         with patch.dict(

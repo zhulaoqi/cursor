@@ -42,10 +42,10 @@ from . import exporter, fetcher
 from .alerting import send_alert
 from .bi_sync import run_daily_sync
 from .account_store import load_accounts
-from .config import SETTINGS
+from .config import SETTINGS, web_fetch_thread_workers
 from .logger import get
 from .models import Account, AccountSnapshot
-from .plan_scraper import fetch_spending_panel_from_dashboard
+from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
 from .scheduler import _try_lock, run_scheduler_loop
 from .spending_refresh import persist_spending_panel
 from .sync_log_store import get_default_sync_log_store
@@ -557,11 +557,14 @@ async def run_task(req: RunRequest):
             if not email:
                 _push(task_id, "global_phase", {"phase": phase, "msg": msg})
                 return
-            if phase == "done":
+            if phase in ("done", "warn_done"):
                 with task_lock:
-                    task["ok"].append(email)
+                    if phase == "done":
+                        task["ok"].append(email)
+                    else:
+                        task.setdefault("warn", []).append(email)
                     task["done"] += 1
-                _push(task_id, "progress", {"email": email, "phase": "done", "msg": msg})
+                _push(task_id, "progress", {"email": email, "phase": phase, "msg": msg})
             elif phase == "error":
                 with task_lock:
                     task["done"] += 1
@@ -645,11 +648,8 @@ async def run_task(req: RunRequest):
         snaps: List[AccountSnapshot] = []
         snap_lock = threading.Lock()
 
-        # 并发数：fetch 阶段全为 HTTP API 调用，无浏览器开销，可以比 browser 并发更激进。
-        # 上限取 api_concurrency × 2（不超过 30），避免线程过多反而增加调度开销。
-        # 浏览器登录依然由 _LOGIN_SEMAPHORE 控制，不受此值影响。
-        api_workers = min(len(accounts), max(SETTINGS.api_concurrency * 2, 20), 30)
-        workers = max(SETTINGS.browser_login_concurrency, api_workers)
+        # fetch 阶段为纯 HTTP；线程数见 web_fetch_thread_workers（可配 WEB_FETCH_MAX_WORKERS）。
+        workers = web_fetch_thread_workers(len(accounts))
 
         # 记录拉取阶段有 warn 的账号，export 完成后保留 warn 标志
         _warn_emails: set[str] = set()
@@ -1031,52 +1031,27 @@ def _format_on_demand_alert_table(
     return out
 
 
-def _spending_refresh_workers(*, account_count: int) -> int:
-    cap = max(1, SETTINGS.spending_refresh_concurrency)
-    return min(cap, max(1, account_count))
+def _account_from_store_row(row: dict[str, Any]) -> Account:
+    email = _normalize_email(row.get("email", ""))
+    return Account(
+        email=email,
+        imap_password=str(row.get("imap_password") or ""),
+        imap_host=str(row.get("imap_host") or IMAP_HOST_DEFAULT),
+        imap_port=int(row.get("imap_port") or IMAP_PORT_DEFAULT),
+        feishu_email=str(row.get("feishu_email") or "").strip().lower(),
+    )
 
 
-def _refresh_account_spending_row(
+def _spending_row_result_from_batch_item(
     store: Any,
     row: dict[str, Any],
+    item: SpendingPanelBatchItem,
 ) -> tuple[dict[str, Any], bool, Optional[tuple[str, str]], Optional[tuple[str, str]]]:
-    """解析单账号消费页。返回 (result, ok, open_alert, hist_alert)。"""
-    email = _normalize_email(row.get("email", ""))
-    if not email:
-        return ({"email": "", "ok": False, "error": "empty email"}, False, None, None)
-    try:
-        acc = Account(
-            email=email,
-            imap_password=str(row.get("imap_password") or ""),
-            imap_host=str(row.get("imap_host") or IMAP_HOST_DEFAULT),
-            imap_port=int(row.get("imap_port") or IMAP_PORT_DEFAULT),
-            feishu_email=str(row.get("feishu_email") or "").strip().lower(),
-        )
-        info = fetch_spending_panel_from_dashboard(acc)
-        persist_spending_panel(store, email, info)
-        row_out: dict[str, Any] = {
-            "email": email,
-            "ok": True,
-            "plan_name": info.plan_name,
-            "on_demand_enabled": info.on_demand_enabled,
-            "on_demand_historical": bool(info.on_demand_historical),
-        }
-        if info.plan_snapshot is not None:
-            row_out["plan_status"] = info.plan_snapshot.status
-            row_out["plan_amount"] = (
-                str(info.plan_snapshot.amount) if info.plan_snapshot.amount is not None else ""
-            )
-            row_out["plan_error"] = info.plan_snapshot.error or ""
-        fei = str(row.get("feishu_email") or "").strip()
-        open_entry: Optional[tuple[str, str]] = None
-        hist_entry: Optional[tuple[str, str]] = None
-        if _on_demand_currently_open_flag(info.on_demand_enabled):
-            open_entry = (email, fei)
-        elif bool(info.on_demand_historical):
-            hist_entry = (email, fei)
-        return (row_out, True, open_entry, hist_entry)
-    except Exception as e:
-        err = f"{type(e).__name__}: {e}"
+    """将批量解析结果转为 API 行结果与按需告警条目。"""
+    email = _normalize_email(item.email or row.get("email", ""))
+    fei = str(row.get("feishu_email") or "").strip()
+    if item.error or item.info is None:
+        err = item.error or "消费页解析失败"
         store.update_account_spending_snapshot(
             email=email,
             plan_name="",
@@ -1096,6 +1071,29 @@ def _refresh_account_spending_row(
             None,
             None,
         )
+
+    info = item.info
+    persist_spending_panel(store, email, info)
+    row_out: dict[str, Any] = {
+        "email": email,
+        "ok": True,
+        "plan_name": info.plan_name,
+        "on_demand_enabled": info.on_demand_enabled,
+        "on_demand_historical": bool(info.on_demand_historical),
+    }
+    if info.plan_snapshot is not None:
+        row_out["plan_status"] = info.plan_snapshot.status
+        row_out["plan_amount"] = (
+            str(info.plan_snapshot.amount) if info.plan_snapshot.amount is not None else ""
+        )
+        row_out["plan_error"] = info.plan_snapshot.error or ""
+    open_entry: Optional[tuple[str, str]] = None
+    hist_entry: Optional[tuple[str, str]] = None
+    if _on_demand_currently_open_flag(info.on_demand_enabled):
+        open_entry = (email, fei)
+    elif bool(info.on_demand_historical):
+        hist_entry = (email, fei)
+    return (row_out, True, open_entry, hist_entry)
 
 
 @app.get("/api/accounts/spending-refresh-busy")
@@ -1218,15 +1216,27 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
             for row in targets
             if _normalize_email(row.get("email", ""))
         ]
-        workers = _spending_refresh_workers(account_count=len(work_rows))
+        row_by_email = {
+            _normalize_email(row.get("email", "")): row for row in work_rows
+        }
+        accounts = [_account_from_store_row(row) for row in work_rows]
         progress_lock = threading.Lock()
         try:
 
-            def _run_one(row: dict[str, Any], index: int) -> None:
-                email = _normalize_email(row.get("email", ""))
+            def _on_account(email: str, index: int, total: int) -> None:
                 with progress_lock:
-                    _spending_progress_before_email(email, index=index, total=len(work_emails))
-                row_out, row_ok, open_entry, hist_entry = _refresh_account_spending_row(store, row)
+                    _spending_progress_before_email(email, index=index, total=total)
+
+            batch_items = fetch_spending_panels_batch(
+                accounts,
+                silent=False,
+                on_account=_on_account,
+            )
+            for item in batch_items:
+                row = row_by_email.get(_normalize_email(item.email), {})
+                row_out, row_ok, open_entry, hist_entry = _spending_row_result_from_batch_item(
+                    store, row, item,
+                )
                 with progress_lock:
                     if open_entry:
                         on_demand_alert_open.append(open_entry)
@@ -1234,18 +1244,6 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
                         on_demand_alert_hist.append(hist_entry)
                     results.append(row_out)
                     _spending_progress_after_email(ok=row_ok)
-
-            if workers <= 1 or len(work_rows) <= 1:
-                for idx, row in enumerate(work_rows):
-                    _run_one(row, idx)
-            else:
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    futures = [
-                        pool.submit(_run_one, row, idx)
-                        for idx, row in enumerate(work_rows)
-                    ]
-                    for fut in as_completed(futures):
-                        fut.result()
             on_demand_alert_open.sort(key=lambda x: x[0].lower())
             on_demand_alert_hist.sort(key=lambda x: x[0].lower())
             results.sort(key=lambda r: str(r.get("email") or "").lower())
@@ -1300,7 +1298,7 @@ async def refresh_account_spending_api(req: RefreshAccountPlanRequest):
 
     使用 ``SETTINGS.spending_refresh_lock_file``：同一时刻仅允许一个 Web 解析请求（全库或行内批量）；
     其它 Web 请求返回 423。静默定时全库走 ``run_daily_spending_refresh_silent``，不再占用此文件锁，
-    Playwright 并发由 ``plan_scraper`` 内信号量约束。
+    消费页解析使用单 Chromium 批量抓取（``fetch_spending_panels_batch``）。
 
     解析在默认线程池执行，避免 Playwright 阻塞 asyncio 事件循环（否则刷新页面时其它 API 无法响应）。
     """

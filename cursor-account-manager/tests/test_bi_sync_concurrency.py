@@ -110,7 +110,7 @@ class BiSyncConcurrencyTests(unittest.TestCase):
 
         with (
             patch.object(bi_sync, "SETTINGS", settings),
-            patch.object(bi_sync, "StarRocksLoader", FakeLoader),
+            patch.object(bi_sync, "create_bi_sync_loader", lambda: FakeLoader()),
             patch.object(bi_sync, "_snapshot_accounts", return_value=accounts),
             patch.object(bi_sync.fetcher, "fetch_one", side_effect=fake_fetch_one),
             patch.object(bi_sync, "fetch_plan_info_from_dashboard", return_value=PlanInfo(status="active", amount=1)),

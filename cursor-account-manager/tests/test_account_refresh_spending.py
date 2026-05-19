@@ -17,7 +17,7 @@ sys.modules.setdefault("patchright.sync_api", patchright_sync_api)
 
 from fastapi.testclient import TestClient
 
-from cam.plan_scraper import PlanInfo, SpendingPanelInfo
+from cam.plan_scraper import PlanInfo, SpendingPanelBatchItem, SpendingPanelInfo
 from decimal import Decimal
 from cam.token_store import TokenStore
 from cam.web_server import _format_on_demand_alert_table, app
@@ -48,13 +48,20 @@ class AccountRefreshSpendingTests(unittest.TestCase):
             with (
                 patch("cam.web_server.get_default_store", return_value=store),
                 patch(
-                    "cam.web_server.fetch_spending_panel_from_dashboard",
-                    return_value=SpendingPanelInfo(
-                        plan_name="Ultra",
-                        on_demand_enabled=False,
-                        error="",
-                        plan_snapshot=PlanInfo(status="active", amount=Decimal("200"), error=""),
-                    ),
+                    "cam.web_server.fetch_spending_panels_batch",
+                    return_value=[
+                        SpendingPanelBatchItem(
+                            email="cursor@example.com",
+                            info=SpendingPanelInfo(
+                                plan_name="Ultra",
+                                on_demand_enabled=False,
+                                error="",
+                                plan_snapshot=PlanInfo(
+                                    status="active", amount=Decimal("200"), error=""
+                                ),
+                            ),
+                        ),
+                    ],
                 ),
             ):
                 res = TestClient(app).post(
@@ -88,14 +95,21 @@ class AccountRefreshSpendingTests(unittest.TestCase):
                 patch("cam.web_server.get_default_store", return_value=store),
                 patch("cam.web_server.send_alert") as mock_alert,
                 patch(
-                    "cam.web_server.fetch_spending_panel_from_dashboard",
-                    return_value=SpendingPanelInfo(
-                        plan_name="Pro",
-                        on_demand_enabled=False,
-                        error="",
-                        plan_snapshot=PlanInfo(status="active", amount=Decimal("20"), error=""),
-                        on_demand_historical=True,
-                    ),
+                    "cam.web_server.fetch_spending_panels_batch",
+                    return_value=[
+                        SpendingPanelBatchItem(
+                            email="hist@example.com",
+                            info=SpendingPanelInfo(
+                                plan_name="Pro",
+                                on_demand_enabled=False,
+                                error="",
+                                plan_snapshot=PlanInfo(
+                                    status="active", amount=Decimal("20"), error=""
+                                ),
+                                on_demand_historical=True,
+                            ),
+                        ),
+                    ],
                 ),
             ):
                 res = TestClient(app).post(
@@ -124,13 +138,20 @@ class AccountRefreshSpendingTests(unittest.TestCase):
                 patch("cam.web_server.get_default_store", return_value=store),
                 patch("cam.web_server.send_alert") as mock_alert,
                 patch(
-                    "cam.web_server.fetch_spending_panel_from_dashboard",
-                    return_value=SpendingPanelInfo(
-                        plan_name="Pro",
-                        on_demand_enabled=True,
-                        error="",
-                        plan_snapshot=PlanInfo(status="active", amount=Decimal("20"), error=""),
-                    ),
+                    "cam.web_server.fetch_spending_panels_batch",
+                    return_value=[
+                        SpendingPanelBatchItem(
+                            email="cursor@example.com",
+                            info=SpendingPanelInfo(
+                                plan_name="Pro",
+                                on_demand_enabled=True,
+                                error="",
+                                plan_snapshot=PlanInfo(
+                                    status="active", amount=Decimal("20"), error=""
+                                ),
+                            ),
+                        ),
+                    ],
                 ),
             ):
                 res = TestClient(app).post(
@@ -162,13 +183,20 @@ class AccountRefreshSpendingTests(unittest.TestCase):
                 patch("cam.web_server.get_default_store", return_value=store),
                 patch("cam.web_server.send_alert") as mock_alert,
                 patch(
-                    "cam.web_server.fetch_spending_panel_from_dashboard",
-                    return_value=SpendingPanelInfo(
-                        plan_name="Pro",
-                        on_demand_enabled=1,  # type: ignore[arg-type]
-                        error="",
-                        plan_snapshot=PlanInfo(status="active", amount=Decimal("20"), error=""),
-                    ),
+                    "cam.web_server.fetch_spending_panels_batch",
+                    return_value=[
+                        SpendingPanelBatchItem(
+                            email="odint@example.com",
+                            info=SpendingPanelInfo(
+                                plan_name="Pro",
+                                on_demand_enabled=1,  # type: ignore[arg-type]
+                                error="",
+                                plan_snapshot=PlanInfo(
+                                    status="active", amount=Decimal("20"), error=""
+                                ),
+                            ),
+                        ),
+                    ],
                 ),
             ):
                 res = TestClient(app).post(

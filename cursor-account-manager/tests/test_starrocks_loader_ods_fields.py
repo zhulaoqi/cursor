@@ -66,7 +66,7 @@ class StarRocksLoaderOdsFieldTests(unittest.TestCase):
         loader = object.__new__(StarRocksLoader)
         loader.host = "sr.example.com"
         loader.port = 9030
-        loader.db = "dataeye_customer"
+        loader.db = "dataeye_aiboard"
         loader.username = "user"
         loader.password = "pw"
         loader.connect_timeout_sec = 10
@@ -97,7 +97,7 @@ class StarRocksLoaderOdsFieldTests(unittest.TestCase):
         loader = object.__new__(StarRocksLoader)
         loader.host = "sr.example.com"
         loader.port = 9030
-        loader.db = "dataeye_customer"
+        loader.db = "dataeye_aiboard"
         loader.connect_retry_times = 2
         loader.connect_retry_backoff_sec = 0
         conn = FakeConnection()
@@ -120,7 +120,7 @@ class StarRocksLoaderOdsFieldTests(unittest.TestCase):
 
     def test_replace_ods_rows_for_account_inserts_feishu_email_and_plan_amount(self):
         loader = object.__new__(StarRocksLoader)
-        loader.db = "dataeye_customer"
+        loader.db = "dataeye_aiboard"
         conn = FakeConnection()
 
         @contextmanager

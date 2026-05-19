@@ -8,7 +8,7 @@ import re
 import threading
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from .api_client import _split_session_token
 from .config import CURSOR_WEB_BASE, SETTINGS
@@ -64,6 +64,15 @@ class SpendingPanelInfo:
     error: str = ""
     plan_snapshot: Optional[PlanInfo] = None
     on_demand_historical: bool = False
+
+
+@dataclass
+class SpendingPanelBatchItem:
+    """批量消费页解析单账号结果。"""
+
+    email: str
+    info: Optional[SpendingPanelInfo] = None
+    error: str = ""
 
 
 @dataclass(frozen=True)
@@ -627,6 +636,110 @@ async def _fetch_plan_info_with_cookie(cookie_val: str) -> PlanInfo:
         amount=None,
         error="消费页未解析到套餐信息，按未开通处理",
     )
+
+
+def _spending_batch_max_parallel(account_count: int) -> int:
+    concurrency = max(1, SETTINGS.spending_refresh_concurrency)
+    active_limit_cfg = int(getattr(SETTINGS, "invoice_active_context_limit", 0))
+    if active_limit_cfg > 0:
+        return max(1, min(concurrency, account_count, active_limit_cfg))
+    return max(1, min(concurrency, account_count))
+
+
+async def _scrape_spending_panels_batch_async(
+    accounts: list[Account],
+    *,
+    manager: "TokenManager",
+    silent: bool,
+    max_parallel: int,
+    on_account: Optional[Callable[[str, int, int], None]] = None,
+) -> list[SpendingPanelBatchItem]:
+    """单 Chromium + 多 Context 并发解析消费页。"""
+    import asyncio
+
+    from patchright.async_api import async_playwright
+
+    total = len(accounts)
+    if total == 0:
+        return []
+
+    sem = asyncio.Semaphore(max_parallel)
+
+    async def _one(acc: Account, browser, index: int) -> SpendingPanelBatchItem:
+        email = (acc.email or "").strip().lower()
+        if on_account:
+            try:
+                on_account(email, index, total)
+            except Exception:
+                pass
+        async with sem:
+            try:
+                token = await asyncio.to_thread(manager.get_valid_token, acc)
+                cookie_val, _ = _split_session_token(token)
+                if not cookie_val:
+                    raise RuntimeError("WorkosCursorSessionToken 为空，无法访问消费页")
+                info = await _fetch_spending_panel_reuse_browser(
+                    browser, cookie_val, silent=silent,
+                )
+                return SpendingPanelBatchItem(email=email, info=info)
+            except Exception as e:
+                return SpendingPanelBatchItem(
+                    email=email,
+                    error=f"{type(e).__name__}: {e}",
+                )
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            tasks = [
+                asyncio.create_task(_one(acc, browser, idx))
+                for idx, acc in enumerate(accounts)
+            ]
+            gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            await browser.close()
+
+    out: list[SpendingPanelBatchItem] = []
+    for item in gathered:
+        if isinstance(item, SpendingPanelBatchItem):
+            out.append(item)
+        elif isinstance(item, BaseException):
+            log.warning(f"[消费页批量] 任务异常: {item}")
+    out.sort(key=lambda x: x.email.lower())
+    return out
+
+
+def fetch_spending_panels_batch(
+    accounts: list[Account],
+    *,
+    manager: Optional["TokenManager"] = None,
+    silent: bool = False,
+    on_account: Optional[Callable[[str, int, int], None]] = None,
+) -> list[SpendingPanelBatchItem]:
+    """批量解析消费页（单 Chromium，并发受 SPENDING_REFRESH / INVOICE_ACTIVE 限制）。"""
+    from .token_manager import get_default_manager
+
+    if not accounts:
+        return []
+    mgr = manager or get_default_manager()
+    max_parallel = _spending_batch_max_parallel(len(accounts))
+    log.info(
+        f"[消费页批量] accounts={len(accounts)} max_parallel={max_parallel} "
+        f"SPENDING_REFRESH_CONCURRENCY={SETTINGS.spending_refresh_concurrency} "
+        f"INVOICE_ACTIVE_CONTEXT_LIMIT={SETTINGS.invoice_active_context_limit}"
+    )
+
+    async def _run() -> list[SpendingPanelBatchItem]:
+        return await _scrape_spending_panels_batch_async(
+            accounts,
+            manager=mgr,
+            silent=silent,
+            max_parallel=max_parallel,
+            on_account=on_account,
+        )
+
+    with _PLAN_BROWSER_SEM:
+        return _run_playwright_coroutine(_run())  # type: ignore[return-value]
 
 
 async def _fetch_spending_panel_with_cookie(cookie_val: str, *, silent: bool = False) -> SpendingPanelInfo:

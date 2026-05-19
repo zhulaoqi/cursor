@@ -60,6 +60,7 @@ class Settings:
     invoice_download_concurrency: int
     invoice_active_context_limit: int
     api_concurrency: int
+    web_fetch_max_workers: int
     capsolver_api_key: str
     twocaptcha_api_key: str
     accounts_csv: Path
@@ -94,6 +95,7 @@ class Settings:
     spending_refresh_concurrency: int
     billing_ledger_retry_times: int
     billing_ledger_retry_backoff_sec: int
+    billing_ledger_concurrency: int
     spending_refresh_alert_enable: bool
     alert_bot_client_id: str
     alert_bot_secret: str
@@ -118,6 +120,7 @@ def load_settings() -> Settings:
         invoice_download_concurrency=_env_int("INVOICE_DOWNLOAD_CONCURRENCY", 10),
         invoice_active_context_limit=_env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 6),
         api_concurrency=_env_int("API_CONCURRENCY", 30),
+        web_fetch_max_workers=_env_int("WEB_FETCH_MAX_WORKERS", 0),
         capsolver_api_key=os.environ.get("CAPSOLVER_API_KEY", "").strip(),
         twocaptcha_api_key=os.environ.get("TWOCAPTCHA_API_KEY", "").strip(),
         accounts_csv=_path("ACCOUNTS_CSV", "data/accounts.csv"),
@@ -159,8 +162,9 @@ def load_settings() -> Settings:
                 _env_int("INVOICE_ACTIVE_CONTEXT_LIMIT", 6),
             ),
         ),
-        billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 3),
-        billing_ledger_retry_backoff_sec=_env_int("BILLING_LEDGER_RETRY_BACKOFF_SEC", 2),
+        billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 4),
+        billing_ledger_retry_backoff_sec=_env_int("BILLING_LEDGER_RETRY_BACKOFF_SEC", 3),
+        billing_ledger_concurrency=max(1, _env_int("BILLING_LEDGER_CONCURRENCY", 3)),
         spending_refresh_alert_enable=_env_bool("SPENDING_REFRESH_ALERT_ENABLE", True),
         alert_bot_client_id=os.environ.get("ALERT_BOT_CLIENT_ID", "").strip(),
         alert_bot_secret=os.environ.get("ALERT_BOT_SECRET", "").strip(),
@@ -171,3 +175,16 @@ def load_settings() -> Settings:
 
 
 SETTINGS = load_settings()
+
+
+def web_fetch_thread_workers(account_count: int) -> int:
+    """Web 批量拉取 fetch 阶段线程数（纯 HTTP，无浏览器）。
+
+    ``WEB_FETCH_MAX_WORKERS=0`` 表示仅按 ``API_CONCURRENCY`` 推算，不设硬顶 30。
+    """
+    n = max(1, int(account_count or 1))
+    boosted = max(SETTINGS.api_concurrency * 2, 20)
+    cap = int(SETTINGS.web_fetch_max_workers or 0)
+    if cap > 0:
+        boosted = min(boosted, cap)
+    return min(n, max(SETTINGS.browser_login_concurrency, boosted))

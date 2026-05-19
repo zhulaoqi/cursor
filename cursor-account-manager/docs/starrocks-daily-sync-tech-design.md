@@ -349,7 +349,7 @@ MVP 方案（暂不引入 Airflow）：
 敏感信息通过环境变量注入，不写入仓库明文：
 
 ```ini
-BI_SYNC_DB_URL=jdbc:mysql://fe-c-211cbbee7a09d77e-internal.starrocks.aliyuncs.com:9030/dataeye_customer
+BI_SYNC_DB_URL=jdbc:mysql://fe-c-70afd013dd6a6a8e-internal.starrocks.aliyuncs.com:9030/dataeye_aiboard
 BI_SYNC_DB_USERNAME=pro
 BI_SYNC_DB_PASSWORD=******
 

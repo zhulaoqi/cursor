@@ -20,6 +20,14 @@ _JDBC_RE = re.compile(r"^jdbc:mysql://(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db
 _JOB_ID_RE = re.compile(r"job_id\s*=\s*(\d+)")
 log = get("starrocks")
 
+# ── BI 双写备用库（硬编码，停用双跑时改 False 或删除本段与 DualStarRocksLoader）──
+BI_SYNC_DUAL_WRITE = True
+BI_SYNC_BACKUP_JDBC_URL = (
+    "jdbc:mysql://fe-c-211cbbee7a09d77e-internal.starrocks.aliyuncs.com:9030/dataeye_customer"
+)
+BI_SYNC_BACKUP_USERNAME = "pro"
+BI_SYNC_BACKUP_PASSWORD = "34x1Wx#1x36F(G"
+
 
 def _to_decimal(value: object) -> Optional[Decimal]:
     if value in (None, ""):
@@ -59,23 +67,40 @@ def _to_int_or_none(value: object) -> Optional[int]:
         return None
 
 
+def _parse_jdbc_url(jdbc_url: str, *, label: str) -> tuple[str, int, str]:
+    s = (jdbc_url or "").strip()
+    if not s:
+        raise ValueError(f"{label} JDBC URL 未配置")
+    m = _JDBC_RE.match(s)
+    if not m:
+        raise ValueError(f"{label} JDBC URL 非法: {s}")
+    return m.group("host"), int(m.group("port") or 9030), m.group("db")
+
+
 class StarRocksLoader:
     ODS_TABLE = "ods_cursor_usage_events_di"
 
-    def __init__(self) -> None:
-        jdbc_url = SETTINGS.bi_sync_db_url.strip()
-        if not jdbc_url:
-            raise ValueError("BI_SYNC_DB_URL 未配置")
-        m = _JDBC_RE.match(jdbc_url)
-        if not m:
-            raise ValueError(f"BI_SYNC_DB_URL 非法: {jdbc_url}")
-        self.host = m.group("host")
-        self.port = int(m.group("port") or 9030)
-        self.db = m.group("db")
-        self.username = SETTINGS.bi_sync_db_username.strip()
-        self.password = SETTINGS.bi_sync_db_password
+    def __init__(
+        self,
+        *,
+        jdbc_url: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        label: str = "primary",
+    ) -> None:
+        if jdbc_url is None:
+            jdbc_url = SETTINGS.bi_sync_db_url.strip()
+            username = SETTINGS.bi_sync_db_username.strip()
+            password = SETTINGS.bi_sync_db_password
+        else:
+            username = (username or "").strip()
+            password = password or ""
+        self.label = label
+        self.host, self.port, self.db = _parse_jdbc_url(jdbc_url, label=label)
+        self.username = username
+        self.password = password
         if not self.username:
-            raise ValueError("BI_SYNC_DB_USERNAME 未配置")
+            raise ValueError(f"{label} 数据库用户名未配置")
         self.query_timeout_sec = max(1, int(SETTINGS.bi_sync_db_query_timeout_sec or 120))
         self.connect_timeout_sec = max(1, int(SETTINGS.bi_sync_db_connect_timeout_sec or 10))
         self.read_timeout_sec = max(1, int(SETTINGS.bi_sync_db_read_timeout_sec or self.query_timeout_sec))
@@ -94,7 +119,7 @@ class StarRocksLoader:
         self._dynamic_partition_policy_checked: set[str] = set()
         self._pool = self._create_pool()
         log.info(
-            "StarRocks 连接池初始化完成 "
+            f"StarRocks 连接池初始化完成 [{self.label}] "
             f"host={self.host} port={self.port} db={self.db} "
             f"min_cached={self.pool_min_cached} max_cached={self.pool_max_cached} "
             f"max_connections={self.pool_max_connections} blocking={self.pool_blocking} "
@@ -481,4 +506,90 @@ class StarRocksLoader:
     @staticmethod
     def ensure_datetime(value: datetime) -> datetime:
         return value.replace(microsecond=0)
+
+
+class DualStarRocksLoader:
+    """主库（.env）+ 备用库（硬编码）双写；备用库失败仅告警，不阻断主链路。"""
+
+    def __init__(self) -> None:
+        self.primary = StarRocksLoader(label="primary")
+        self._backup: StarRocksLoader | None = None
+        if BI_SYNC_DUAL_WRITE:
+            self._backup = StarRocksLoader(
+                jdbc_url=BI_SYNC_BACKUP_JDBC_URL,
+                username=BI_SYNC_BACKUP_USERNAME,
+                password=BI_SYNC_BACKUP_PASSWORD,
+                label="backup",
+            )
+            log.info(
+                "BI 双写已启用: primary=%s:%s/%s backup=%s:%s/%s",
+                self.primary.host,
+                self.primary.port,
+                self.primary.db,
+                self._backup.host,
+                self._backup.port,
+                self._backup.db,
+            )
+
+    def _on_backup(self, op: str, fn, *args, **kwargs):
+        if not self._backup:
+            return None
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            log.warning(
+                f"StarRocks 备用库 {op} 失败（不阻断主库） "
+                f"host={self._backup.host} db={self._backup.db}: {e}"
+            )
+            return None
+
+    def check_connection(self) -> None:
+        self.primary.check_connection()
+        if self._backup:
+            self._on_backup("check_connection", self._backup.check_connection)
+
+    def ensure_tables(self) -> None:
+        self.primary.ensure_tables()
+        if self._backup:
+            self._on_backup("ensure_tables", self._backup.ensure_tables)
+
+    def ensure_biz_date_partitions_ready(self, *, biz_date: str) -> None:
+        self.primary.ensure_biz_date_partitions_ready(biz_date=biz_date)
+        if self._backup:
+            self._on_backup(
+                "ensure_biz_date_partitions_ready",
+                self._backup.ensure_biz_date_partitions_ready,
+                biz_date=biz_date,
+            )
+
+    def normalize_decimal_fields(self, row: dict) -> dict:
+        return self.primary.normalize_decimal_fields(row)
+
+    def replace_ods_rows_for_account(
+        self,
+        *,
+        biz_date: str,
+        account_email: str,
+        rows: list[dict],
+    ) -> int:
+        loaded = self.primary.replace_ods_rows_for_account(
+            biz_date=biz_date,
+            account_email=account_email,
+            rows=rows,
+        )
+        if self._backup:
+            self._on_backup(
+                "replace_ods_rows_for_account",
+                self._backup.replace_ods_rows_for_account,
+                biz_date=biz_date,
+                account_email=account_email,
+                rows=rows,
+            )
+        return loaded
+
+
+def create_bi_sync_loader() -> StarRocksLoader | DualStarRocksLoader:
+    if BI_SYNC_DUAL_WRITE:
+        return DualStarRocksLoader()
+    return StarRocksLoader()
 

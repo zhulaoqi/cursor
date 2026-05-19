@@ -1089,7 +1089,21 @@ _BILLING_MONTH_REFRESH_STATE_JS = """
   state.targetRowDates = rows.filter(date => monthKey(date) === target.value);
   state.staleRowDates = rows.filter(date => monthKey(date) && monthKey(date) !== target.value);
   state.ready = (state.selectedIndicator || state.targetRowDates.length > 0) && state.staleRowDates.length === 0;
+  state.settledEmpty = state.selectedIndicator && state.targetRowDates.length === 0;
   return state;
+}
+"""
+
+_BILLING_PAGE_LOADING_JS = """
+() => {
+  const scope = document.querySelector('table') || document.body;
+  if (!scope) return false;
+  const busySel = '[aria-busy="true"], .animate-spin, [class*="skeleton" i], [class*="Skeleton"]';
+  if (scope.querySelector(busySel)) return true;
+  for (const el of scope.querySelectorAll('[role="progressbar"], [data-state="loading"]')) {
+    if (el.offsetParent !== null || el.getClientRects().length > 0) return true;
+  }
+  return false;
 }
 """
 
@@ -1338,14 +1352,32 @@ async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
         return False
 
 
+async def _billing_page_is_loading(page) -> bool:
+    try:
+        return bool(await page.evaluate(_BILLING_PAGE_LOADING_JS))
+    except Exception:
+        return False
+
+
+async def _billing_month_refresh_state(page, payload: dict) -> dict:
+    try:
+        state = await page.evaluate(_BILLING_MONTH_REFRESH_STATE_JS, payload)
+        if isinstance(state, dict):
+            return state
+    except Exception:
+        pass
+    return {}
+
+
 async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: int = 20000) -> bool:
-    """点击月份后等待账单列表刷新，避免马上读到旧月份的发票行。"""
+    """点击月份后等待列表就绪：有目标月行，或确认该月无账单（非加载中）。"""
     attempts = max(1, timeout_ms // 500)
     last_state: dict = {}
     for _ in range(attempts):
         try:
-            state = await page.evaluate(_BILLING_MONTH_REFRESH_STATE_JS, payload)
-            if isinstance(state, dict):
+            loading = await _billing_page_is_loading(page)
+            state = await _billing_month_refresh_state(page, payload)
+            if state:
                 last_state = state
                 if state.get("ready"):
                     row_dates = state.get("rowDates") or []
@@ -1355,21 +1387,41 @@ async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: in
                         f"rows={row_dates[:8]}"
                     )
                     return True
+                if _billing_empty_from_refresh_state(state, payload, loading=loading):
+                    log.info(
+                        "账单页目标月无账单（筛选已生效）: "
+                        f"target={payload.get('value')}, "
+                        f"trigger={str(state.get('triggerText', ''))[:40]!r}, "
+                        f"stale={(state.get('staleRowDates') or [])[:4]}"
+                    )
+                    return True
         except Exception:
             pass
         await page.wait_for_timeout(500)
+    loading = await _billing_page_is_loading(page)
+    if _billing_empty_from_refresh_state(last_state, payload, loading=loading):
+        log.info(
+            "账单页目标月无账单（等待结束，残留旧月行已忽略）: "
+            f"target={payload.get('value')}, "
+            f"trigger={str(last_state.get('triggerText', ''))[:40]!r}"
+        )
+        return True
     log.warning(
         "账单页月份切换后列表未确认刷新: "
         f"target={payload.get('value')}, "
         f"trigger={str(last_state.get('triggerText', ''))[:40]!r}, "
         f"rows={(last_state.get('rowDates') or [])[:8]}, "
-        f"stale={(last_state.get('staleRowDates') or [])[:8]}"
+        f"stale={(last_state.get('staleRowDates') or [])[:8]}, "
+        f"loading={loading}"
     )
     return False
 
 
 async def _select_billing_month_in_ctx(page, invoice_month: str) -> bool:
-    """先把账单页月份控件切到用户选择的月份，再解析列表。"""
+    """先把账单页月份控件切到用户选择的月份，再解析列表。
+
+    月份下拉点击成功即返回 True；刷新确认超时不视为失败，避免整页跳过抓取。
+  """
     payload = _billing_month_select_payload(invoice_month)
     if not payload:
         return False
@@ -1379,53 +1431,232 @@ async def _select_billing_month_in_ctx(page, invoice_month: str) -> bool:
             selected = bool(await page.evaluate(_BILLING_MONTH_SELECT_JS, payload))
         if selected:
             refreshed = await _wait_for_billing_month_refresh(page, payload)
-            if not refreshed:
-                return False
-            log.info(f"账单页月份已切换到 {payload['value']}")
+            if refreshed:
+                log.info(f"账单页月份已切换到 {payload['value']}")
+            else:
+                log.warning(
+                    f"账单页月份 {payload['value']} 切换后列表未确认刷新，"
+                    "仍将读取当前 DOM 并按日期过滤"
+                )
+                await page.wait_for_timeout(1200)
         else:
-            log.warning(f"账单页未找到可切换到 {payload['value']} 的月份控件，继续使用列表日期过滤兜底")
+            log.warning(
+                f"账单页未找到可切换到 {payload['value']} 的月份控件，"
+                "将读取当前列表并按日期过滤兜底"
+            )
         return selected
     except Exception as e:
         log.warning(f"账单页月份切换失败: {e}")
         return False
 
 
+def _billing_empty_from_refresh_state(
+    state: dict,
+    payload: dict,
+    *,
+    loading: bool = False,
+) -> bool:
+    """目标账期无账单且页面已稳定（非加载中）。
+
+    月份筛选已对准、无目标月行时，即使 DOM 仍显示旧月残留行，也视为该月无数据。
+    """
+    if loading or not payload or not isinstance(state, dict):
+        return False
+    target_rows = state.get("targetRowDates") or []
+    stale = state.get("staleRowDates") or []
+    rows = state.get("rowDates") or []
+    selected = state.get("selectedIndicator")
+    if state.get("ready") and not target_rows and not stale:
+        return True
+    if selected and not target_rows:
+        return True
+    if selected and not rows:
+        return True
+    return False
+
+
+async def _billing_page_auth_ok(page) -> bool:
+    """Cookie 失效或未登录时不应把空列表当成「无账单」。"""
+    try:
+        url = (page.url or "").lower()
+        if any(
+            token in url
+            for token in ("authenticator.cursor", "/login", "sign-in", "signin")
+        ):
+            return False
+        page_text = await page.evaluate(
+            "() => (document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 5000)"
+        )
+        if isinstance(page_text, str) and re.search(
+            r"sign\s*in|log\s*in|继续登录|请登录|登录以继续|session expired|会话已过期",
+            page_text,
+            re.I,
+        ):
+            return False
+    except Exception:
+        return True
+    return True
+
+
+async def _billing_list_confirmed_empty(page, payload: dict) -> bool:
+    """空列表且页面/月份状态表明该账期确实无账单（可停止重试）。"""
+    if not await _billing_page_auth_ok(page):
+        return False
+    if await _billing_page_is_loading(page):
+        return False
+    try:
+        page_text = await page.evaluate(
+            "() => (document.body?.innerText || '').replace(/\\s+/g, ' ')"
+        )
+        if isinstance(page_text, str) and re.search(
+            r"no invoices|no past invoices|没有账单|没有发票|暂无账单|暂无发票",
+            page_text,
+            re.I,
+        ):
+            return True
+    except Exception:
+        pass
+    if not payload:
+        return False
+    state = await _billing_month_refresh_state(page, payload)
+    return _billing_empty_from_refresh_state(state, payload, loading=False)
+
+
+def _filter_billing_items_by_month(items: list[dict], month_key: str) -> list[dict]:
+    if not month_key:
+        return items
+    return [
+        r for r in items
+        if _billing_month_key(str(r.get("date", ""))) == month_key
+    ]
+
+
+async def _should_retry_billing_fetch(
+    page,
+    payload: dict,
+    *,
+    requested_month: str,
+) -> bool:
+    """仅页面/列表未就绪、未登录、仍在加载时重试；目标月无账单不重试。"""
+    if not await _billing_page_auth_ok(page):
+        return True
+    if await _billing_page_is_loading(page):
+        return True
+    if not requested_month or not payload:
+        return False
+    state = await _billing_month_refresh_state(page, payload)
+    if _billing_empty_from_refresh_state(state, payload, loading=False):
+        return False
+    if not state.get("selectedIndicator"):
+        return True
+    return False
+
+
+async def _read_billing_list_items(page) -> tuple[list, list[dict]]:
+    found_rows: list = await page.evaluate(_BILLING_LIST_JS)
+    return found_rows, _billing_list_items_from_rows(found_rows)
+
+
+def _billing_list_items_from_rows(found_rows: list) -> list[dict]:
+    return [
+        {
+            "url": str(r.get("url", "")),
+            "date": str(r.get("date", "")),
+            "description": str(r.get("description", "")),
+            "status": str(r.get("status", "")),
+            "amountText": str(r.get("amountText", "")),
+        }
+        for r in (found_rows or [])
+        if isinstance(r, dict) and str(r.get("url", "")).startswith("http")
+    ]
+
+
 async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict]:
     """抓取 Billing Invoices 五列表格，返回含 date/description/status/amountText/url 的 dict 列表。"""
     requested_month = _billing_month_key(invoice_month)
+    payload = _billing_month_select_payload(invoice_month) if requested_month else {}
+    retry_times = max(1, SETTINGS.billing_ledger_retry_times)
+    retry_backoff = max(0, SETTINGS.billing_ledger_retry_backoff_sec)
+
     for billing_url in _BILLING_URLS:
-        try:
-            await page.goto(billing_url, wait_until="load", timeout=20000)
-            ready = await _wait_billing_page_ready(page)
-            if not ready:
-                log.info(f"账单页核心区域未就绪，跳过 URL: {billing_url}")
-                continue
-            if requested_month:
-                selected = await _select_billing_month_in_ctx(page, invoice_month)
-                if not selected:
+        for attempt in range(1, retry_times + 1):
+            try:
+                await page.goto(billing_url, wait_until="load", timeout=20000)
+                ready = await _wait_billing_page_ready(page)
+                if not ready:
+                    log.info(
+                        f"账单页核心区域未就绪 ({attempt}/{retry_times}): {billing_url}"
+                    )
+                    if attempt < retry_times:
+                        await asyncio.sleep(retry_backoff)
                     continue
-        except Exception:
-            continue
-        found_rows: list[dict] = await page.evaluate(_BILLING_LIST_JS)
-        items = [
-            {
-                "url": str(r.get("url", "")),
-                "date": str(r.get("date", "")),
-                "description": str(r.get("description", "")),
-                "status": str(r.get("status", "")),
-                "amountText": str(r.get("amountText", "")),
-            }
-            for r in (found_rows or [])
-            if isinstance(r, dict) and str(r.get("url", "")).startswith("http")
-        ]
-        log.info(f"账单页 {billing_url}: {len(found_rows or [])} 行, 可用 {len(items)}")
-        if items:
-            for row in items[:8]:
+
+                if requested_month:
+                    await _select_billing_month_in_ctx(page, invoice_month)
+                    await _wait_for_billing_month_refresh(
+                        page, payload, timeout_ms=25000,
+                    )
+
+                if not await _billing_page_auth_ok(page):
+                    log.warning(
+                        f"账单页未登录或会话失效 ({attempt}/{retry_times}): "
+                        f"{billing_url}"
+                    )
+                    if attempt < retry_times:
+                        await asyncio.sleep(retry_backoff)
+                    continue
+
+                found_rows, items = await _read_billing_list_items(page)
+                if await _billing_page_is_loading(page):
+                    log.info(
+                        f"账单列表仍在加载 ({attempt}/{retry_times}): {billing_url}"
+                    )
+                    if attempt < retry_times:
+                        await asyncio.sleep(retry_backoff)
+                    continue
+
+                if requested_month:
+                    items = _filter_billing_items_by_month(items, requested_month)
+
                 log.info(
-                    f"  date={row['date']!r} status={row['status']!r} "
-                    f"amount={row['amountText']!r} url={row['url'][:70]}"
+                    f"账单页 {billing_url} ({attempt}/{retry_times}): "
+                    f"DOM {len(found_rows or [])} 行, 账期匹配 {len(items)}"
                 )
-            return items
+                if items:
+                    for row in items[:8]:
+                        log.info(
+                            f"  date={row['date']!r} status={row['status']!r} "
+                            f"amount={row['amountText']!r} url={row['url'][:70]}"
+                        )
+                    return items
+
+                if await _billing_list_confirmed_empty(page, payload):
+                    log.info(
+                        f"账单页确认账期 {requested_month or '(全部)'} 无账单: {billing_url}"
+                    )
+                    return []
+
+                if not await _should_retry_billing_fetch(
+                    page, payload, requested_month=requested_month,
+                ):
+                    log.info(
+                        f"账单页账期 {requested_month} 无匹配账单（筛选已生效，不重试）: "
+                        f"{billing_url}"
+                    )
+                    return []
+
+                log.warning(
+                    f"账单页列表未就绪将重试 ({attempt}/{retry_times}): "
+                    f"{billing_url} month={requested_month or '-'}"
+                )
+                if attempt < retry_times:
+                    await asyncio.sleep(retry_backoff)
+            except Exception as e:
+                log.warning(
+                    f"账单页抓取异常 ({attempt}/{retry_times}) {billing_url}: {e}"
+                )
+                if attempt < retry_times:
+                    await asyncio.sleep(retry_backoff)
     return []
 
 

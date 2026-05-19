@@ -852,6 +852,29 @@
       padding-left: 20px;
       box-sizing: border-box;
     }
+    /* 主视图：仅入场过渡，离场立即隐藏，避免双页叠层闪烁 */
+    main > .cam-view-panel[x-cloak] {
+      display: none !important;
+    }
+    .cam-view-enter {
+      transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .cam-view-enter-start {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    .cam-view-enter-end {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .cam-view-enter {
+        transition: opacity 0.12s ease !important;
+      }
+      .cam-view-enter-start {
+        transform: none !important;
+      }
+    }
     .account-list-card { overflow: visible; }
     .list-bulk-toolbar {
       position: sticky;
@@ -867,6 +890,92 @@
       border-radius: 12px 12px 0 0;
       box-shadow: 0 1px 0 rgba(226,232,240,.7);
       backdrop-filter: blur(8px);
+    }
+    .batch-range-picker {
+      display: inline-flex;
+      align-items: center;
+    }
+    .batch-range-select {
+      height: 36px;
+      min-width: 148px;
+      max-width: 220px;
+      padding: 0 30px 0 12px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.2;
+      color: #334155;
+      background-color: #fff;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      border: 1px solid #D0D7E2;
+      border-radius: 10px;
+      cursor: pointer;
+      appearance: none;
+      transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+    }
+    .batch-range-select:hover:not(:disabled) {
+      border-color: #B6C0CF;
+      background-color: #F8FAFC;
+    }
+    .batch-range-select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, .12);
+    }
+    .batch-range-select:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .header-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      line-height: 1;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .header-breadcrumb-link {
+      cursor: pointer;
+      color: var(--primary);
+      font-weight: 500;
+    }
+    .header-breadcrumb-link:hover {
+      text-decoration: underline;
+    }
+    .header-breadcrumb-tail {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .header-breadcrumb-sep {
+      display: inline-flex;
+      align-items: center;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .header-breadcrumb-current {
+      color: var(--muted);
+      font-weight: 500;
     }
     .account-list-table-wrap {
       width: 100%;
@@ -1707,17 +1816,16 @@
       </svg>
       <span class="mono" style="font-weight:600; font-size:16px; color:var(--text);">Cursor Account Manager</span>
     </div>
-    <div style="display:flex; align-items:center; gap:12px;">
-      <!-- 面包屑 -->
-      <div style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);">
-        <span style="cursor:pointer; color:var(--primary);" @click="goList()">账号库</span>
-        <template x-if="view !== 'list'">
-          <span style="display:flex;align-items:center;gap:6px;">
+    <div class="header-actions">
+      <nav class="header-breadcrumb" aria-label="页面导航">
+        <span class="header-breadcrumb-link" @click="goList()">账号库</span>
+        <span class="header-breadcrumb-tail" x-show="view !== 'list'" x-cloak>
+          <span class="header-breadcrumb-sep" aria-hidden="true">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            <span x-text="view === 'upload' ? '上传账号' : (view === 'sync' ? '账单调度' : '拉取进度')"></span>
           </span>
-        </template>
-      </div>
+          <span class="header-breadcrumb-current" x-text="breadcrumbLabel()"></span>
+        </span>
+      </nav>
       <span class="badge" :class="serverOk ? 'badge-ok' : 'badge-error'">
         <span style="width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;"></span>
         <span x-text="serverOk ? '服务正常' : '服务异常'"></span>
@@ -1732,7 +1840,12 @@
   <!-- ══════════════════════════════════════════════════════════════
        VIEW: 账号库列表
   ═══════════════════════════════════════════════════════════════ -->
-  <div class="account-list-view" x-show="view === 'list'" x-cloak x-transition>
+  <div class="account-list-view cam-view-panel"
+       x-show="view === 'list'"
+       x-cloak
+       x-transition:enter="cam-view-enter"
+       x-transition:enter-start="cam-view-enter-start"
+       x-transition:enter-end="cam-view-enter-end">
 
     <!-- 页头 -->
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
@@ -1921,6 +2034,20 @@
               <input type="checkbox" @change="toggleAll($event)" :checked="filteredDbAccounts.length > 0 && filteredDbAccounts.every(a => selectedEmails.has(a.email))" aria-label="全选当前筛选账号" />
             </label>
             <span style="font-size:13px; font-weight:500;">全选</span>
+            <div class="batch-range-picker" x-show="accountBatchRangeOptions().length > 1" x-cloak>
+              <label class="sr-only" for="account-batch-range-select">按批次选中账号</label>
+              <select
+                id="account-batch-range-select"
+                class="batch-range-select"
+                @change="selectAccountBatchRange($event)"
+                aria-label="按批次选中或取消账号（每批 100 个，按账号库顺序）"
+                title="按账号库顺序每批 100 个；已全选的批次再次选择可取消该批">
+                <option value="" selected disabled>按批选中</option>
+                <template x-for="opt in accountBatchRangeOptions()" :key="opt.id">
+                  <option :value="opt.id" x-text="opt.label"></option>
+                </template>
+              </select>
+            </div>
             <span style="color:var(--muted); font-size:13px;" x-text="`已选 ${selectedEmails.size} / ${filteredDbAccounts.length}`"></span>
             <template x-if="Object.values(accountDbStatus).some(s => s.status === 'disabled')">
               <button class="btn btn-ghost btn-sm" style="color:var(--warn); border-color:var(--warn);" @click="resetAllDisabled()">
@@ -2085,16 +2212,15 @@
       </template>
     </div>
 
+  </div>
+
     <div class="selection-dock">
       <div class="selection-dock-panel"
            x-show="view === 'list' && selectedEmails.size > 0"
            x-cloak
            x-transition:enter="selection-dock-panel-enter"
            x-transition:enter-start="selection-dock-panel-enter-start"
-           x-transition:enter-end="selection-dock-panel-enter-end"
-           x-transition:leave="selection-dock-panel-leave"
-           x-transition:leave-start="selection-dock-panel-leave-start"
-           x-transition:leave-end="selection-dock-panel-leave-end">
+           x-transition:enter-end="selection-dock-panel-enter-end">
       <div class="sticky-selection-bar" role="region" aria-label="批量操作">
         <div class="sticky-selection-meta" aria-live="polite" :aria-label="`已选择 ${selectedEmails.size} 个账号`">
           <span class="sticky-selection-badge" x-text="selectedEmails.size"></span>
@@ -2138,12 +2264,17 @@
       </div>
       </div>
     </div>
-  </div>
+
 
   <!-- ══════════════════════════════════════════════════════════════
        VIEW: 上传账号
   ═══════════════════════════════════════════════════════════════ -->
-  <div x-show="view === 'upload'" x-cloak x-transition>
+  <div x-show="view === 'upload'"
+       x-cloak
+       class="cam-view-panel"
+       x-transition:enter="cam-view-enter"
+       x-transition:enter-start="cam-view-enter-start"
+       x-transition:enter-end="cam-view-enter-end">
 
     <!-- 页头 -->
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
@@ -2303,7 +2434,12 @@
   <!-- ══════════════════════════════════════════════════════════════
        VIEW: 拉取进度
   ═══════════════════════════════════════════════════════════════ -->
-  <div x-show="view === 'run'" x-cloak x-transition>
+  <div x-show="view === 'run'"
+       x-cloak
+       class="cam-view-panel"
+       x-transition:enter="cam-view-enter"
+       x-transition:enter-start="cam-view-enter-start"
+       x-transition:enter-end="cam-view-enter-end">
 
     <!-- ── 页面头：标题 + 状态胶囊 ── -->
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
@@ -2479,7 +2615,12 @@
   <!-- ══════════════════════════════════════════════════════════════
        VIEW: 账单调度
   ═══════════════════════════════════════════════════════════════ -->
-  <div x-show="view === 'sync'" x-cloak x-transition class="sync-shell">
+  <div x-show="view === 'sync'"
+       x-cloak
+       class="sync-shell cam-view-panel"
+       x-transition:enter="cam-view-enter"
+       x-transition:enter-start="cam-view-enter-start"
+       x-transition:enter-end="cam-view-enter-end">
     <div class="sync-head">
       <div>
         <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">账单调度</h2>
@@ -3121,6 +3262,7 @@ function app() {
 
     // ── Storage keys ──
     _SS_KEY: 'cam_run_state',
+    _ACCOUNT_BATCH_SIZE: 100,
 
     // ── 计算属性 ──
     get uploadNewCount() {
@@ -3151,6 +3293,17 @@ function app() {
     },
 
     // ── 导航 ──
+    breadcrumbLabel() {
+      if (this.view === 'upload') return '上传账号';
+      if (this.view === 'sync') return '账单调度';
+      if (this.view === 'run') return '拉取进度';
+      return '';
+    },
+
+    _scrollMainToTop() {
+      window.scrollTo(0, 0);
+    },
+
     goList() {
       this._stopSyncRunDetailPolling();
       this._stopSyncInlineRunDetailPolling();
@@ -3158,7 +3311,8 @@ function app() {
       this.uploadPreview = [];
       this.uploadError = '';
       this.showManualAdd = false;
-      this.loadAccounts();
+      this._scrollMainToTop();
+      requestAnimationFrame(() => this.loadAccounts());
     },
 
     goUpload() {
@@ -3167,9 +3321,11 @@ function app() {
       this.view = 'upload';
       this.uploadPreview = [];
       this.uploadError = '';
+      this._scrollMainToTop();
     },
     goSync() {
       this.view = 'sync';
+      this._scrollMainToTop();
       this.loadAccounts();
       this.loadSyncDashboard();
     },
@@ -4493,6 +4649,65 @@ function app() {
       } catch (e) {
         this.addLog('red', `批量重置失败：${e.message}`);
       }
+    },
+
+    _accountBatchEmails(start, end) {
+      return this.dbAccounts
+        .slice(start, end)
+        .map(a => a.email)
+        .filter(Boolean);
+    },
+
+    _isAccountBatchFullySelected(emails) {
+      return emails.length > 0 && emails.every(email => this.selectedEmails.has(email));
+    },
+
+    accountBatchRangeOptions() {
+      const total = this.dbAccounts.length;
+      const size = this._ACCOUNT_BATCH_SIZE;
+      if (total <= size) return [];
+      const opts = [];
+      for (let start = 0; start < total; start += size) {
+        const end = Math.min(start + size, total);
+        const from = start + 1;
+        const to = end;
+        const emails = this._accountBatchEmails(start, end);
+        const fullySelected = this._isAccountBatchFullySelected(emails);
+        let base;
+        if (from === 1) {
+          base = `前 ${to} 个`;
+        } else {
+          base = `第 ${from}–${to} 个`;
+        }
+        const label = fullySelected ? `取消 · ${base}` : base;
+        opts.push({
+          id: `${start}-${end}`,
+          start,
+          end,
+          label,
+          fullySelected,
+          count: emails.length,
+        });
+      }
+      return opts;
+    },
+
+    selectAccountBatchRange(e) {
+      const select = e?.target;
+      const id = select?.value;
+      if (!id) return;
+      const opt = this.accountBatchRangeOptions().find(o => o.id === id);
+      if (!opt) return;
+      const emails = this._accountBatchEmails(opt.start, opt.end);
+      const batchSet = new Set(emails);
+      if (this._isAccountBatchFullySelected(emails)) {
+        this.selectedEmails = new Set(
+          [...this.selectedEmails].filter(email => !batchSet.has(email)),
+        );
+      } else {
+        this.selectedEmails = new Set([...this.selectedEmails, ...emails]);
+      }
+      if (select) select.value = '';
     },
 
     toggleAll(e) {

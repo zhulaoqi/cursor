@@ -21,7 +21,7 @@ from .config import SETTINGS
 from .logger import get
 from .models import Account
 from .plan_scraper import PlanInfo, fetch_plan_info_from_dashboard
-from .starrocks_loader import StarRocksLoader
+from .starrocks_loader import create_bi_sync_loader
 from .sync_log_store import SyncLogStore, get_default_sync_log_store
 from .token_store import get_default_store
 
@@ -521,7 +521,7 @@ def run_daily_sync(
     ods_rows = 0
     log_store.add_stage(run_id=run_id, stage="prepare_partition", status="start")
     try:
-        loader = StarRocksLoader()
+        loader = create_bi_sync_loader()
         loader.check_connection()
         loader.ensure_tables()
         loader.ensure_biz_date_partitions_ready(biz_date=target_date)

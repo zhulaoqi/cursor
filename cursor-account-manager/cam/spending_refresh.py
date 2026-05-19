@@ -9,13 +9,7 @@ from datetime import datetime, timedelta, timezone
 from .alerting import send_alert
 from .config import SETTINGS
 from .models import Account
-from .plan_scraper import (
-    SpendingPanelInfo,
-    _PLAN_BROWSER_SEM,
-    _fetch_spending_panel_reuse_browser,
-    _run_playwright_coroutine,
-)
-from .api_client import _split_session_token
+from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
 from .logger import get
 from .sync_log_store import get_default_sync_log_store
 from .token_store import TokenStore, get_default_store
@@ -36,7 +30,7 @@ def _on_demand_open_flag(value: object) -> bool:
     return False
 
 
-def persist_spending_panel(store: TokenStore, email: str, info: SpendingPanelInfo) -> None:
+def persist_spending_panel(store: TokenStore, email: str, info) -> None:
     """写入消费页解析结果；若同页解析出明确套餐状态则一并更新 plan_* 字段。"""
     now = int(time.time())
     store.update_account_spending_snapshot(
@@ -57,58 +51,68 @@ def persist_spending_panel(store: TokenStore, email: str, info: SpendingPanelInf
         )
 
 
-async def _run_daily_spending_refresh_async(
+def _apply_batch_item(
     store: TokenStore,
-    rows: list[dict],
-) -> dict[str, int]:
-    from patchright.async_api import async_playwright
-    from .token_manager import get_default_manager
+    row: dict,
+    item: SpendingPanelBatchItem,
+) -> tuple[bool, bool, bool]:
+    """持久化单条批量结果。返回 (ok, on_demand_open, on_demand_historical)。"""
+    email = _normalize_email(item.email or str(row.get("email") or ""))
+    if not email:
+        return False, False, False
+    if item.error or item.info is None:
+        err = item.error or "消费页解析失败"
+        store.update_account_spending_snapshot(
+            email=email,
+            plan_name="",
+            on_demand_enabled=None,
+            on_demand_historical=None,
+            spending_error=err,
+        )
+        return False, False, False
 
-    mgr = get_default_manager()
-    ok = 0
-    failed = 0
-    on_demand_open = 0
-    on_demand_historical = 0
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        try:
-            for row in rows:
-                email = _normalize_email(str(row.get("email") or ""))
-                if not email:
-                    continue
-                acc = Account(
-                    email=email,
-                    imap_password=str(row.get("imap_password") or ""),
-                    imap_host=str(row.get("imap_host") or SETTINGS.default_imap_host),
-                    imap_port=int(row.get("imap_port") or SETTINGS.default_imap_port),
-                    feishu_email=str(row.get("feishu_email") or "").strip().lower(),
-                )
-                try:
-                    token = mgr.get_valid_token(acc)
-                    cookie_val, _ = _split_session_token(token)
-                    if not cookie_val:
-                        raise RuntimeError("WorkosCursorSessionToken 为空")
-                    info = await _fetch_spending_panel_reuse_browser(
-                        browser, cookie_val, silent=True
-                    )
-                    persist_spending_panel(store, email, info)
-                    if _on_demand_open_flag(info.on_demand_enabled):
-                        on_demand_open += 1
-                    elif bool(info.on_demand_historical):
-                        on_demand_historical += 1
-                    ok += 1
-                except Exception as e:
-                    err = f"{type(e).__name__}: {e}"
-                    store.update_account_spending_snapshot(
-                        email=email,
-                        plan_name="",
-                        on_demand_enabled=None,
-                        on_demand_historical=None,
-                        spending_error=err,
-                    )
-                    failed += 1
-        finally:
-            await browser.close()
+    info = item.info
+    persist_spending_panel(store, email, info)
+    on_open = _on_demand_open_flag(info.on_demand_enabled)
+    on_hist = (not on_open) and bool(info.on_demand_historical)
+    return True, on_open, on_hist
+
+
+def _run_spending_refresh_core() -> dict[str, int]:
+    store = get_default_store()
+    rows = store.list_accounts()
+    accounts: list[Account] = []
+    row_by_email: dict[str, dict] = {}
+    for row in rows:
+        email = _normalize_email(str(row.get("email") or ""))
+        if not email:
+            continue
+        row_by_email[email] = row
+        accounts.append(
+            Account(
+                email=email,
+                imap_password=str(row.get("imap_password") or ""),
+                imap_host=str(row.get("imap_host") or SETTINGS.default_imap_host),
+                imap_port=int(row.get("imap_port") or SETTINGS.default_imap_port),
+                feishu_email=str(row.get("feishu_email") or "").strip().lower(),
+            )
+        )
+
+    batch_items = fetch_spending_panels_batch(accounts, silent=True)
+
+    ok = failed = on_demand_open = on_demand_historical = 0
+    for item in batch_items:
+        row = row_by_email.get(_normalize_email(item.email), {})
+        row_ok, on_open, on_hist = _apply_batch_item(store, row, item)
+        if row_ok:
+            ok += 1
+            if on_open:
+                on_demand_open += 1
+            elif on_hist:
+                on_demand_historical += 1
+        else:
+            failed += 1
+
     return {
         "ok": ok,
         "failed": failed,
@@ -116,15 +120,6 @@ async def _run_daily_spending_refresh_async(
         "on_demand_open": on_demand_open,
         "on_demand_historical": on_demand_historical,
     }
-
-
-def _run_spending_refresh_core() -> dict[str, int]:
-    store = get_default_store()
-    rows = store.list_accounts()
-    with _PLAN_BROWSER_SEM:
-        return _run_playwright_coroutine(  # type: ignore[return-value]
-            _run_daily_spending_refresh_async(store, rows)
-        )
 
 
 def run_daily_spending_refresh_silent() -> dict[str, int]:
