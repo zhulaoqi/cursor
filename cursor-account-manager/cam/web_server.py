@@ -435,6 +435,13 @@ def _build_runtime_run_fallback(run_id: str) -> Optional[dict[str, Any]]:
 
 # ─── 路由 ─────────────────────────────────────────────────────────
 
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon():
+    path = _STATIC / "favicon.svg"
+    return FileResponse(path, media_type="image/svg+xml")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_path = _STATIC / "index.html"
