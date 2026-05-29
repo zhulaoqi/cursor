@@ -168,7 +168,12 @@ class RunRequest(BaseModel):
     with_invoices: bool = True
     with_summary: bool = True
     with_raw: bool = False
-    with_billing_ledger: bool = False   # 账期净支出 Excel（独立任务，与 PDF 并存）
+    with_billing_ledger: bool = False   # 账期净支出（独立任务，与 PDF 并存）
+    # 账期净支出导出模式：
+    #   "excel_only"   - 仅生成 Excel 下载（默认，兼容旧行为）
+    #   "db_only"      - 仅写库，不生成 Excel
+    #   "db_and_excel" - 写库 + 生成 Excel 下载
+    ledger_export_mode: str = "excel_only"
 
 
 class SyncRunRequest(BaseModel):
@@ -541,12 +546,22 @@ async def run_task(req: RunRequest):
         }
 
     def _run_billing_ledger_job() -> None:
-        """账期净支出：仅浏览器抓 Billing 列表 + 写 Excel。"""
+        """账期净支出：浏览器抓 Billing 列表，按 ledger_export_mode 写库/生成 Excel。
+
+        ledger_export_mode:
+            "excel_only"   - 仅生成 Excel 下载（默认，兼容旧行为）
+            "db_only"      - 仅写库，不生成 Excel
+            "db_and_excel" - 写库 + 生成 Excel 下载
+        """
         from .billing_ledger import export_billing_ledger_workbook, scrape_billing_ledger_batch
         from .token_manager import get_default_manager
 
         task = _tasks[task_id]
         month = (req.month or "").strip()
+        export_mode = (req.ledger_export_mode or "excel_only").strip()
+        need_db = export_mode in ("db_only", "db_and_excel")
+        need_excel = export_mode in ("excel_only", "db_and_excel")
+
         accounts = [
             Account(
                 email=a.email,
@@ -587,33 +602,63 @@ async def run_task(req: RunRequest):
                 manager=mgr,
                 progress_cb=_export_cb,
             )
-            _purge_old_tmp(max_age_sec=3600)
-            out_dir = Path(tempfile.mkdtemp(prefix="cam_ledger_"))
-            xlsx_name = f"账期净支出_{month}.xlsx"
-            xlsx_path = out_dir / xlsx_name
-            _export_cb("", "summary", "生成账期净支出 Excel…")
-            export_billing_ledger_workbook(xlsx_path, summaries, detail_rows)
 
             dl_token: Optional[str] = None
-            if summaries:
-                dl_token = secrets.token_hex(12)
-                with _task_lock:
-                    _download_files[dl_token] = xlsx_path
+            db_result_msg: str = ""
 
-            with task_lock:
-                task["download_token"] = dl_token
-                task["out_dir"] = str(out_dir)
-                task["has_zip"] = False
+            # ── 写库 ───────────────────────────────────────────────────
+            if need_db and summaries:
+                try:
+                    from .billing_ledger_store import get_ledger_store
+                    _export_cb("", "db_write", "写入净支出汇总到 MySQL…")
+                    store = get_ledger_store()
+                    store.ensure_tables()
+                    n_sum = store.upsert_summaries(summaries)
+                    db_result_msg = f"已写库：{n_sum} 条汇总记录"
+                    log.info(f"账期净支出写库完成 month={month} {db_result_msg}")
+                    _export_cb("", "db_write", db_result_msg)
+                except Exception as db_err:
+                    log.exception("账期净支出写库失败")
+                    _push(task_id, "error", {"msg": f"写库失败: {db_err}"})
+                    if not need_excel:
+                        # db_only 模式：写库失败即终止
+                        raise
+
+            # ── 生成 Excel ────────────────────────────────────────────
+            if need_excel:
+                _purge_old_tmp(max_age_sec=3600)
+                out_dir = Path(tempfile.mkdtemp(prefix="cam_ledger_"))
+                xlsx_name = f"账期净支出_{month}.xlsx"
+                xlsx_path = out_dir / xlsx_name
+                _export_cb("", "summary", "生成账期净支出 Excel…")
+                export_billing_ledger_workbook(xlsx_path, summaries, detail_rows)
+
+                if summaries:
+                    dl_token = secrets.token_hex(12)
+                    with _task_lock:
+                        _download_files[dl_token] = xlsx_path
+
+                with task_lock:
+                    task["download_token"] = dl_token
+                    task["out_dir"] = str(out_dir)
+                    task["has_zip"] = False
+            else:
+                with task_lock:
+                    task["download_token"] = None
+                    task["out_dir"] = ""
+                    task["has_zip"] = False
 
             _push(task_id, "ready", {
                 "download_token": dl_token,
                 "has_zip": False,
                 "label": month,
                 "run_mode": "billing_ledger",
+                "ledger_export_mode": export_mode,
+                "db_result_msg": db_result_msg,
             })
         except Exception as e:
             log.exception("账期净支出导出失败")
-            _push(task_id, "error", {"msg": f"生成 Excel 失败: {e}"})
+            _push(task_id, "error", {"msg": f"导出失败: {e}"})
 
         task["status"] = "finished"
         task["finished_at"] = time.time()

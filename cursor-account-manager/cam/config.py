@@ -102,6 +102,19 @@ class Settings:
     alert_bot_provider: str
     alert_bot_enable: bool
     alert_to_emails: str
+    ledger_db_host: str
+    ledger_db_port: int
+    ledger_db_user: str
+    ledger_db_password: str
+    ledger_db_name: str
+    ledger_db_pool_max_connections: int
+    ledger_db_pool_min_cached: int
+    ledger_db_pool_max_cached: int
+    ledger_db_connect_timeout_sec: int
+    ledger_db_read_timeout_sec: int
+    ledger_db_write_timeout_sec: int
+    ledger_db_connect_retry_times: int
+    ledger_db_connect_retry_backoff_sec: int
 
 
 def load_settings() -> Settings:
@@ -171,6 +184,19 @@ def load_settings() -> Settings:
         alert_bot_provider=os.environ.get("ALERT_BOT_PROVIDER", "feishu").strip() or "feishu",
         alert_bot_enable=_env_bool("ALERT_BOT_ENABLE", False),
         alert_to_emails=os.environ.get("ALERT_TO_EMAILS", "").strip(),
+        ledger_db_host=os.environ.get("LEDGER_DB_HOST", "172.30.11.103").strip(),
+        ledger_db_port=_env_int("LEDGER_DB_PORT", 3306),
+        ledger_db_user=os.environ.get("LEDGER_DB_USER", "aicoding_admin").strip(),
+        ledger_db_password=os.environ.get("LEDGER_DB_PASSWORD", "NXJ4dba7HpA1==JtDG#_"),
+        ledger_db_name=os.environ.get("LEDGER_DB_NAME", "aicoding").strip(),
+        ledger_db_pool_max_connections=_env_int("LEDGER_DB_POOL_MAX_CONNECTIONS", 8),
+        ledger_db_pool_min_cached=_env_int("LEDGER_DB_POOL_MIN_CACHED", 1),
+        ledger_db_pool_max_cached=_env_int("LEDGER_DB_POOL_MAX_CACHED", 4),
+        ledger_db_connect_timeout_sec=_env_int("LEDGER_DB_CONNECT_TIMEOUT_SEC", 10),
+        ledger_db_read_timeout_sec=_env_int("LEDGER_DB_READ_TIMEOUT_SEC", 30),
+        ledger_db_write_timeout_sec=_env_int("LEDGER_DB_WRITE_TIMEOUT_SEC", 30),
+        ledger_db_connect_retry_times=_env_int("LEDGER_DB_CONNECT_RETRY_TIMES", 3),
+        ledger_db_connect_retry_backoff_sec=_env_int("LEDGER_DB_CONNECT_RETRY_BACKOFF_SEC", 2),
     )
 
 

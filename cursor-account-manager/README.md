@@ -328,3 +328,10 @@ Cursor 的发票 API 路径历史变过几次，本项目同时尝试了多个�
 - 配代理（`PROXY=`），每批账号换 IP
 - `API_CONCURRENCY` 调到 3-5
 - 用 cron 定时跑 `dump --all`，一天一次即可
+
+---
+
+## 技术文档
+
+- **[docs/技术说明与学习定位.md](docs/技术说明与学习定位.md)** — 技术栈、架构分层、业务功能图解、API 与配置速查（新人学习入口）
+- `docs/starrocks-daily-sync-tech-design.md` — BI 日同步详细设计

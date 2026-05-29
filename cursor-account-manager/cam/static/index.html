@@ -7,39 +7,270 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="apple-touch-icon" href="/static/favicon.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     :root {
-      --primary:  #1D4ED8;
-      --secondary:#3B82F6;
+      --primary:  #0969DA;
+      --secondary:#218BFF;
       --cta:      #F97316;
-      --bg:       #F3F7FC;
+      --bg:       #F6F8FA;
       --surface:  #FFFFFF;
-      --text:     #1E293B;
-      --muted:    #64748B;
-      --border:   #DBE4F0;
+      --text:     #111827;
+      --muted:    #6B7280;
+      --border:   #D0D7DE;
+      --line-subtle: #E5E7EB;
+      --line-soft:   #EEF2F6;
+      --shadow-soft: 0 1px 2px rgba(16,24,40,.06);
       --success:  #16A34A;
       --warn:     #D97706;
       --danger:   #DC2626;
       --app-shell-width: 1600px;
       --app-shell-gutter: 32px;
+      /* 商业化字体系统：中英文分离，按语义场景组合（Fluent/Material 语义化） */
+      --font-ui-latin-win: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif;
+      --font-ui-zh-win: "Microsoft YaHei UI", "Microsoft YaHei", "DengXian", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      --font-ui-latin-mac: "SF Pro Text", "SF Pro Display", "-apple-system", "Helvetica Neue", "Inter", "Roboto", Arial, sans-serif;
+      --font-ui-zh-mac: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+      --font-ui-latin: var(--font-ui-latin-win);
+      --font-ui-zh: var(--font-ui-zh-win);
+      /* 中文界面优先（按钮/标题/标签） */
+      --font-ui-cn-first: var(--font-ui-zh), var(--font-ui-latin), "Source Han Sans SC", system-ui, sans-serif;
+      /* 数据界面优先（数字/英文/表格） */
+      --font-ui-latin-first: var(--font-ui-latin), var(--font-ui-zh), "Source Han Sans SC", system-ui, sans-serif;
+      --font-sans: var(--font-ui-cn-first);
+      --font-mono: "Cascadia Mono", "Cascadia Code", "SF Mono", "JetBrains Mono",
+                   "Fira Code", "Consolas", "Menlo", "Monaco", "Courier New", monospace;
+      /* 语义化字体角色 */
+      --font-role-title: var(--font-ui-cn-first);
+      --font-role-body: var(--font-ui-cn-first);
+      --font-role-label: var(--font-ui-cn-first);
+      --font-role-data: var(--font-ui-latin-first);
+      --fw-regular: 400;
+      --fw-medium: 500;
+      --fw-semibold: 600;
+      --fw-bold: 700;
+      --btn-font-weight: var(--fw-semibold);
+      --btn-line-height: 1.2;
+      --btn-letter-spacing: 0;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-md: 15px;
+      --text-lg: 18px;
+      --lh-tight: 1.35;
+      --lh-normal: 1.5;
+      --lh-relaxed: 1.6;
     }
     *, *::before, *::after { box-sizing: border-box; }
     body {
-      font-family: 'Fira Sans', system-ui, sans-serif;
-      background: #F6F8FB;
+      font-family: var(--font-role-body);
+      background: var(--bg);
       color: var(--text);
-      font-size: 14px;
-      line-height: 1.6;
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
       margin: 0;
+      font-kerning: normal;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
     }
-    h1, h2, h3, .mono { font-family: 'Fira Code', monospace; }
+    .is-windows {
+      --font-ui-latin: var(--font-ui-latin-win);
+      --font-ui-zh: var(--font-ui-zh-win);
+      --font-role-title: var(--font-ui-zh), var(--font-ui-latin), sans-serif;
+      --font-role-label: var(--font-ui-zh), var(--font-ui-latin), sans-serif;
+      --btn-font-weight: var(--fw-medium);
+      --btn-line-height: 1.2;
+      --btn-letter-spacing: 0;
+    }
+    .is-macos {
+      --font-ui-latin: var(--font-ui-latin-mac);
+      --font-ui-zh: var(--font-ui-zh-mac);
+    }
+    body.is-windows {
+      font-synthesis: none;
+    }
+    h1, h2, h3 {
+      font-family: var(--font-role-title);
+      line-height: var(--lh-tight);
+      letter-spacing: -0.01em;
+    }
+    /* ── 全站排版规范化 utility ── */
+    .page-title {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: var(--fw-bold);
+      letter-spacing: -0.01em;
+      line-height: 1.25;
+      color: #0F172A;
+      font-family: var(--font-role-title);
+    }
+    .page-subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
+    }
+    .text-muted-xs { color: var(--muted); font-size: var(--text-xs); line-height: var(--lh-tight); }
+    .text-muted-sm { color: var(--muted); font-size: var(--text-sm); line-height: var(--lh-normal); }
+    .text-body-sm { color: var(--text); font-size: var(--text-sm); line-height: var(--lh-normal); }
+    .text-medium-sm { color: var(--text); font-size: var(--text-sm); line-height: var(--lh-normal); font-weight: 500; }
+    .text-body-md { color: var(--text); font-size: var(--text-md); line-height: var(--lh-normal); }
+    .text-strong-sm { font-size: var(--text-sm); font-weight: var(--fw-semibold); color: var(--text); }
+    .mono-sm {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .mono-xs {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .chip-count {
+      background:#F1F5F9;
+      color:var(--muted);
+      font-size:11px;
+      padding:1px 7px;
+      border-radius:999px;
+      font-weight:600;
+      line-height: 1.4;
+    }
+    .empty-block {
+      padding: 72px 40px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty-title { margin: 0 0 4px; font-size: var(--text-lg); font-weight: 500; color: #334155; }
+    .empty-sub { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+    .modal-title-sm { margin:0; font-size:16px; font-weight:700; color:#0F172A; }
+    .modal-note { margin:0 0 14px; font-size: var(--text-sm); color: var(--muted); line-height: var(--lh-normal); }
+    .brand-title {
+      font-size:16px;
+      font-weight:var(--fw-semibold);
+      color:var(--text);
+      letter-spacing:0;
+      font-family: var(--font-role-title);
+    }
+    .search-input-plain {
+      border: none;
+      outline: none;
+      box-shadow: none;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-size: var(--text-sm);
+      background: transparent;
+      color: var(--text);
+    }
+    .icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .status-inline-note {
+      font-size: var(--text-xs);
+      color: #64748B;
+      line-height: var(--lh-tight);
+    }
+    .bulk-check-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: var(--text-sm);
+      width: 32px;
+      margin-right: -6px;
+    }
+    .empty-row-note {
+      color: var(--muted);
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
+      text-align: center;
+    }
+    .btn-ghost-warn {
+      color: var(--warn);
+      border-color: var(--warn);
+      background: #FFFBEB;
+    }
+    .btn-ghost-warn:hover:not(:disabled) {
+      color: #B45309;
+      border-color: #B45309;
+      background: #FEF3C7;
+    }
+    .btn-ghost-neutral {
+      color: var(--text);
+      border-color: var(--border);
+      background: #fff;
+    }
+    .detail-summary {
+      cursor: pointer;
+      font-weight: 600;
+      padding: 8px 0;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pre-code-sample {
+      background: var(--bg);
+      padding: 16px;
+      border-radius: 8px;
+      font-size: var(--text-xs);
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      line-height: var(--lh-normal);
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .mono,
+    .log-time,
+    .date-popover-title { font-family: var(--font-mono); }
     .app-shell {
       width: min(var(--app-shell-width), calc(100vw - var(--app-shell-gutter) * 2));
       margin: 0 auto;
+    }
+    .app-header {
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      border-top: none;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(8px);
+      background: rgba(255,255,255,.95);
+    }
+    .app-header-inner {
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+    .app-main {
+      padding: 36px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      transition: opacity 0.15s ease;
     }
 
     /* ── 拖拽区域 ── */
@@ -79,8 +310,10 @@
     /* ── 状态徽章 ── */
     .badge {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
-      letter-spacing: .01em;
+      padding: 3px 10px; border-radius: 999px; font-size: var(--text-xs); font-weight: var(--fw-semibold);
+      letter-spacing: 0;
+      font-family: var(--font-role-data);
+      font-variant-numeric: tabular-nums lining-nums;
     }
     .badge-ok      { background: #DCFCE7; color: #15803D; }
     .badge-warn    { background: #FEF9C3; color: #A16207; }
@@ -187,12 +420,16 @@
       color: #94A3B8;
       font-size: 12px;
     }
-    .sync-date-plugin { position: relative; min-width: 190px; }
+    .sync-date-plugin {
+      position: relative;
+      min-width: 190px;
+      z-index: 90;
+    }
     .sync-date-trigger {
       width: 100%;
       height: 40px;
-      border: 1px solid #CBD5E1;
-      border-radius: 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
       background: #fff;
       padding: 0 12px 0 14px;
       display: flex;
@@ -200,17 +437,17 @@
       justify-content: space-between;
       gap: 8px;
       font-size: 14px;
-      color: #0F172A;
+      color: var(--text);
       cursor: pointer;
       transition: border-color .15s, box-shadow .15s, background .15s;
     }
     .sync-date-trigger:hover {
-      border-color: #94A3B8;
-      background: #FCFDFF;
+      border-color: #BFC7D1;
+      background: #F6F8FA;
     }
     .sync-date-trigger.open {
-      border-color: #93C5FD;
-      box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(9,105,218,.14);
     }
     .sync-date-trigger:disabled {
       cursor: not-allowed;
@@ -222,11 +459,11 @@
       left: 0;
       right: 0;
       top: 46px;
-      z-index: 40;
+      z-index: 260;
       background: #fff;
-      border: 1px solid #E2E8F0;
+      border: 1px solid var(--border);
       border-radius: 12px;
-      box-shadow: 0 8px 20px rgba(15,23,42,.12);
+      box-shadow: 0 8px 24px rgba(16,24,40,.10);
       padding: 10px;
       display: flex;
       flex-direction: column;
@@ -241,7 +478,7 @@
     .sync-date-weekday {
       text-align: center;
       font-size: 12px;
-      color: #64748B;
+      color: var(--muted);
       font-weight: 600;
       line-height: 20px;
     }
@@ -254,14 +491,14 @@
       border: none;
       border-radius: 8px;
       background: transparent;
-      color: #0F172A;
+      color: var(--text);
       font-size: 12px;
       font-weight: 600;
       height: 30px;
       cursor: pointer;
       transition: background .12s, color .12s;
     }
-    .sync-date-day:hover { background: #EFF6FF; color: #1D4ED8; }
+    .sync-date-day:hover { background: #F3F4F6; color: var(--text); }
     .sync-date-day.is-muted { color: #94A3B8; font-weight: 500; }
     .sync-date-day.is-disabled {
       cursor: not-allowed;
@@ -270,32 +507,37 @@
     }
     .sync-date-day.is-disabled:hover { background: transparent; color: #CBD5E1; }
     .sync-date-day.is-selected {
-      background: #2563EB;
+      background: var(--primary);
       color: #fff;
       box-shadow: none;
     }
     .sync-date-day.is-today:not(.is-selected) {
-      border: 1px solid #BFDBFE;
-      color: #1D4ED8;
+      border: 1px solid #9EC5FE;
+      color: var(--primary);
     }
     .sync-date-footer {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding-top: 6px;
-      border-top: 1px solid #EEF2F7;
+      border-top: 1px solid var(--line-subtle);
     }
     .sync-date-foot-btn {
-      border: none;
-      background: transparent;
-      color: #2563EB;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: #374151;
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 600;
       cursor: pointer;
-      padding: 4px 6px;
+      padding: 4px 8px;
       border-radius: 6px;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
     }
-    .sync-date-foot-btn:hover { background: #EFF6FF; }
+    .sync-date-foot-btn:hover {
+      background: #F6F8FA;
+      border-color: #BFC7D1;
+      color: #111827;
+    }
     .sync-date-panel-list {
       max-height: 180px;
       overflow: auto;
@@ -309,16 +551,454 @@
       font-size: 13px;
     }
     .sync-action-btn { min-width: 108px; justify-content: center; }
+    /* ── 商业化排版规范：上传页 + 调度页 ── */
+    .upload-shell,
+    .sync-shell {
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
+      letter-spacing: 0;
+      color: var(--text);
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+    .section-title {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+    .section-subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
+    }
+    .upload-card {
+      padding: 28px;
+      margin-bottom: 18px;
+    }
+    .upload-drop-text {
+      text-align: center;
+    }
+    .upload-drop-title {
+      margin: 0;
+      font-size: var(--text-md);
+      font-weight: 600;
+      line-height: var(--lh-tight);
+      color: var(--text);
+    }
+    .upload-drop-sub {
+      margin: 6px 0 0;
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--lh-tight);
+    }
+    .upload-actions-row {
+      margin-top: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .upload-hint-gap {
+      margin-left: 8px;
+    }
+    .upload-hint-text {
+      font-size: var(--text-sm);
+      color: var(--muted);
+    }
+    .upload-manual-panel {
+      margin-top: 18px;
+      padding: 18px;
+      background: var(--bg);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    .manual-row {
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+      margin-bottom:12px;
+    }
+    .manual-row-secondary {
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+    .manual-field {
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      flex:2;
+      min-width:200px;
+    }
+    .manual-field-pwd {
+      min-width:180px;
+    }
+    .manual-field-port {
+      flex:1;
+      min-width:100px;
+      max-width:140px;
+    }
+    .manual-field-wide-input {
+      width: 100%;
+    }
+    .manual-add-btn {
+      align-self:flex-end;
+      flex-shrink:0;
+    }
+    .preview-card {
+      overflow: hidden;
+    }
+    .preview-toolbar-tight {
+      gap: 8px;
+    }
+    .preview-th-status {
+      width: 60px;
+    }
+    .run-head {
+      margin-bottom: 20px;
+    }
+    .run-title-reset {
+      margin: 0;
+    }
+    .run-state-badge {
+      padding: 4px 12px;
+      border-radius: 999px;
+    }
+    .run-progress-card {
+      margin-bottom: 28px;
+      padding: 18px 24px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.04);
+    }
+    .run-progress-bar {
+      margin-bottom: 12px;
+      height: 10px;
+      border-radius: 999px;
+    }
+    .run-progress-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+    .run-progress-status {
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+    .run-main-card {
+      padding: 28px 32px;
+    }
+    .run-table-wrap {
+      border:1px solid var(--border);
+      border-radius:10px;
+      margin-bottom:24px;
+    }
+    .run-th-actions {
+      width:160px;
+      text-align:right;
+    }
+    .run-msg-ellipsis {
+      max-width:300px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .run-log-details {
+      margin-bottom:24px;
+    }
+    .run-log-box {
+      margin-top:10px;
+      padding:12px 16px;
+      background:#FAFBFD;
+      border-radius:10px;
+      border:1px solid var(--border);
+      max-height:240px;
+      overflow-y:auto;
+    }
+    .center-modal-root {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+    }
+    .center-modal-backdrop {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.45);
+    }
+    .conflict-modal-card {
+      max-width: 520px;
+      width: 90%;
+      padding: 28px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .format-help-card {
+      max-width: 520px;
+      width: 90%;
+      padding: 28px;
+    }
+    .modal-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      flex-shrink: 0;
+    }
+    .modal-head-row-help {
+      margin-bottom: 16px;
+    }
+    .icon-btn-tight {
+      padding: 4px;
+    }
+    .conflict-modal-intro {
+      margin: 0 0 10px;
+      flex-shrink: 0;
+    }
+    .conflict-list-box {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+      padding: 10px;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-bottom: 14px;
+      max-height: 220px;
+    }
+    .conflict-list-item {
+      padding: 5px 2px;
+      border-bottom: 1px solid var(--border);
+    }
+    .conflict-modal-note {
+      margin: 0 0 18px;
+      flex-shrink: 0;
+    }
+    .conflict-modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .format-help-note {
+      margin: 12px 0 0;
+    }
+    .form-label {
+      font-size: var(--text-xs);
+      color: #64748B;
+      font-weight: 600;
+      letter-spacing: .02em;
+      line-height: 1.2;
+    }
+    .form-label .opt {
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .upload-error-box {
+      margin-top: 14px;
+      padding: 11px 14px;
+      background: #FEE2E2;
+      border-radius: 8px;
+      color: var(--danger);
+      font-size: var(--text-sm);
+      border: 1px solid #FCA5A5;
+      line-height: var(--lh-tight);
+    }
+    .preview-head {
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: #FAFAFA;
+      border-radius: 12px 12px 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .preview-title {
+      font-weight: 700;
+      font-size: var(--text-lg);
+      color: #0F172A;
+    }
+    .preview-sub {
+      color: var(--muted);
+      font-size: var(--text-sm);
+      margin-left: 10px;
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .status-pill {
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: var(--text-xs);
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .preview-head .status-pill {
+      margin-left: 8px;
+    }
+    .upload-shell td .status-pill {
+      margin-left: 0;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .status-pill.warn {
+      background: #FEF3C7;
+      color: var(--warn);
+    }
+    .status-pill.ok {
+      background: #DCFCE7;
+      color: var(--success);
+    }
+    .sync-toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .sync-note-card {
+      margin: 0 0 12px;
+      border-style: dashed;
+    }
+    .sync-note-title {
+      font-size: var(--text-sm);
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .sync-note-text {
+      margin: 0;
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--lh-normal);
+    }
+    .sync-note-text .mono {
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .sync-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .sync-card-title {
+      font-size: var(--text-lg);
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      line-height: var(--lh-tight);
+      color: #0F172A;
+    }
+    .sync-card-desc {
+      margin: 0 0 12px;
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--lh-normal);
+    }
+    .sync-inline-label {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--lh-tight);
+    }
+    .sync-page-title {
+      margin-bottom: 4px;
+    }
+    .sync-task-action-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .sync-task-action-left {
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .sync-date-quick-row {
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+    }
+    .sync-date-popover-head {
+      padding: 0;
+    }
+    .sync-replay-grid {
+      display:grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap:12px;
+      align-items:stretch;
+    }
+    .sync-inline-label-gap {
+      margin-bottom:4px;
+    }
+    .sync-replay-date-box {
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:8px;
+      min-height:122px;
+    }
+    .sync-replay-date-quick {
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    .sync-date-plugin-compact {
+      min-width: unset;
+    }
+    .sync-date-list-btn {
+      width:100%;
+      justify-content:flex-start;
+    }
+    .sync-replay-textarea {
+      min-height:122px;
+      resize:none;
+    }
+    .sync-replay-action-row {
+      display:flex;
+      justify-content:flex-end;
+      margin-top:10px;
+    }
+    .sync-stage-list {
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
     .sync-shell {
       position: relative;
       padding: 20px;
-      border-radius: 18px;
-      border: 1px solid #E3E8EF;
-      background: #F8FAFD;
-      box-shadow: none;
-      overflow: hidden;
+      border-radius: 20px;
+      border: 1px solid #E6ECF3;
+      background: #F6F8FB;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+      overflow: visible;
     }
     .sync-shell::before {
+      content: none;
+    }
+    .sync-shell::after {
       content: none;
     }
     .sync-head {
@@ -327,9 +1007,14 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      margin-bottom:12px;
+      margin-bottom:16px;
       flex-wrap:wrap;
       gap:14px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #FFFFFF;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
     }
     .sync-desc {
       margin: 4px 0 0;
@@ -341,67 +1026,207 @@
       position: relative;
       z-index: 1;
       display:grid;
-      grid-template-columns: repeat(auto-fit,minmax(360px,1fr));
-      gap:14px;
+      grid-template-columns: repeat(auto-fit,minmax(390px,1fr));
+      gap:16px;
       margin-bottom:16px;
+      overflow: visible;
     }
     .sync-task-card {
-      padding: 18px 20px;
-      border: 1px solid #DDE6F2;
-      border-radius: 14px;
+      padding: 20px 22px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
       background: #fff;
-      box-shadow: 0 1px 3px rgba(15,23,42,.05);
+      box-shadow: var(--shadow-soft);
+      position: relative;
+      overflow: visible;
     }
-    .sync-task-card.main { border-left: 4px solid #3B82F6; }
-    .sync-task-card.replay { border-left: 4px solid #0EA5A4; }
-    .sync-badge-main { background: #E8F0FF; color: #1D4ED8; }
-    .sync-badge-replay { background: #E6FFFB; color: #0F766E; }
+    .sync-task-card::before {
+      content: none;
+    }
+    .sync-badge-main {
+      background: #EFF6FF;
+      color: #1D4ED8;
+      border: 1px solid #BFDBFE;
+    }
+    .sync-badge-replay {
+      background: #ECFDF5;
+      color: #047857;
+      border: 1px solid #A7F3D0;
+    }
     .sync-section-card {
-      border-radius: 14px;
-      border: 1px solid #DDE6F2;
+      border-radius: 16px;
+      border: 1px solid var(--border);
       background: #fff;
-      box-shadow: 0 1px 3px rgba(15,23,42,.05);
-      padding: 18px 22px;
+      box-shadow: var(--shadow-soft);
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .sync-section-card::before {
+      content: none;
+    }
+    /* S5：统一中性色卡片，不做模块装饰线 */
+    .sync-section-card.section-overview {
+      border-color: var(--border);
+    }
+    .sync-section-card.section-logs {
+      border-color: var(--border);
+    }
+    .sync-section-card.section-failed {
+      border-color: var(--border);
+    }
+    .sync-section-card.section-runs {
+      border-color: var(--border);
+      margin-bottom: 0;
+    }
+    .sync-panels-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 16px;
       margin-bottom: 16px;
     }
     .sync-section-title {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 700;
       color: #0F172A;
       letter-spacing: .01em;
     }
+    .sync-section-subtitle {
+      margin: 5px 0 0;
+      color: #6B7280;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .sync-section-head {
+      min-height: 38px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line-subtle);
+    }
+    .sync-section-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .sync-section-head .btn-sm {
+      height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+    .sync-section-card.section-overview .sync-section-title { color: #0F172A; }
+    .sync-section-card.section-logs .sync-section-title { color: #0F172A; }
+    .sync-section-card.section-failed .sync-section-title { color: #0F172A; }
+    .sync-section-card.section-runs .sync-section-title { color: #0F172A; }
+    .sync-section-card.section-overview .sync-section-head { border-bottom-color: var(--line-subtle); }
+    .sync-section-card.section-logs .sync-section-head { border-bottom-color: var(--line-subtle); }
+    .sync-section-card.section-failed .sync-section-head { border-bottom-color: var(--line-subtle); }
+    .sync-section-card.section-runs .sync-section-head { border-bottom-color: var(--line-subtle); }
     .sync-section-card table thead th {
-      background: #F8FBFF;
+      background: #FFFFFF;
       color: #64748B;
-      font-weight: 700;
-      font-size: 11.5px;
-      letter-spacing: .04em;
-      text-transform: uppercase;
+      font-weight: 600;
+      font-size: var(--text-xs);
+      letter-spacing: .015em;
+      text-transform: none;
+      border-bottom: 1px solid var(--line-subtle);
     }
     .sync-section-card table tbody td {
-      font-size: 13px;
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
       color: #1E293B;
     }
     .sync-section-card table tbody tr:hover {
-      background: #F1F7FF !important;
+      background: #F8FAFC !important;
     }
-    .sync-meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+    .sync-shell table thead th {
+      background: #FFFFFF !important;
+      border-bottom: 1px solid #E8EEF5;
+    }
+    .sync-shell table tbody tr:nth-child(even) {
+      background: #FFFFFF;
+    }
+    .sync-meta-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:10px;
+    }
     .sync-meta-item {
-      border: 1px solid #E3EAF5;
-      border-radius: 11px;
-      padding: 10px 12px;
-      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 13px;
+      background: #FFFFFF;
+      min-height: 88px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      box-shadow: var(--shadow-soft);
+      position: relative;
+      overflow: hidden;
+      transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
     }
-    .sync-meta-k { font-size:12px; color:#64748B; margin-bottom:2px; }
-    .sync-meta-v { font-size:14px; font-weight:700; color:var(--text); }
+    .sync-meta-item:hover {
+      border-color: #BFC7D1;
+      box-shadow: 0 3px 8px rgba(15,23,42,.06);
+      transform: translateY(-1px);
+    }
+    .sync-meta-item::before {
+      content: none;
+    }
+    .sync-meta-k {
+      font-size: 11.5px;
+      color:#6B7280;
+      margin-bottom: 8px;
+      letter-spacing: 0;
+      line-height: 1.3;
+      font-weight: 600;
+      text-transform: none;
+    }
+    .sync-meta-v {
+      font-size: 16px;
+      font-weight: 650;
+      color: #111827;
+      font-family: var(--font-role-data);
+      font-variant-numeric: tabular-nums lining-nums;
+      line-height: 1.2;
+      letter-spacing: -0.005em;
+    }
+    .sync-meta-item.is-number .sync-meta-v {
+      font-size: 31px;
+      line-height: 1;
+      letter-spacing: -0.025em;
+      font-weight: 680;
+    }
+    .sync-meta-item.is-status {
+      border-color: var(--border);
+      background: #FFFFFF;
+    }
+    .sync-meta-item.is-status .sync-meta-k { color: #6B7280; }
+    .sync-meta-item.is-status .sync-meta-v {
+      font-size: 14px;
+      letter-spacing: 0;
+      line-height: 1.25;
+    }
+    .sync-meta-item.is-total {
+      border-color: var(--border);
+      background: #FFFFFF;
+    }
+    .sync-meta-item.is-total .sync-meta-k { color: #6B7280; }
     .sync-log-head {
       display:flex;
       align-items:center;
       justify-content:space-between;
       color:var(--muted);
-      font-size:11px;
-      letter-spacing:.04em;
-      text-transform:uppercase;
+      font-size: var(--text-xs);
+      letter-spacing:.02em;
+      text-transform:none;
       padding:0 2px 6px;
       border-bottom:1px solid #EEF2F7;
       margin-bottom:4px;
@@ -413,25 +1238,141 @@
       height:30px;
       padding:0 10px;
       border-radius:999px;
-      border:1px solid #C4D7FF;
-      background:#F2F7FF;
-      color:#1D4ED8;
+      border:1px solid var(--border);
+      background:#fff;
+      color:#374151;
       font-size:12px;
-      font-weight:700;
+      font-weight:600;
       cursor:pointer;
       transition:all .15s ease;
     }
     .log-link-tag:hover {
-      background:#DBEAFE;
-      border-color:#93C5FD;
+      background:#F6F8FA;
+      border-color:#BFC7D1;
+      color:#111827;
       transform:translateY(-1px);
+    }
+    .sync-runs-table-wrap {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #FFFFFF;
+      overflow: hidden;
+    }
+    .sync-runs-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .sync-runs-table thead th {
+      background: #FFFFFF !important;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line-subtle) !important;
+    }
+    .sync-runs-table tbody tr {
+      background: #FFFFFF;
+    }
+    .sync-runs-table tbody tr:hover {
+      background: #F6F8FA !important;
+    }
+    .sync-runs-table td { border-bottom: 1px solid var(--line-soft); }
+    .sync-runs-row {
+      cursor: pointer;
+    }
+    .sync-error-ellipsis {
+      max-width: 520px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sync-inline-expand-cell {
+      padding: 0 12px 14px 12px !important;
+      background: #fff;
+    }
+    .sync-inline-panel {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+      box-shadow: var(--shadow-soft);
+    }
+    .sync-inline-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .sync-inline-panel-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .sync-inline-stage-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sync-inline-error {
+      margin: 8px 0;
+    }
+    .sync-inline-failed-block {
+      margin-top: 12px;
+    }
+    .sync-inline-failed-title {
+      margin-bottom: 6px;
+    }
+    .sync-runs-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .sync-runs-pagination-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    @media (max-width: 1180px) {
+      .sync-panels-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 900px) {
+      .sync-shell {
+        padding: 14px;
+        border-radius: 16px;
+      }
+      .sync-head {
+        padding: 12px;
+      }
+      .sync-task-grid {
+        grid-template-columns: 1fr;
+      }
+      .sync-meta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .sync-meta-item.is-number .sync-meta-v {
+        font-size: 24px;
+      }
+    }
+    @media (max-width: 640px) {
+      .sync-meta-grid {
+        grid-template-columns: 1fr;
+      }
+      .sync-task-card,
+      .sync-section-card {
+        padding: 16px 14px;
+      }
     }
 
     /* ── 自定义 Checkbox ── */
     input[type="checkbox"] {
       appearance: none; -webkit-appearance: none;
       width: 16px; height: 16px; min-width: 16px;
-      border: 2px solid #CBD5E1; border-radius: 4px;
+      border: 1px solid #CBD5E1; border-radius: 4px;
       background: #fff; cursor: pointer; position: relative;
       transition: border-color .15s, background .15s;
       vertical-align: middle;
@@ -456,37 +1397,59 @@
     /* ── 表格 ── */
     table { border-collapse: collapse; width: 100%; }
     th {
-      background: #F7FAFF; color: #718198; font-weight: 700;
-      font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
-      border-bottom: 1px solid var(--border);
+      background: #FFFFFF; color: #6B7280; font-weight: var(--fw-semibold);
+      font-size: var(--text-xs);
+      letter-spacing: .015em;
+      text-transform: none;
+      border-bottom: 1px solid var(--line-subtle);
+      font-family: var(--font-role-data);
     }
-    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid #EDF2FA; white-space: nowrap; }
-    thead th { border-bottom: 1px solid var(--border); }
+    th, td {
+      padding: 13px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line-soft);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    td {
+      font-size: var(--text-sm);
+      line-height: var(--lh-normal);
+      letter-spacing: 0;
+      font-family: var(--font-role-data);
+    }
+    thead th { border-bottom: 1px solid var(--line-subtle); }
     tr:last-child td { border-bottom: none; }
     tbody tr { transition: background .12s; }
-    tbody tr:nth-child(even) { background: #FBFDFF; }
-    tbody tr:hover { background: #EEF5FF !important; }
+    tbody tr:nth-child(even) { background: #FFFFFF; }
+    tbody tr:hover { background: #F6F8FA !important; }
 
     /* ── 按钮 ── */
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
-      height: 38px; padding: 0 18px; border-radius: 10px; font-weight: 700; font-size: 13px;
+      height: 38px; padding: 0 18px; border-radius: 10px; font-weight: var(--btn-font-weight); font-size: var(--text-sm);
+      font-family: var(--font-role-label);
+      line-height: var(--btn-line-height);
       cursor: pointer; border: 1px solid transparent; transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s, background .15s, border-color .15s;
       white-space: nowrap;
       justify-content: center;
-      letter-spacing: .01em;
+      letter-spacing: var(--btn-letter-spacing);
+      text-rendering: optimizeLegibility;
     }
-    .btn:hover:not(:disabled) { opacity: 1; box-shadow: 0 1px 2px rgba(15,23,42,.10); transform: none; }
+    .btn > svg {
+      display: block;
+      flex-shrink: 0;
+    }
+    .btn:hover:not(:disabled) { opacity: 1; box-shadow: 0 1px 2px rgba(16,24,40,.09); transform: none; }
     .btn:active:not(:disabled) { transform: scale(0.97); box-shadow: none; }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary  { background: #1F6FEB; color: #fff; border-color: #1F6FEB; box-shadow: none; }
-    .btn-primary:hover:not(:disabled) { background: #1A63D8; border-color: #1A63D8; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary  { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: none; }
+    .btn-primary:hover:not(:disabled) { background: #085FC7; border-color: #085FC7; }
     .btn-cta      { background: #F59E0B; color: #fff; border-color:#F59E0B; box-shadow: none; }
     .btn-cta:hover:not(:disabled) { background: #D97706; border-color: #D97706; }
-    .btn-ghost    { background: #fff; color: #334155; border: 1px solid #D0D7E2; }
-    .btn-ghost:hover:not(:disabled) { background: #F8FAFC; border-color: #B6C0CF; color: #0F172A; }
-    .btn-danger   { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
-    .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1.5px solid #FCA5A5; }
+    .btn-ghost    { background: #fff; color: #24292F; border: 1px solid var(--border); }
+    .btn-ghost:hover:not(:disabled) { background: #F6F8FA; border-color: #BFC7D1; color: #111827; }
+    .btn-danger   { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .btn-warning  { background: #FEF2F2; color: var(--danger); border: 1px solid #FCA5A5; }
     .btn-warning:hover:not(:disabled) { background: #FEE2E2; border-color: #EF4444; }
     .btn-download {
       background: var(--primary);
@@ -499,21 +1462,30 @@
       border-color: #1E40AF;
       box-shadow: 0 2px 8px rgba(29, 78, 216, 0.22);
     }
-    .btn-sm       { height: 36px; padding: 0 14px; font-size: 13px; }
+    .btn-sm       { height: 36px; padding: 0 14px; font-size: 12.5px; }
+    /* Windows 字体栅格下按钮文字更易出现“忽高忽低”，单独收敛 */
+    .is-windows .btn { text-rendering: auto; font-synthesis: none; }
+    .is-windows .btn > svg {
+      transform: translateY(0);
+    }
+    .is-windows .btn-sm {
+      font-size: 12.5px;
+    }
 
     /* ── 卡片 ── */
     .card {
       background: #fff;
-      border-radius: 14px;
+      border-radius: 12px;
       border: 1px solid var(--border);
-      box-shadow: 0 1px 2px rgba(15,23,42,.06);
+      box-shadow: var(--shadow-soft);
     }
     /* ── 下载参数区 ── */
     .field-label {
       flex: 0 0 auto;
-      font-size: 12px; color: #475569; font-weight: 700;
-      letter-spacing: .01em;
+      font-size: var(--text-xs); color: #475569; font-weight: var(--fw-semibold);
+      letter-spacing: .015em;
       white-space: nowrap;
+      font-family: var(--font-role-label);
     }
     .filters-panel {
       padding: 12px 18px 12px 24px;
@@ -572,8 +1544,8 @@
     }
     .filter-helper {
       color: var(--muted);
-      font-size: 11.5px;
-      line-height: 1.35;
+      font-size: var(--text-xs);
+      line-height: var(--lh-tight);
       display: none;
     }
     .filter-title-row {
@@ -800,13 +1772,17 @@
     /* ── 输入框样式：select 与文本/数字输入；
        原生月份与日期输入已全部替换为自定义 picker，所以这里不再覆盖它们 ── */
     select, input[type="text"], input[type="number"] {
-      background: var(--surface); border: 1.5px solid var(--border);
+      background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 8px 12px; font-size: 14px;
+      min-height: 40px;
       color: var(--text); outline: none;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 1px 2px rgba(15,23,42,.04);
+      box-shadow: none;
       transition: border-color 0.15s, box-shadow .15s;
     }
-    select:focus, input:focus { border-color: var(--primary); }
+    select:focus, input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(9,105,218,.14);
+    }
 
     /* ── 开关 ── */
     .toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 auto; }
@@ -832,8 +1808,16 @@
     }
     .log-item:last-child { border-bottom: none; }
     .log-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
-    .log-time { font-family: 'Fira Code', monospace; font-size: 11.5px; color: #94A3B8; flex-shrink: 0; min-width: 60px; padding-top: 1px; }
-    .log-text { font-size: 12.5px; color: var(--text); line-height: 1.5; }
+    .log-time {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: #94A3B8;
+      flex-shrink: 0;
+      min-width: 64px;
+      padding-top: 1px;
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .log-text { font-size: var(--text-sm); color: var(--text); line-height: var(--lh-normal); }
 
     /* ── 骨架屏 ── */
     @keyframes shimmer { 0%{background-position:-200px 0} 100%{background-position:200px 0} }
@@ -850,10 +1834,58 @@
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
     /* ── 大列表快捷操作 ── */
-    /* 账号库整页内容区：相对 shell 略向右收进，避免大屏下表格贴左、右侧空一大块 */
-    .account-list-view {
-      padding-left: 20px;
-      box-sizing: border-box;
+    .account-list-view { box-sizing: border-box; }
+    .list-page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .list-page-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      width: 300px;
+      max-width: min(100%, 360px);
+      min-width: 220px;
+      flex: 1 1 280px;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .search-box .search-input-plain,
+    .search-box input[type="text"] {
+      min-width: 0;
+      border: none !important;
+      border-radius: 0 !important;
+      outline: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      background: transparent !important;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .search-box:focus-within {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.14);
+    }
+    .search-box input[type="text"]:focus,
+    .search-box .search-input-plain:focus {
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
     }
     /* 主视图：仅入场过渡，离场立即隐藏，避免双页叠层闪烁 */
     main > .cam-view-panel[x-cloak] {
@@ -883,51 +1915,124 @@
       position: sticky;
       top: 60px;
       z-index: 60;
-      padding: 12px 18px 12px 24px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 18px 12px 20px;
+      border: 1px solid #E2E8F0;
       display: flex;
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
-      background: rgba(250,250,250,.96);
+      min-height: 56px;
+      background: #FFFFFF;
       border-radius: 12px 12px 0 0;
-      box-shadow: 0 1px 0 rgba(226,232,240,.7);
-      backdrop-filter: blur(8px);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .list-bulk-toolbar .text-medium-sm {
+      color: #334155;
+      font-weight: 500;
+    }
+    .list-bulk-toolbar .text-muted-sm {
+      color: #64748B;
+      font-variant-numeric: tabular-nums lining-nums;
     }
     .batch-range-picker {
+      position: relative;
       display: inline-flex;
       align-items: center;
     }
-    .batch-range-select {
+    .batch-range-trigger {
       height: 36px;
       min-width: 148px;
       max-width: 220px;
-      padding: 0 30px 0 12px;
-      font-family: inherit;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid #D8E0EC;
+      border-radius: 10px;
+      background: #fff;
+      color: #334155;
       font-size: 13px;
       font-weight: 500;
       line-height: 1.2;
-      color: #334155;
-      background-color: #fff;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      border: 1px solid #D0D7E2;
-      border-radius: 10px;
       cursor: pointer;
-      appearance: none;
       transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
     }
-    .batch-range-select:hover:not(:disabled) {
-      border-color: #B6C0CF;
+    .batch-range-trigger:hover:not(:disabled) {
+      border-color: #C5D0DE;
       background-color: #F8FAFC;
     }
-    .batch-range-select:focus {
-      outline: none;
+    .batch-range-trigger.is-open {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(29, 78, 216, .12);
+      background: #fff;
     }
-    .batch-range-select:disabled {
+    .batch-range-caret {
+      color: #64748B;
+      flex-shrink: 0;
+      transition: transform .15s ease;
+    }
+    .batch-range-trigger.is-open .batch-range-caret {
+      transform: rotate(180deg);
+    }
+    .batch-range-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 220px;
+      max-width: 280px;
+      max-height: 260px;
+      overflow: auto;
+      padding: 6px;
+      background: #fff;
+      border: 1px solid #DDE4EE;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(15,23,42,.12);
+      z-index: 70;
+    }
+    .batch-range-option {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 8px;
+      padding: 8px 10px;
+      text-align: left;
+      color: #1E293B;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .batch-range-option:hover {
+      background: #F8FAFD;
+      border-color: #D9E3F5;
+    }
+    .batch-range-option.is-selected {
+      background: #EEF6FF;
+      border-color: #BFDBFE;
+      color: #1D4ED8;
+    }
+    .batch-range-option-note {
+      color: #64748B;
+      font-size: 11px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .list-bulk-toolbar .btn-ghost-warn {
+      color: #475569;
+      border-color: #D0D7E2;
+      background: #FFFFFF;
+    }
+    .list-bulk-toolbar .btn-ghost-warn:hover:not(:disabled) {
+      color: #0F172A;
+      border-color: #B6C0CF;
+      background: #F8FAFC;
+    }
+    .batch-range-trigger:disabled {
       opacity: .45;
       cursor: not-allowed;
     }
@@ -985,7 +2090,7 @@
       max-width: 100%;
       overflow-x: auto;
       border-radius: 0 0 12px 12px;
-      box-shadow: inset 0 -1px 0 var(--border);
+      box-shadow: none;
       padding: 0 16px 4px 20px;
       box-sizing: border-box;
       -webkit-overflow-scrolling: touch;
@@ -1042,6 +2147,20 @@
     }
     .account-list-table th {
       white-space: nowrap;
+    }
+    .account-list-table thead th {
+      background: #FFFFFF;
+      color: #64748B;
+      border-bottom: 1px solid #E8EEF5;
+    }
+    .account-list-table tbody td {
+      border-bottom: 1px solid #F0F4F8;
+    }
+    .account-list-table tbody tr:nth-child(even) {
+      background: #FFFFFF;
+    }
+    .account-list-table tbody tr:hover {
+      background: #F8FAFC !important;
     }
     .account-list-table .account-col-center {
       text-align: center;
@@ -1233,7 +2352,7 @@
     .on-demand-progress-popover .odp-email {
       font-size: 11px;
       color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--font-mono);
       margin-top: 6px;
       word-break: break-all;
     }
@@ -1464,6 +2583,165 @@
       gap: 10px;
       padding: 18px 24px 22px;
     }
+
+    /* ── 账期净支出导出模式选择弹框 ─────────────────────────────── */
+    .ledger-export-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 220;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ledger-export-dialog {
+      position: relative;
+      width: min(520px, calc(100vw - 32px));
+      background: #fff;
+      border: 1px solid #E2E8F0;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(15,23,42,.18), 0 4px 16px rgba(15,23,42,.08);
+      overflow: hidden;
+    }
+    .ledger-export-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 22px 24px 16px;
+      border-bottom: 1px solid #F1F5F9;
+    }
+    .ledger-export-header-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #DBEAFE 0%, #EDE9FE 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #4F46E5;
+    }
+    .ledger-export-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: #0F172A;
+      line-height: 1.3;
+    }
+    .ledger-export-subtitle {
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: #64748B;
+    }
+    .ledger-export-body {
+      padding: 18px 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ledger-option-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 14px 16px;
+      border: 2px solid #E2E8F0;
+      border-radius: 12px;
+      cursor: pointer;
+      background: #FAFAFA;
+      transition: border-color .15s, background .15s, box-shadow .15s;
+      user-select: none;
+    }
+    .ledger-option-card:hover {
+      border-color: #C7D2FE;
+      background: #F5F3FF;
+    }
+    .ledger-option-card.selected {
+      border-color: #6366F1;
+      background: #EEF2FF;
+      box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+    }
+    .ledger-option-radio {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid #CBD5E1;
+      background: #fff;
+      flex-shrink: 0;
+      margin-top: 1px;
+      transition: border-color .15s, background .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ledger-option-card.selected .ledger-option-radio {
+      border-color: #6366F1;
+      background: #6366F1;
+    }
+    .ledger-option-radio-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #fff;
+      display: none;
+    }
+    .ledger-option-card.selected .ledger-option-radio-dot {
+      display: block;
+    }
+    .ledger-option-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .ledger-option-icon.icon-excel {
+      background: #DCFCE7;
+      color: #16A34A;
+    }
+    .ledger-option-icon.icon-db {
+      background: #DBEAFE;
+      color: #2563EB;
+    }
+    .ledger-option-icon.icon-both {
+      background: #FEF3C7;
+      color: #D97706;
+    }
+    .ledger-option-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .ledger-option-label {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #1E293B;
+      margin-bottom: 3px;
+    }
+    .ledger-option-desc {
+      font-size: 12px;
+      color: #64748B;
+      line-height: 1.55;
+    }
+    .ledger-option-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 20px;
+      background: #EEF2FF;
+      color: #6366F1;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .ledger-export-footer {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 24px 20px;
+      border-top: 1px solid #F1F5F9;
+    }
+
     .run-row-actions {
       display: flex;
       align-items: center;
@@ -1638,7 +2916,7 @@
       margin-bottom: 10px;
     }
     .date-popover-title {
-      font-family: 'Fira Code', monospace;
+      font-family: var(--font-mono);
       font-size: 13px;
       font-weight: 700;
       color: #0F172A;
@@ -1788,6 +3066,86 @@
       flex-wrap: wrap;
       align-items: center;
     }
+    .run-result-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 12px;
+      padding: 16px 18px;
+      border-radius: 12px;
+      border: 1px solid #E2E8F0;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+    .run-result-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+    .run-result-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .run-result-text {
+      min-width: 0;
+      flex: 1;
+    }
+    .run-result-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .1px;
+    }
+    .run-result-sub {
+      margin: 4px 0 0;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .run-result-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .run-result-success {
+      background: linear-gradient(180deg, #F7FEF9 0%, #F0FDF4 100%);
+      border-color: #BBF7D0;
+      border-left: 4px solid #22C55E;
+    }
+    .run-result-success .run-result-icon {
+      background: #DCFCE7;
+      color: #16A34A;
+    }
+    .run-result-success .run-result-title { color: #166534; }
+    .run-result-success .run-result-sub { color: #15803D; }
+    .run-result-failed {
+      background: linear-gradient(180deg, #FFFCF2 0%, #FFFBEB 100%);
+      border-color: #FDE68A;
+      border-left: 4px solid #D97706;
+    }
+    .run-result-failed .run-result-icon {
+      background: #FEF3C7;
+      color: #D97706;
+    }
+    .run-result-failed .run-result-title { color: #92400E; }
+    .run-result-failed .run-result-sub { color: #B45309; }
+    .run-result-failed .run-result-actions .btn-ghost {
+      border-color: #D97706;
+      color: #B45309;
+      background: #FFF7E6;
+    }
+    .run-result-failed .run-result-actions .btn-ghost:hover:not(:disabled) {
+      border-color: #B45309;
+      color: #92400E;
+      background: #FFEDD5;
+    }
 
     /* ── details/summary 箭头 ── */
     details > summary { list-style: none; }
@@ -1811,13 +3169,13 @@
 <body class="min-h-screen">
 
 <!-- ── 顶部导航 ─────────────────────────────────────────────── -->
-<header class="card" style="border-radius:0; border-left:none; border-right:none; border-top:none; position:sticky; top:0; z-index:100; backdrop-filter:blur(8px); background:rgba(255,255,255,.95);">
-  <div class="app-shell" style="height:60px; display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:10px;">
+<header class="card app-header">
+  <div class="app-shell app-header-inner">
+    <div class="brand-row">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
       </svg>
-      <span class="mono" style="font-weight:600; font-size:16px; color:var(--text);">Cursor Account Manager</span>
+      <span class="brand-title">Cursor Account Manager</span>
     </div>
     <div class="header-actions">
       <nav class="header-breadcrumb" aria-label="页面导航">
@@ -1830,14 +3188,14 @@
         </span>
       </nav>
       <span class="badge" :class="serverOk ? 'badge-ok' : 'badge-error'">
-        <span style="width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;"></span>
+        <span class="status-dot"></span>
         <span x-text="serverOk ? '服务正常' : '服务异常'"></span>
       </span>
     </div>
   </div>
 </header>
 
-<main class="app-shell" style="padding:36px 0; display:flex; flex-direction:column; gap:28px; transition: opacity 0.15s ease;"
+<main class="app-shell app-main"
       :style="{ opacity: _ready ? 1 : 0, pointerEvents: _ready ? 'auto' : 'none' }">
 
   <!-- ══════════════════════════════════════════════════════════════
@@ -1851,19 +3209,19 @@
        x-transition:enter-end="cam-view-enter-end">
 
     <!-- 页头 -->
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
+    <div class="list-page-head">
       <div>
-        <h2 style="margin:0 0 4px; font-size:22px; font-weight:700; letter-spacing:-.3px;">账号库</h2>
-        <p style="margin:0; color:var(--muted); font-size:13.5px;"
+        <h2 class="page-title">账号库</h2>
+        <p class="page-subtitle"
            x-text="searchEmail.trim() ? `共 ${dbAccounts.length} 个账号，匹配 ${filteredDbAccounts.length} 个` : `共 ${dbAccounts.length} 个账号`"></p>
       </div>
-      <div style="display:flex; gap:10px; align-items:center;">
-        <div style="display:flex; align-items:center; gap:8px; padding:0 10px; height:36px; border:1px solid var(--border); border-radius:8px; background:#fff; min-width:280px;">
+      <div class="list-page-actions">
+        <div class="search-box">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" x-model="searchEmail" placeholder="按邮箱搜索（支持模糊）"
-                 style="border:none; outline:none; box-shadow:none; padding:0; height:100%; width:100%; font-size:13px; background:transparent;" />
+                 class="search-input-plain" />
           <button x-show="searchEmail" x-cloak @click="searchEmail=''" title="清空搜索"
-                  style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;display:flex;align-items:center;">
+                  class="icon-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -1937,7 +3295,7 @@
                 </div>
                 <div class="date-popover-footer">
                   <button type="button" class="date-footer-btn" @click="dateFrom=''; dateTo=''; rangeSelecting='start'">清除</button>
-                  <span style="font-size:12px;color:#64748B;" x-text="rangeSelecting==='end'?'请选择结束日期':'请选择开始日期'"></span>
+                  <span class="status-inline-note" x-text="rangeSelecting==='end'?'请选择结束日期':'请选择开始日期'"></span>
                   <button type="button" class="date-footer-btn" @click="selectQuickTodayRange()">今天</button>
                 </div>
               </div>
@@ -2020,12 +3378,12 @@
     <div class="card account-list-card">
       <!-- 空状态 -->
       <template x-if="filteredDbAccounts.length === 0">
-        <div style="padding:72px 40px; text-align:center; color:var(--muted);">
+        <div class="empty-block">
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="empty-icon">
             <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
           </svg>
-          <p style="margin:0 0 4px; font-size:15px; font-weight:500;" x-text="dbAccounts.length === 0 ? '账号库为空' : '无匹配账号'"></p>
-          <p style="margin:0; font-size:13px;" x-text="dbAccounts.length === 0 ? '点击右上角「上传账号」添加账号' : '请尝试其他邮箱关键词'"></p>
+          <p class="empty-title" x-text="dbAccounts.length === 0 ? '账号库为空' : '无匹配账号'"></p>
+          <p class="empty-sub" x-text="dbAccounts.length === 0 ? '点击右上角「上传账号」添加账号' : '请尝试其他邮箱关键词'"></p>
         </div>
       </template>
 
@@ -2033,27 +3391,45 @@
         <div>
           <!-- 批量操作工具栏 -->
           <div class="list-bulk-toolbar">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; width:32px; margin-right:-6px;">
+            <label class="bulk-check-label">
               <input type="checkbox" @change="toggleAll($event)" :checked="filteredDbAccounts.length > 0 && filteredDbAccounts.every(a => selectedEmails.has(a.email))" aria-label="全选当前筛选账号" />
             </label>
-            <span style="font-size:13px; font-weight:500;">全选</span>
+            <span class="text-medium-sm">全选</span>
             <div class="batch-range-picker" x-show="accountBatchRangeOptions().length > 1" x-cloak>
               <label class="sr-only" for="account-batch-range-select">按批次选中账号</label>
-              <select
-                id="account-batch-range-select"
-                class="batch-range-select"
-                @change="selectAccountBatchRange($event)"
-                aria-label="按批次选中或取消账号（每批 100 个，按账号库顺序）"
-                title="按账号库顺序每批 100 个；已全选的批次再次选择可取消该批">
-                <option value="" selected disabled>按批选中</option>
-                <template x-for="opt in accountBatchRangeOptions()" :key="opt.id">
-                  <option :value="opt.id" x-text="opt.label"></option>
-                </template>
-              </select>
+              <div @click.outside="batchRangeMenuOpen = false">
+                <button
+                  id="account-batch-range-select"
+                  type="button"
+                  class="batch-range-trigger"
+                  :class="{ 'is-open': batchRangeMenuOpen }"
+                  @click="batchRangeMenuOpen = !batchRangeMenuOpen"
+                  :aria-expanded="batchRangeMenuOpen ? 'true' : 'false'"
+                  aria-haspopup="listbox"
+                  aria-label="按批次选中或取消账号（每批 100 个，按账号库顺序）"
+                  title="按账号库顺序每批 100 个；已全选的批次再次选择可取消该批">
+                  <span>按批选中</span>
+                  <svg class="batch-range-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+                <div class="batch-range-menu" x-show="batchRangeMenuOpen" x-cloak x-transition role="listbox">
+                  <template x-for="opt in accountBatchRangeOptions()" :key="opt.id">
+                    <button
+                      type="button"
+                      class="batch-range-option"
+                      :class="{ 'is-selected': opt.fullySelected }"
+                      @click="selectAccountBatchRangeById(opt.id)">
+                      <span x-text="opt.label"></span>
+                      <span class="batch-range-option-note" x-text="`${opt.count}个`"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
             </div>
-            <span style="color:var(--muted); font-size:13px;" x-text="`已选 ${selectedEmails.size} / ${filteredDbAccounts.length}`"></span>
+            <span class="text-muted-sm" x-text="`已选 ${selectedEmails.size} / ${filteredDbAccounts.length}`"></span>
             <template x-if="Object.values(accountDbStatus).some(s => s.status === 'disabled')">
-              <button class="btn btn-ghost btn-sm" style="color:var(--warn); border-color:var(--warn);" @click="resetAllDisabled()">
+              <button class="btn btn-ghost btn-sm btn-ghost-warn" @click="resetAllDisabled()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 重置所有锁定
               </button>
@@ -2137,9 +3513,9 @@
                   <tr :class="accountDbStatus[a.email]?.status === 'disabled' ? 'opacity-60' : ''">
                     <td class="select-col">
                       <input type="checkbox" :checked="selectedEmails.has(a.email)"
-                        @change="toggleOne(a.email, $event)" style="cursor:pointer;" />
+                        @change="toggleOne(a.email, $event)" />
                     </td>
-                    <td><span class="mono mono-cell" style="font-size:13px;" x-text="a.email" :title="a.email"></span></td>
+                    <td><span class="mono mono-cell mono-sm" x-text="a.email" :title="a.email"></span></td>
                     <td class="feishu-col"><span class="mono mono-cell" x-text="a.feishu_email || '-'" :title="a.feishu_email || '-'"></span></td>
                     <td class="compact-col plan-block-col" :title="currentPlanTooltip(a)">
                       <span class="plan-pill" :class="planPillClass(a)" x-text="currentPlanDisplay(a)"></span>
@@ -2166,9 +3542,9 @@
                         </template>
                       </div>
                     </td>
-                    <td class="compact-col plan-block-col"><span class="mono-cell" style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'" :title="a.imap_host || 'imap.feishu.cn'"></span></td>
-                    <td class="account-col-center compact-col" style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
-                    <td class="account-col-center compact-col" style="color:var(--muted); font-size:12px;">
+                    <td class="compact-col plan-block-col"><span class="mono-cell text-muted-xs" x-text="a.imap_host || 'imap.feishu.cn'" :title="a.imap_host || 'imap.feishu.cn'"></span></td>
+                    <td class="account-col-center compact-col text-muted-xs" x-text="a.imap_port || 993"></td>
+                    <td class="account-col-center compact-col text-muted-xs">
                       <span :style="`padding:2px 8px;border-radius:4px;font-size:11px;background:${a.source==='manual'?'#EFF6FF':a.source==='upload'?'#F0FDF4':'#F1F5F9'};color:${a.source==='manual'?'var(--primary)':a.source==='upload'?'var(--success)':'var(--muted)'}`"
                         x-text="a.source || '-'"></span>
                     </td>
@@ -2179,11 +3555,11 @@
                         </span>
                       </template>
                       <template x-if="!accountDbStatus[a.email]">
-                        <span style="font-size:11px;color:var(--muted);">-</span>
+                        <span class="text-muted-xs">-</span>
                       </template>
                     </td>
                     <td class="account-col-center compact-col">
-                      <span class="mono-cell" style="color:var(--muted); font-size:12px;"
+                      <span class="mono-cell text-muted-xs"
                         x-text="a.updated_at ? fmtTs(a.updated_at) : '-'"
                         :title="a.updated_at ? ('数据更新时间：' + fmtTs(a.updated_at)) : '尚无账号数据更新记录'"></span>
                     </td>
@@ -2248,7 +3624,7 @@
           <span class="sticky-selection-divider" aria-hidden="true"></span>
           <button type="button"
             class="btn btn-ledger btn-sm"
-            @click="startBillingLedgerExport()"
+            @click="showLedgerExportModal = true"
             :disabled="selectedEmails.size===0"
             :aria-label="`导出账期净支出，共 ${selectedEmails.size} 个账号`"
             :title="`导出账期净支出（${selectedEmails.size} 个）`">
@@ -2274,16 +3650,16 @@
   ═══════════════════════════════════════════════════════════════ -->
   <div x-show="view === 'upload'"
        x-cloak
-       class="cam-view-panel"
+       class="cam-view-panel upload-shell"
        x-transition:enter="cam-view-enter"
        x-transition:enter-start="cam-view-enter-start"
        x-transition:enter-end="cam-view-enter-end">
 
     <!-- 页头 -->
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:16px;">
+    <div class="section-head">
       <div>
-        <h2 style="margin:0 0 4px; font-size:22px; font-weight:700; letter-spacing:-.3px;">上传账号</h2>
-        <p style="margin:0; color:var(--muted); font-size:13.5px;">支持 CSV 或 Excel，需包含 <code>email</code>、<code>imap_password</code>、<code>feishu_email</code> 三列（可选 <code>imap_host</code>、<code>imap_port</code>）</p>
+        <h2 class="section-title">上传账号</h2>
+        <p class="section-subtitle">支持 CSV 或 Excel，需包含 <code>email</code>、<code>imap_password</code>、<code>feishu_email</code> 三列（可选 <code>imap_host</code>、<code>imap_port</code>）</p>
       </div>
       <button class="btn btn-ghost btn-sm" @click="goList()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -2292,7 +3668,7 @@
     </div>
 
     <!-- 拖拽区域 -->
-    <div class="card" style="padding:32px; margin-bottom:20px;">
+    <div class="card upload-card">
       <div class="drop-zone" :class="{'drag-over': isDragging && !isUploading}"
            :style="{ opacity: isUploading ? 0.6 : 1, cursor: isUploading ? 'not-allowed' : 'pointer' }"
            @dragover.prevent="if(!isUploading) isDragging=true"
@@ -2307,16 +3683,16 @@
             <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite"/>
           </circle>
         </svg>
-        <div style="text-align:center;">
-          <p style="margin:0; font-weight:600; color:var(--text);" x-text="isUploading ? '解析中…' : '拖拽文件到此处 或 点击选择'"></p>
-          <p style="margin:4px 0 0; font-size:12px; color:var(--muted);" x-show="!isUploading">支持 .csv .xlsx .xls &nbsp;·&nbsp; 最大 10MB</p>
+        <div class="upload-drop-text">
+          <p class="upload-drop-title" x-text="isUploading ? '解析中…' : '拖拽文件到此处 或 点击选择'"></p>
+          <p class="upload-drop-sub" x-show="!isUploading">支持 .csv .xlsx .xls &nbsp;·&nbsp; 最大 10MB</p>
         </div>
-        <input x-ref="fileInput" type="file" accept=".csv,.xlsx,.xls" style="display:none;" @change="onFileInput($event)" />
+        <input x-ref="fileInput" type="file" accept=".csv,.xlsx,.xls" hidden @change="onFileInput($event)" />
       </div>
 
       <!-- 模板下载 + 手动添加 -->
-      <div style="margin-top:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <span style="font-size:13px; color:var(--muted);">没有文件？</span>
+      <div class="upload-actions-row">
+        <span class="upload-hint-text">没有文件？</span>
         <button class="btn btn-ghost btn-sm" @click="downloadTemplate()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           下载 CSV 模板
@@ -2325,71 +3701,71 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h8M8 9h2"/></svg>
           下载 Excel 模板
         </button>
-        <span style="font-size:13px; color:var(--muted); margin-left:8px;">或手动添加 →</span>
+        <span class="upload-hint-text upload-hint-gap">或手动添加 →</span>
         <button class="btn btn-ghost btn-sm" @click="showManualAdd=!showManualAdd">手动添加账号</button>
       </div>
 
       <!-- 手动添加 -->
-      <div x-show="showManualAdd" x-transition style="margin-top:20px; padding:20px; background:var(--bg); border-radius:10px; border:1px solid var(--border);">
+      <div x-show="showManualAdd" x-transition class="upload-manual-panel">
         <!-- 第一行：必填字段 -->
-        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
-          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:200px;">
-            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">邮箱 *</label>
-            <input type="text" x-model="manualEmail" placeholder="cursor@example.com" style="width:100%;"
+        <div class="manual-row">
+          <div class="manual-field">
+            <label class="form-label">邮箱 *</label>
+            <input type="text" x-model="manualEmail" placeholder="cursor@example.com" class="manual-field-wide-input"
               @keydown.enter="addManualAccount()" />
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:180px;">
-            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">IMAP 密码 *</label>
-            <input type="text" x-model="manualPwd" placeholder="专用密码" style="width:100%;"
+          <div class="manual-field manual-field-pwd">
+            <label class="form-label">IMAP 密码 *</label>
+            <input type="text" x-model="manualPwd" placeholder="专用密码" class="manual-field-wide-input"
               @keydown.enter="addManualAccount()" />
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:200px;">
-            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">飞书邮箱 *</label>
-            <input type="text" x-model="manualFeishuEmail" placeholder="owner@example.com" style="width:100%;"
+          <div class="manual-field">
+            <label class="form-label">飞书邮箱 *</label>
+            <input type="text" x-model="manualFeishuEmail" placeholder="owner@example.com" class="manual-field-wide-input"
               @keydown.enter="addManualAccount()" />
           </div>
         </div>
         <!-- 第二行：可选字段 + 按钮 -->
-        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
-          <div style="display:flex;flex-direction:column;gap:6px;flex:2;min-width:180px;">
-            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
-              IMAP Host <span style="font-weight:400;text-transform:none;letter-spacing:0;">（可选，默认飞书）</span>
+        <div class="manual-row-secondary">
+          <div class="manual-field manual-field-pwd">
+            <label class="form-label">
+              IMAP Host <span class="opt">（可选，默认飞书）</span>
             </label>
-            <input type="text" x-model="manualHost" placeholder="imap.feishu.cn" style="width:100%;"
+            <input type="text" x-model="manualHost" placeholder="imap.feishu.cn" class="manual-field-wide-input"
               @keydown.enter="addManualAccount()" />
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:100px;max-width:140px;">
-            <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
-              Port <span style="font-weight:400;text-transform:none;letter-spacing:0;">（可选）</span>
+          <div class="manual-field manual-field-port">
+            <label class="form-label">
+              Port <span class="opt">（可选）</span>
             </label>
-            <input type="number" x-model="manualPort" placeholder="993" style="width:100%;"
+            <input type="number" x-model="manualPort" placeholder="993" class="manual-field-wide-input"
               @keydown.enter="addManualAccount()" />
           </div>
-          <button class="btn btn-primary" style="align-self:flex-end; flex-shrink:0;" @click="addManualAccount()">添加到预览</button>
+          <button class="btn btn-primary manual-add-btn" @click="addManualAccount()">添加到预览</button>
         </div>
       </div>
 
       <!-- 解析错误 -->
-      <div x-show="uploadError" style="margin-top:14px; padding:12px 16px; background:#FEE2E2; border-radius:8px; color:var(--danger); font-size:13px;" x-text="uploadError"></div>
+      <div x-show="uploadError" class="upload-error-box" x-text="uploadError"></div>
     </div>
 
     <!-- 预览表格（上传/手动添加后显示） -->
     <template x-if="uploadPreview.length > 0">
-      <div class="card" style="overflow:hidden;">
-        <div style="padding:14px 24px; border-bottom:1px solid var(--border); background:#FAFAFA; border-radius:12px 12px 0 0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <div class="card preview-card">
+        <div class="preview-head">
           <div>
-            <span style="font-weight:600; font-size:15px;">预览</span>
-            <span style="color:var(--muted); font-size:13px; margin-left:10px;" x-text="`${uploadPreview.length} 个账号`"></span>
+            <span class="preview-title">预览</span>
+            <span class="preview-sub" x-text="`${uploadPreview.length} 个账号`"></span>
             <template x-if="uploadConflicts.length > 0">
-              <span style="margin-left:8px; padding:2px 10px; border-radius:999px; background:#FEF3C7; color:var(--warn); font-size:12px; font-weight:600;"
+              <span class="status-pill warn"
                 x-text="`${uploadConflicts.length} 个已存在（将提示更新）`"></span>
             </template>
             <template x-if="uploadNewCount > 0">
-              <span style="margin-left:8px; padding:2px 10px; border-radius:999px; background:#DCFCE7; color:var(--success); font-size:12px; font-weight:600;"
+              <span class="status-pill ok"
                 x-text="`${uploadNewCount} 个新账号`"></span>
             </template>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div class="sync-toolbar preview-toolbar-tight">
             <button class="btn btn-ghost btn-sm" @click="uploadPreview=[]">清空预览</button>
             <button class="btn btn-primary btn-sm" @click="saveWithConflictCheck()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -2401,7 +3777,7 @@
           <table>
             <thead>
               <tr>
-                <th style="width:60px;">状态</th>
+                <th class="preview-th-status">状态</th>
                 <th>邮箱</th>
                 <th>飞书邮箱</th>
                 <th>IMAP 密码</th>
@@ -2413,18 +3789,16 @@
               <template x-for="(a, i) in uploadPreview" :key="i">
                 <tr :class="uploadConflicts.includes(a.email) ? 'row-conflict' : 'row-new'">
                   <td>
-                    <span x-show="uploadConflicts.includes(a.email)"
-                      style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:#FEF3C7;color:var(--warn);">已存在</span>
-                    <span x-show="!uploadConflicts.includes(a.email)"
-                      style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:#DCFCE7;color:var(--success);">新增</span>
+                    <span x-show="uploadConflicts.includes(a.email)" class="status-pill warn">已存在</span>
+                    <span x-show="!uploadConflicts.includes(a.email)" class="status-pill ok">新增</span>
                   </td>
-                  <td class="mono" style="font-size:13px;" x-text="a.email"></td>
-                  <td class="mono" style="font-size:12px; color:var(--muted);" x-text="a.feishu_email || '-'"></td>
+                  <td class="mono mono-sm" x-text="a.email"></td>
+                  <td class="mono mono-xs text-muted-xs" x-text="a.feishu_email || '-'"></td>
                   <td>
-                    <span class="mono" style="font-size:12px; color:var(--muted);" x-text="a.imap_password.slice(0,4) + '••••'"></span>
+                    <span class="mono mono-xs text-muted-xs" x-text="a.imap_password.slice(0,4) + '••••'"></span>
                   </td>
-                  <td style="color:var(--muted); font-size:12px;" x-text="a.imap_host || 'imap.feishu.cn'"></td>
-                  <td style="color:var(--muted); font-size:12px;" x-text="a.imap_port || 993"></td>
+                  <td class="text-muted-xs" x-text="a.imap_host || 'imap.feishu.cn'"></td>
+                  <td class="text-muted-xs" x-text="a.imap_port || 993"></td>
                 </tr>
               </template>
             </tbody>
@@ -2445,9 +3819,9 @@
        x-transition:enter-end="cam-view-enter-end">
 
     <!-- ── 页面头：标题 + 状态胶囊 ── -->
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
-      <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">拉取进度</h2>
-      <span class="badge" :class="runFinished ? 'badge-ok' : 'badge-running'" style="font-size:12px; padding:4px 12px; border-radius:999px;">
+    <div class="section-head run-head">
+      <h2 class="page-title run-title-reset">拉取进度</h2>
+      <span class="badge run-state-badge" :class="runFinished ? 'badge-ok' : 'badge-running'">
         <svg x-show="!runFinished" class="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
         <svg x-show="runFinished" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         <span x-text="runFinished ? '已完成' : '运行中'"></span>
@@ -2455,43 +3829,43 @@
     </div>
 
     <!-- ── 进度信息区：进度条 + 计数 + 状态文字 整体合并 ── -->
-    <div style="margin-bottom:28px; padding:18px 24px; background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,.04);">
+    <div class="run-progress-card">
       <!-- 进度条主体 -->
-      <div class="progress-bar-bg" style="margin-bottom:12px; height:10px; border-radius:999px;">
+      <div class="progress-bar-bg run-progress-bar">
         <div class="progress-bar-fill"
           :class="{ animating: !runFinished && runTotal > 0 }"
           :style="`width:${runTotal > 0 ? Math.round(runDone/runTotal*100) : 0}%; height:10px; border-radius:999px; transition:width .5s cubic-bezier(.4,0,.2,1)`">
         </div>
       </div>
       <!-- 计数 + 状态文字同行 -->
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-        <span style="font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px;">
+      <div class="run-progress-row">
+        <span class="text-muted-sm run-progress-status">
           <template x-if="!runFinished && globalPhaseMsg">
             <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
           </template>
           <span x-text="globalPhaseMsg || runStatusText"></span>
         </span>
-        <span class="mono" style="font-size:13px; color:var(--text); font-weight:600;"
+        <span class="mono mono-sm text-strong-sm"
           x-text="runTotal > 0 ? `${runDone} / ${runTotal}` : '—'"></span>
       </div>
     </div>
 
-    <div class="card" style="padding:28px 32px;">
+    <div class="card run-main-card">
       <!-- 账号状态列表 -->
-      <div class="overflow-x-auto" style="border:1px solid var(--border); border-radius:10px; margin-bottom:24px;">
+      <div class="overflow-x-auto run-table-wrap">
         <table>
           <thead>
             <tr>
               <th>邮箱</th>
               <th>状态</th>
               <th>消息</th>
-              <th style="width:160px;text-align:right;">操作</th>
+              <th class="run-th-actions">操作</th>
             </tr>
           </thead>
           <tbody>
             <template x-for="(item, email) in runItems" :key="email">
               <tr>
-                <td class="mono" style="font-size:13px;" x-text="email"></td>
+                <td class="mono mono-sm" x-text="email"></td>
                 <td>
                   <span class="badge"
                     :class="{
@@ -2520,7 +3894,7 @@
                     })[item.phase] || item.phase"></span>
                   </span>
                 </td>
-                <td style="color:var(--muted); font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis;" x-text="item.msg || ''"></td>
+                <td class="text-muted-xs run-msg-ellipsis" x-text="item.msg || ''"></td>
                 <td>
                   <div class="run-row-actions">
                     <template x-if="retryDownloads[email]">
@@ -2552,12 +3926,12 @@
       </div>
 
       <!-- 日志 -->
-      <details style="margin-bottom:24px;">
-        <summary style="cursor:pointer; font-size:13px; color:var(--muted); font-weight:600; padding:8px 0; user-select:none; display:flex; align-items:center; gap:6px;">
+      <details class="run-log-details">
+        <summary class="text-muted-sm detail-summary">
           详细日志
-          <span style="background:#F1F5F9; color:var(--muted); font-size:11px; padding:1px 7px; border-radius:999px; font-weight:600;" x-text="logLines.length"></span>
+          <span class="chip-count" x-text="logLines.length"></span>
         </summary>
-        <div style="margin-top:10px; padding:12px 16px; background:#FAFBFD; border-radius:10px; border:1px solid var(--border); max-height:240px; overflow-y:auto;" id="log-box">
+        <div class="run-log-box" id="log-box">
           <template x-for="(line, i) in logLines" :key="i">
             <div class="log-item">
               <div class="log-dot" :style="`background:${line.color}`"></div>
@@ -2602,14 +3976,36 @@
           </button>
         </div>
       </div>
-      <div x-show="runFinished && !downloadToken && !hasZip" style="padding:18px 24px; background:#FFFBEB; border-radius:10px; border:1px solid #FDE68A; display:flex; align-items:center; gap:14px;">
-        <div style="width:36px;height:36px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <!-- 写库成功（db_only 模式：无下载文件但有成功账号） -->
+      <div x-show="runFinished && !downloadToken && !hasZip && runOkCount > 0"
+           class="run-result-banner run-result-success">
+        <div class="run-result-main">
+          <div class="run-result-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="run-result-text">
+            <p class="run-result-title">数据已写入数据库</p>
+            <p class="run-result-sub" x-text="`成功 ${runOkCount} 个账号 · 失败 ${runFailCount} 个`"></p>
+          </div>
         </div>
-        <div>
-          <p style="margin:0; color:#92400E; font-size:14px; font-weight:600;">所有账号均拉取失败</p>
-          <p style="margin:4px 0 0; color:#B45309; font-size:13px;">请检查账号配置后重试</p>
-          <button class="btn btn-ghost btn-sm" @click="goList()" style="margin-top:10px; border-color:#D97706; color:#D97706;">返回列表</button>
+        <div class="run-result-actions">
+          <button class="btn btn-ghost btn-sm" @click="goList()">返回列表</button>
+        </div>
+      </div>
+      <!-- 全部失败（真实失败，无下载也无成功账号） -->
+      <div x-show="runFinished && !downloadToken && !hasZip && runOkCount === 0"
+           class="run-result-banner run-result-failed">
+        <div class="run-result-main">
+          <div class="run-result-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="run-result-text">
+            <p class="run-result-title">所有账号均拉取失败</p>
+            <p class="run-result-sub">请检查账号配置后重试</p>
+          </div>
+        </div>
+        <div class="run-result-actions">
+          <button class="btn btn-ghost btn-sm" @click="goList()">返回列表</button>
         </div>
       </div>
     </div>
@@ -2626,10 +4022,10 @@
        x-transition:enter-end="cam-view-enter-end">
     <div class="sync-head">
       <div>
-        <h2 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-.3px;">账单调度</h2>
+        <h2 class="section-title sync-page-title">账单调度</h2>
         <p class="sync-desc">每日主任务固定拉取昨日全量账号；补拉作为并行功能单独触发。按量付费字段另有独立静默定时任务（见下方说明）。</p>
       </div>
-      <div style="display:flex; gap:10px; align-items:center;">
+      <div class="sync-toolbar">
         <button class="btn btn-ghost" @click="goList()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
           返回列表
@@ -2638,31 +4034,31 @@
       </div>
     </div>
 
-    <div class="sync-task-card" style="margin: 0 0 12px; border-style: dashed;"
+    <div class="sync-task-card sync-note-card"
       x-show="schedulerMeta.spending_refresh_enable">
-      <div style="font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text);">消费页 / 按量付费（定时调度）</div>
-      <p style="margin:0; font-size:12px; color:var(--muted); line-height:1.55;">
-        服务端按 cron <code class="mono" style="font-size:11px;" x-text="schedulerMeta.spending_refresh_cron || '0 3 * * *'"></code>
+      <div class="sync-note-title">消费页 / 按量付费（定时调度）</div>
+      <p class="sync-note-text">
+        服务端按 cron <code class="mono" x-text="schedulerMeta.spending_refresh_cron || '0 3 * * *'"></code>
         自动全库刷新套餐档位与按量开关（与 BI 主同步<strong>不同锁</strong>，可并行；与账号库表头全库刷新<strong>不共用长时间文件锁</strong>）。完成后会发飞书汇总（与 BI 调度成功卡片类似）；失败原因亦写入各账号「消费页错误」，可在账号库悬停「当前套餐」查看。
-        BI 主链路 cron 为 <code class="mono" style="font-size:11px;" x-text="schedulerMeta.bi_sync_cron || '-'"></code>。
+        BI 主链路 cron 为 <code class="mono" x-text="schedulerMeta.bi_sync_cron || '-'"></code>。
       </p>
     </div>
 
     <div class="sync-task-grid">
       <div class="sync-task-card main">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-          <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:6px;">
+        <div class="sync-card-head">
+          <div class="sync-card-title">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
             手动执行昨日同步
           </div>
           <span class="badge sync-badge-main">主任务</span>
         </div>
-        <p style="margin:0 0 14px; font-size:12px; color:var(--muted); line-height:1.5;">
+        <p class="sync-card-desc">
           固定拉取昨日全天全部账号数据（T+0 补齐），用于日常主链路同步。
         </p>
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-          <span style="display:flex; align-items:center; gap:10px;">
-            <span style="font-size:12px; color:var(--muted);">业务日期</span>
+        <div class="sync-task-action-row">
+          <span class="sync-task-action-left">
+            <span class="sync-inline-label">业务日期</span>
             <div class="sync-date-plugin" @click.outside="syncDailyDatePanelOpen = false">
               <button type="button"
                 class="sync-date-trigger"
@@ -2672,7 +4068,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div x-show="syncDailyDatePanelOpen" x-cloak x-transition class="sync-date-panel">
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <div class="sync-date-quick-row">
                   <template x-for="d in syncReplayDateOptions()" :key="`daily-${d.value}`">
                     <button type="button"
                       class="date-chip"
@@ -2681,7 +4077,7 @@
                       x-text="d.label"></button>
                   </template>
                 </div>
-                <div class="date-popover-header" style="padding:0;">
+                <div class="date-popover-header sync-date-popover-head">
                   <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('daily', -1)" aria-label="上一月">‹</button>
                   <div class="date-popover-title" x-text="syncCalendarTitle('daily')"></div>
                   <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('daily', 1)" aria-label="下一月">›</button>
@@ -2720,21 +4116,21 @@
       </div>
 
       <div class="sync-task-card replay">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-          <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:6px;">
+        <div class="sync-card-head">
+          <div class="sync-card-title">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
             自定义补拉（按账号）
           </div>
           <span class="badge sync-badge-replay">补偿任务</span>
         </div>
-        <p style="margin:0 0 12px; font-size:12px; color:var(--muted); line-height:1.5;">
+        <p class="sync-card-desc">
           按需补拉指定账号，不限定失败账号。支持逗号、空格或换行分隔邮箱。
         </p>
-        <div style="display:grid; grid-template-columns: 190px minmax(0, 1fr); gap:12px; align-items:stretch;">
+        <div class="sync-replay-grid">
           <div>
-            <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">业务日期</div>
-            <div style="border:1px solid var(--border); border-radius:10px; padding:8px; min-height:122px;">
-              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+            <div class="sync-inline-label sync-inline-label-gap">业务日期</div>
+            <div class="sync-replay-date-box">
+              <div class="sync-replay-date-quick">
                 <template x-for="d in syncReplayDateOptions()" :key="d.value">
                   <button type="button"
                     class="date-chip"
@@ -2743,7 +4139,7 @@
                     x-text="d.label"></button>
                 </template>
               </div>
-              <div class="sync-date-plugin" style="min-width:unset;" @click.outside="syncReplayDatePanelOpen = false">
+              <div class="sync-date-plugin sync-date-plugin-compact" @click.outside="syncReplayDatePanelOpen = false">
                 <button type="button"
                   class="sync-date-trigger"
                   :class="{ 'open': syncReplayDatePanelOpen }"
@@ -2752,7 +4148,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <div x-show="syncReplayDatePanelOpen" x-cloak x-transition class="sync-date-panel">
-                  <div class="date-popover-header" style="padding:0;">
+                  <div class="date-popover-header sync-date-popover-head">
                     <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('replay', -1)" aria-label="上一月">‹</button>
                     <div class="date-popover-title" x-text="syncCalendarTitle('replay')"></div>
                     <button type="button" class="date-nav-btn" @click="shiftSyncCalendarMonth('replay', 1)" aria-label="下一月">›</button>
@@ -2783,8 +4179,7 @@
                   </div>
                   <div class="sync-date-panel-list">
                     <template x-for="d in syncRecentDateList()" :key="d">
-                      <button type="button" class="btn btn-ghost btn-sm"
-                        style="width:100%; justify-content:flex-start;"
+                      <button type="button" class="btn btn-ghost btn-sm sync-date-list-btn"
                         @click="selectSyncDate('replay', d)"
                         x-text="d"></button>
                     </template>
@@ -2794,7 +4189,7 @@
             </div>
           </div>
           <div>
-            <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">账号邮箱</div>
+            <div class="sync-inline-label sync-inline-label-gap">账号邮箱</div>
             <div class="sync-email-picker" @click.outside="syncReplayPickerOpen = false">
               <input type="text"
                 class="sync-input"
@@ -2817,10 +4212,10 @@
               </div>
             </div>
             <textarea x-model="syncReplayEmails" rows="2" placeholder="a@xx.com,b@xx.com"
-              class="sync-input" style="min-height:122px; resize:none;"></textarea>
+              class="sync-input sync-replay-textarea"></textarea>
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+        <div class="sync-replay-action-row">
           <button class="btn btn-primary sync-action-btn" :disabled="syncSubmittingReplay || syncIsRunning" @click="triggerSyncReplay()">
             <span x-text="syncSubmittingReplay ? '提交中...' : (syncIsRunning ? '执行中...' : '执行')"></span>
           </button>
@@ -2828,27 +4223,40 @@
       </div>
     </div>
 
-    <div class="sync-section-card">
-      <div x-show="!syncTodayRun" style="color:var(--muted); font-size:13px;">今天暂无同步记录。</div>
+    <div class="sync-section-card section-overview">
+      <div class="sync-section-head">
+        <div>
+          <div class="sync-section-title">今日运行概览</div>
+          <p class="sync-section-subtitle">核心指标卡片化展示，快速判断运行健康状态。</p>
+        </div>
+        <div class="sync-section-actions"></div>
+      </div>
+      <div x-show="!syncTodayRun" class="text-muted-sm">今天暂无同步记录。</div>
       <div x-show="syncTodayRun" class="sync-meta-grid">
-        <div class="sync-meta-item">
+        <div class="sync-meta-item is-status">
           <div class="sync-meta-k">状态</div>
           <div class="sync-meta-v"><span class="badge" :class="syncStatusClass(syncTodayRun?.status)" x-text="syncStatusLabel(syncTodayRun?.status)"></span></div>
         </div>
         <div class="sync-meta-item"><div class="sync-meta-k">开始时间</div><div class="sync-meta-v" x-text="fmtTsFull(syncTodayRun?.started_at)"></div></div>
         <div class="sync-meta-item"><div class="sync-meta-k">结束时间</div><div class="sync-meta-v" x-text="fmtTsFull(syncTodayRun?.ended_at)"></div></div>
-        <div class="sync-meta-item"><div class="sync-meta-k">快照账号数</div><div class="sync-meta-v" x-text="syncTodayRun?.account_snapshot_total ?? 0"></div></div>
-        <div class="sync-meta-item"><div class="sync-meta-k">成功 / 失败</div><div class="sync-meta-v" x-text="`${syncTodayRun?.account_success ?? 0} / ${syncTodayRun?.account_failed ?? 0}`"></div></div>
+        <div class="sync-meta-item is-number"><div class="sync-meta-k">快照账号数</div><div class="sync-meta-v" x-text="syncTodayRun?.account_snapshot_total ?? 0"></div></div>
+        <div class="sync-meta-item is-total is-number"><div class="sync-meta-k">成功 / 失败</div><div class="sync-meta-v" x-text="`${syncTodayRun?.account_success ?? 0} / ${syncTodayRun?.account_failed ?? 0}`"></div></div>
       </div>
     </div>
 
-    <div class="sync-section-card">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-        <div class="sync-section-title">执行日志</div>
-        <button class="btn btn-ghost btn-sm" @click="syncLogCompact = !syncLogCompact" x-text="syncLogCompact ? '切换详细模式' : '切换简洁模式'"></button>
+    <div class="sync-panels-grid">
+    <div class="sync-section-card section-logs">
+      <div class="sync-section-head">
+        <div>
+          <div class="sync-section-title">执行日志</div>
+          <p class="sync-section-subtitle">按阶段追踪任务执行链路与耗时。</p>
+        </div>
+        <div class="sync-section-actions">
+          <button class="btn btn-ghost btn-sm" @click="syncLogCompact = !syncLogCompact" x-text="syncLogCompact ? '切换详细模式' : '切换简洁模式'"></button>
+        </div>
       </div>
-      <div x-show="syncStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
-      <div x-show="syncStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
+      <div x-show="syncStages.length===0" class="text-muted-sm">暂无执行日志。</div>
+      <div x-show="syncStages.length>0" class="sync-stage-list">
         <div class="sync-log-head">
           <span>阶段</span>
           <span>状态 / 时间 / 耗时</span>
@@ -2872,14 +4280,19 @@
       </div>
     </div>
 
-    <div class="sync-section-card">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-        <div class="sync-section-title">失败账号</div>
-        <button class="btn btn-ghost btn-sm" :disabled="!syncTodayRun?.run_id || syncSubmittingRetry || syncFailedAccounts.length===0" @click="retryTodayFailed()">
-          执行
-        </button>
+    <div class="sync-section-card section-failed">
+      <div class="sync-section-head">
+        <div>
+          <div class="sync-section-title">失败账号</div>
+          <p class="sync-section-subtitle">可一键重试当天失败账号，减少人工排查。</p>
+        </div>
+        <div class="sync-section-actions">
+          <button class="btn btn-ghost btn-sm" :disabled="!syncTodayRun?.run_id || syncSubmittingRetry || syncFailedAccounts.length===0" @click="retryTodayFailed()">
+            执行
+          </button>
+        </div>
       </div>
-      <div x-show="syncFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
+      <div x-show="syncFailedAccounts.length===0" class="text-muted-sm">暂无失败账号。</div>
       <div x-show="syncFailedAccounts.length>0" class="overflow-x-auto">
         <table>
           <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
@@ -2887,8 +4300,7 @@
             <template x-for="a in syncFailedAccounts" :key="a.id">
               <tr>
                 <td class="mono" x-text="a.account_email"></td>
-                <td
-                  style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                <td class="sync-error-ellipsis"
                   :title="a.error_message || '-'"
                   x-text="a.error_message || '-'"></td>
                 <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
@@ -2898,15 +4310,22 @@
         </table>
       </div>
     </div>
+    </div>
 
-    <div class="sync-section-card" style="margin-bottom:0;">
-      <div class="sync-section-title" style="margin-bottom:10px;">最近运行</div>
-      <div class="overflow-x-auto">
-        <table>
+    <div class="sync-section-card section-runs">
+      <div class="sync-section-head">
+        <div>
+          <div class="sync-section-title">最近运行</div>
+          <p class="sync-section-subtitle">完整运行记录独立成主卡，支持按 run_id 展开查看明细。</p>
+        </div>
+        <div class="sync-section-actions"></div>
+      </div>
+      <div class="overflow-x-auto sync-runs-table-wrap">
+        <table class="sync-runs-table">
           <thead><tr><th>run_id</th><th>日期</th><th>触发方式</th><th>状态</th><th>成功/失败</th><th>开始</th><th>操作</th></tr></thead>
           <template x-for="r in syncRunsPaged" :key="r.run_id">
             <tbody>
-              <tr @click="toggleSyncRunInlineDetail(r.run_id)" style="cursor:pointer;">
+              <tr @click="toggleSyncRunInlineDetail(r.run_id)" class="sync-runs-row">
                 <td class="mono" x-text="r.run_id"></td>
                 <td x-text="r.biz_date"></td>
                 <td><span class="badge badge-neutral" x-text="syncTriggerLabel(r.trigger_type)"></span></td>
@@ -2921,22 +4340,22 @@
                 </td>
               </tr>
               <tr x-show="syncRunInlineDetailId === r.run_id" x-cloak>
-                <td colspan="7" style="padding:0 12px 14px 12px; background:#fff;">
-                  <div style="margin-top:8px; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:12px;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
-                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <td colspan="7" class="sync-inline-expand-cell">
+                  <div class="sync-inline-panel">
+                    <div class="sync-inline-panel-head">
+                      <div class="sync-inline-panel-meta">
                         <span class="mono" x-text="syncRunInlineDetail?.run_id || syncRunInlineDetailId"></span>
                         <span class="badge badge-neutral" x-show="syncRunInlineDetail?.trigger_type" x-text="syncTriggerLabel(syncRunInlineDetail?.trigger_type)"></span>
                         <span class="badge" :class="syncStatusClass(syncRunInlineDetail?.status)" x-text="syncStatusLabel(syncRunInlineDetail?.status)"></span>
-                        <span style="font-size:12px; color:var(--muted);" x-text="`成功/失败 ${syncRunInlineDetail?.account_success||0}/${syncRunInlineDetail?.account_failed||0}`"></span>
+                        <span class="text-muted-xs" x-text="`成功/失败 ${syncRunInlineDetail?.account_success||0}/${syncRunInlineDetail?.account_failed||0}`"></span>
                       </div>
                       <button type="button" class="btn btn-ghost btn-sm" @click.stop="closeSyncRunInlineDetail()">收起</button>
                     </div>
-                    <div x-show="syncRunInlineLoading" style="font-size:13px; color:var(--muted);">日志加载中...</div>
-                    <div x-show="syncRunInlineError" class="danger-dialog-error" style="margin:8px 0;" x-text="syncRunInlineError"></div>
+                    <div x-show="syncRunInlineLoading" class="text-muted-sm">日志加载中...</div>
+                    <div x-show="syncRunInlineError" class="danger-dialog-error sync-inline-error" x-text="syncRunInlineError"></div>
                     <div x-show="!syncRunInlineLoading">
-                      <div x-show="syncRunInlineStages.length===0" style="color:var(--muted); font-size:13px;">暂无执行日志。</div>
-                      <div x-show="syncRunInlineStages.length>0" style="display:flex; flex-direction:column; gap:8px;">
+                      <div x-show="syncRunInlineStages.length===0" class="text-muted-sm">暂无执行日志。</div>
+                      <div x-show="syncRunInlineStages.length>0" class="sync-inline-stage-list">
                         <div class="sync-log-head">
                           <span>阶段</span>
                           <span>状态 / 时间 / 耗时</span>
@@ -2958,9 +4377,9 @@
                           </div>
                         </template>
                       </div>
-                      <div style="margin-top:12px;">
-                        <div style="font-size:13px; font-weight:600; margin-bottom:6px;">失败账号</div>
-                        <div x-show="syncRunInlineFailedAccounts.length===0" style="color:var(--muted); font-size:13px;">暂无失败账号。</div>
+                      <div class="sync-inline-failed-block">
+                        <div class="text-strong-sm sync-inline-failed-title">失败账号</div>
+                        <div x-show="syncRunInlineFailedAccounts.length===0" class="text-muted-sm">暂无失败账号。</div>
                         <div x-show="syncRunInlineFailedAccounts.length>0" class="overflow-x-auto">
                           <table>
                             <thead><tr><th>邮箱</th><th>错误</th><th>状态</th></tr></thead>
@@ -2968,8 +4387,7 @@
                               <template x-for="a in syncRunInlineFailedAccounts" :key="a.id">
                                 <tr>
                                   <td class="mono" x-text="a.account_email"></td>
-                                  <td
-                                    style="max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                                  <td class="sync-error-ellipsis"
                                     :title="a.error_message || '-'"
                                     x-text="a.error_message || '-'"></td>
                                   <td><span class="badge" :class="syncStatusClass(a.status)" x-text="syncStatusLabel(a.status)"></span></td>
@@ -2987,9 +4405,9 @@
           </template>
         </table>
       </div>
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px; gap:10px; flex-wrap:wrap;">
-        <div style="font-size:12px; color:var(--muted);" x-text="`第 ${syncRunsPage} / ${syncRunsTotalPages} 页，共 ${syncRuns.length} 条`"></div>
-        <div style="display:flex; gap:6px; align-items:center;">
+      <div class="sync-runs-pagination">
+        <div class="text-muted-xs" x-text="`第 ${syncRunsPage} / ${syncRunsTotalPages} 页，共 ${syncRuns.length} 条`"></div>
+        <div class="sync-runs-pagination-actions">
           <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsPrevPage()" :disabled="syncRunsPage<=1">上一页</button>
           <button type="button" class="btn btn-ghost btn-sm" @click="syncRunsNextPage()" :disabled="syncRunsPage>=syncRunsTotalPages">下一页</button>
         </div>
@@ -2998,6 +4416,94 @@
   </div>
 
 </main>
+
+<!-- ── 账期净支出导出模式选择弹框 ────────────────────────────── -->
+<div class="ledger-export-modal"
+     x-show="showLedgerExportModal"
+     x-cloak
+     x-transition.opacity
+     @keydown.escape.window="showLedgerExportModal && (showLedgerExportModal = false)">
+  <div class="modal-scrim" @click="showLedgerExportModal = false">
+    <div class="ledger-export-dialog" role="dialog" aria-modal="true" aria-labelledby="ledger-export-title" @click.stop>
+      <div class="ledger-export-header">
+        <div class="ledger-export-header-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <div>
+          <h3 id="ledger-export-title" class="ledger-export-title">导出账期净支出</h3>
+          <p class="ledger-export-subtitle">
+            月份：<strong x-text="selectedMonth"></strong>
+            &nbsp;·&nbsp;账号：<strong x-text="selectedEmails.size"></strong> 个
+          </p>
+        </div>
+      </div>
+
+      <div class="ledger-export-body">
+        <!-- 选项1：仅下载 Excel -->
+        <div class="ledger-option-card"
+             :class="{ selected: ledgerExportMode === 'excel_only' }"
+             @click="ledgerExportMode = 'excel_only'"
+             role="radio"
+             :aria-checked="ledgerExportMode === 'excel_only'">
+          <div class="ledger-option-radio">
+            <div class="ledger-option-radio-dot"></div>
+          </div>
+          <div class="ledger-option-icon icon-excel" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
+          <div class="ledger-option-content">
+            <div class="ledger-option-label">仅下载 Excel<span class="ledger-option-badge">默认</span></div>
+            <div class="ledger-option-desc">生成账期净支出 Excel 文件，完成后可直接下载到本地。不写入数据库。</div>
+          </div>
+        </div>
+
+        <!-- 选项2：仅写库 -->
+        <div class="ledger-option-card"
+             :class="{ selected: ledgerExportMode === 'db_only' }"
+             @click="ledgerExportMode = 'db_only'"
+             role="radio"
+             :aria-checked="ledgerExportMode === 'db_only'">
+          <div class="ledger-option-radio">
+            <div class="ledger-option-radio-dot"></div>
+          </div>
+          <div class="ledger-option-icon icon-db" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <div class="ledger-option-content">
+            <div class="ledger-option-label">仅写入数据库</div>
+            <div class="ledger-option-desc">将汇总数据和账单明细写入 MySQL 数据库。不生成 Excel 文件，无下载链接。</div>
+          </div>
+        </div>
+
+        <!-- 选项3：写库 + Excel -->
+        <div class="ledger-option-card"
+             :class="{ selected: ledgerExportMode === 'db_and_excel' }"
+             @click="ledgerExportMode = 'db_and_excel'"
+             role="radio"
+             :aria-checked="ledgerExportMode === 'db_and_excel'">
+          <div class="ledger-option-radio">
+            <div class="ledger-option-radio-dot"></div>
+          </div>
+          <div class="ledger-option-icon icon-both" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="ledger-option-content">
+            <div class="ledger-option-label">写库 + 下载 Excel</div>
+            <div class="ledger-option-desc">同时完成数据库写入并生成 Excel 文件。写库失败不影响 Excel 生成，二者独立执行。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ledger-export-footer">
+        <button class="btn btn-ghost btn-sm" @click="showLedgerExportModal = false">取消</button>
+        <button class="btn btn-ledger btn-sm" @click="startBillingLedgerExport(ledgerExportMode)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span>开始导出</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── 删除选中确认弹窗 ───────────────────────────────────────── -->
 <div class="delete-confirm-modal" x-show="showDeleteConfirm" x-cloak x-transition.opacity>
@@ -3077,35 +4583,35 @@
 
 <!-- ── 冲突确认弹窗 ───────────────────────────────────────────── -->
 <!-- 外层只做 x-show 开关，内层固定 display:flex 居中，Alpine 不干扰居中布局 -->
-<div x-show="showConflictModal" x-cloak style="position:fixed;inset:0;z-index:200;">
-  <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);"
+<div x-show="showConflictModal" x-cloak class="center-modal-root">
+  <div class="center-modal-backdrop"
        @click="showConflictModal=false">
-    <div class="card" style="max-width:520px;width:90%;padding:28px;max-height:80vh;display:flex;flex-direction:column;" @click.stop>
+    <div class="card conflict-modal-card" @click.stop>
       <!-- 标题 -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-shrink:0;">
-        <h3 style="margin:0;font-size:16px;">发现重复账号</h3>
-        <button style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;" @click="showConflictModal=false">
+      <div class="modal-head-row">
+        <h3 class="modal-title-sm">发现重复账号</h3>
+        <button class="icon-btn icon-btn-tight" @click="showConflictModal=false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <!-- 说明文字 -->
-      <p style="margin:0 0 10px;font-size:14px;color:var(--text);flex-shrink:0;">
+      <p class="text-body-md conflict-modal-intro">
         以下 <strong x-text="uploadConflicts.length"></strong> 个账号在账号库中已存在：
       </p>
       <!-- 邮箱列表（可滚动，最多显示约 8 行） -->
-      <div style="flex:1;overflow-y:auto;min-height:0;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:14px;max-height:220px;">
+      <div class="conflict-list-box">
         <template x-for="email in uploadConflicts" :key="email">
-          <div class="mono" style="padding:5px 2px;font-size:13px;color:var(--text);border-bottom:1px solid var(--border);" x-text="email"></div>
+          <div class="mono mono-sm text-body-sm conflict-list-item" x-text="email"></div>
         </template>
       </div>
       <!-- 说明 -->
-      <p style="margin:0 0 18px;font-size:13px;color:var(--muted);flex-shrink:0;">
+      <p class="modal-note conflict-modal-note">
         确认后将按邮箱更新这些账号的密码等信息；或选择仅保存新账号（跳过已存在的）。
       </p>
       <!-- 操作按钮 -->
-      <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;flex-shrink:0;">
+      <div class="conflict-modal-actions">
         <button class="btn btn-ghost btn-sm" @click="showConflictModal=false">取消</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--text);border-color:var(--border);"
+        <button class="btn btn-ghost btn-sm btn-ghost-neutral"
           @click="doSaveAccounts(false);showConflictModal=false">
           仅保存新账号（<span x-text="uploadNewCount"></span> 个）
         </button>
@@ -3119,19 +4625,19 @@
 </div>
 
 <!-- ── 格式说明浮层 ─────────────────────────────────────────── -->
-<div x-show="showFormatHelp" x-cloak style="position:fixed;inset:0;z-index:200;">
-  <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);" @click="showFormatHelp=false">
-    <div class="card" style="max-width:520px;width:90%;padding:28px;" @click.stop>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <h3 style="margin:0;font-size:16px;">CSV 格式说明</h3>
-        <button style="background:none;border:none;cursor:pointer;color:var(--muted);" @click="showFormatHelp=false">
+<div x-show="showFormatHelp" x-cloak class="center-modal-root">
+  <div class="center-modal-backdrop" @click="showFormatHelp=false">
+    <div class="card format-help-card" @click.stop>
+      <div class="modal-head-row modal-head-row-help">
+        <h3 class="modal-title-sm">CSV 格式说明</h3>
+        <button class="icon-btn" @click="showFormatHelp=false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <pre style="background:var(--bg);padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;border:1px solid var(--border);">email,imap_password,imap_host,imap_port,feishu_email
+      <pre class="pre-code-sample">email,imap_password,imap_host,imap_port,feishu_email
 cursor183@eclicktech.com.cn,S0oefdkzkUfTnlMY,imap.feishu.cn,993,owner@example.com
 cursor184@eclicktech.com.cn,AnotherPass,,,owner@example.com</pre>
-      <p style="margin:12px 0 0; font-size:13px; color:var(--muted);">
+      <p class="text-muted-sm format-help-note">
         • <strong>email</strong>、<strong>imap_password</strong>、<strong>feishu_email</strong> 必填<br/>
         • feishu_email 用于账单同步底表归属字段<br/>
         • imap_host 不填则用默认 <code>imap.feishu.cn</code><br/>
@@ -3159,6 +4665,7 @@ function app() {
     dbAccounts: [],
     accountDbStatus: {},   // { email: {status, failures} }
     selectedEmails: new Set(),
+    batchRangeMenuOpen: false,
     searchEmail: '',
     isDeletingSelected: false,
     showDeleteConfirm: false,
@@ -3221,6 +4728,8 @@ function app() {
     downloadToken: null,
     hasZip: false,
     runMode: 'default', // 'default' | 'billing_ledger'
+    showLedgerExportModal: false,
+    ledgerExportMode: 'excel_only', // 'excel_only' | 'db_only' | 'db_and_excel'
     retryingEmails: new Set(),
     retryResolvedEmails: new Set(),
     retryDownloads: {},
@@ -3335,6 +4844,14 @@ function app() {
 
     // ── 初始化 ──
     async init() {
+      const isWindows = /Windows|Win32|Win64|WOW64/i.test(navigator.userAgent || '') ||
+        (typeof navigator.platform === 'string' && navigator.platform.toLowerCase().startsWith('win'));
+      const isMac = /Macintosh|MacIntel|MacPPC|Mac68K/i.test(navigator.userAgent || '') ||
+        (typeof navigator.platform === 'string' && navigator.platform.toLowerCase().startsWith('mac'));
+      if (document.body) {
+        document.body.classList.toggle('is-windows', isWindows);
+        document.body.classList.toggle('is-macos', isMac);
+      }
       this.setDatePreset('30d');
       this.selectedMonth = new Date().toISOString().slice(0, 7);
       fetch('/api/status')
@@ -4695,9 +6212,7 @@ function app() {
       return opts;
     },
 
-    selectAccountBatchRange(e) {
-      const select = e?.target;
-      const id = select?.value;
+    selectAccountBatchRangeById(id) {
       if (!id) return;
       const opt = this.accountBatchRangeOptions().find(o => o.id === id);
       if (!opt) return;
@@ -4710,6 +6225,14 @@ function app() {
       } else {
         this.selectedEmails = new Set([...this.selectedEmails, ...emails]);
       }
+      this.batchRangeMenuOpen = false;
+    },
+
+    selectAccountBatchRange(e) {
+      const select = e?.target;
+      const id = select?.value;
+      if (!id) return;
+      this.selectAccountBatchRangeById(id);
       if (select) select.value = '';
     },
 
@@ -4805,7 +6328,7 @@ function app() {
       return '下载 ZIP';
     },
 
-    async startBillingLedgerExport() {
+    async startBillingLedgerExport(exportMode) {
       const selected = this.dbAccounts.filter(a => this.selectedEmails.has(a.email));
       if (!selected.length) return;
       if (!this.selectedMonth || !/^\d{4}-\d{2}$/.test(this.selectedMonth)) {
@@ -4813,6 +6336,7 @@ function app() {
         return;
       }
 
+      this.showLedgerExportModal = false;
       this.runMode = 'billing_ledger';
       this.runItems = {};
       selected.forEach(a => { this.runItems[a.email] = { phase: 'pending', msg: '' }; });
@@ -4846,6 +6370,7 @@ function app() {
           with_invoices: false,
           with_summary: false,
           with_raw: false,
+          ledger_export_mode: exportMode || 'excel_only',
         }),
       });
       if (!res.ok) {
@@ -5115,7 +6640,7 @@ function app() {
         if (d.run_mode) this.runMode = d.run_mode;
         this.globalPhaseMsg = '';
         const readyMsg = this.runMode === 'billing_ledger'
-          ? '账期净支出 Excel 已生成，可以下载'
+          ? (d.download_token ? '账期净支出 Excel 已生成，可以下载' : '账期净支出数据已写入数据库')
           : '文件已生成，可以下载';
         this.addLog('var(--success)', readyMsg);
         this._saveState();
