@@ -187,7 +187,7 @@ def load_settings() -> Settings:
         ledger_db_host=os.environ.get("LEDGER_DB_HOST", "172.30.11.103").strip(),
         ledger_db_port=_env_int("LEDGER_DB_PORT", 3306),
         ledger_db_user=os.environ.get("LEDGER_DB_USER", "aicoding_admin").strip(),
-        ledger_db_password=os.environ.get("LEDGER_DB_PASSWORD", "NXJ4dba7HpA1==JtDG#_"),
+        ledger_db_password=os.environ.get("LEDGER_DB_PASSWORD", "***"),
         ledger_db_name=os.environ.get("LEDGER_DB_NAME", "aicoding").strip(),
         ledger_db_pool_max_connections=_env_int("LEDGER_DB_POOL_MAX_CONNECTIONS", 8),
         ledger_db_pool_min_cached=_env_int("LEDGER_DB_POOL_MIN_CACHED", 1),
