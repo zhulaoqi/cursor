@@ -249,7 +249,7 @@ $envContent = @(
     "SPENDING_REFRESH_CRON=0 3 * * *",
     "SPENDING_REFRESH_LOCK_FILE=/tmp/cam_spending_refresh.lock",
     "SPENDING_REFRESH_ALERT_ENABLE=true",
-    "SPENDING_REFRESH_CONCURRENCY=$(Get-UserVal 'SPENDING_REFRESH_CONCURRENCY' '6')",
+    "SPENDING_REFRESH_CONCURRENCY=$(Get-UserVal 'SPENDING_REFRESH_CONCURRENCY' '4')",
     "",
     "# ─── 告警机器人（邮件接收人逗号分隔） ───",
     "ALERT_BOT_ENABLE=true",

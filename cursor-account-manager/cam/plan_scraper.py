@@ -22,11 +22,11 @@ log = get("plan")
 
 _PLAN_BROWSER_SEM = threading.Semaphore(max(1, SETTINGS.invoice_active_context_limit))
 
-# 消费页解析：缩短空转等待（原 12×1s 最坏约 12s/页，现约 2s/页）
-_SPENDING_POLL_MAX_ROUNDS = 5
-_SPENDING_POLL_INTERVAL_MS = 400
-_SPENDING_INIT_SETTLE_MS = 250
-_SPENDING_NETWORKIDLE_TIMEOUT_MS = 8000
+# 消费页解析：部分账号进入 spending 后主内容渲染慢于侧边导航，等待窗口不能过短。
+_SPENDING_POLL_MAX_ROUNDS = 16
+_SPENDING_POLL_INTERVAL_MS = 700
+_SPENDING_INIT_SETTLE_MS = 800
+_SPENDING_NETWORKIDLE_TIMEOUT_MS = 12000
 
 
 def _run_playwright_coroutine(coro) -> object:
@@ -428,6 +428,28 @@ def _compact_text(value: object, *, limit: int = 300) -> str:
     return text[:limit] + "..."
 
 
+def _looks_like_spending_shell_only(full_text: str) -> bool:
+    """判断是否只拿到了侧边导航/骨架文本（主消费区尚未稳定渲染）。"""
+    normalized = re.sub(r"\s+", " ", str(full_text or "")).strip()
+    if not normalized:
+        return True
+    low = normalized.lower()
+    has_nav = "spending" in low and (
+        "billing" in low or "members" in low or "settings" in low
+    )
+    has_core = bool(re.search(
+        r"current\s+plan|on[\s\-–—]*demand\s+spending|monthly\s+limit|"
+        r"当前\s*套餐|按需(?:支出|消费)|每月(?:额度)?限额",
+        normalized,
+        re.I,
+    ))
+    if has_core:
+        return False
+    if has_nav:
+        return True
+    return len(normalized) < 80
+
+
 def _spending_info_from_full_text(
     full_text: str,
     *,
@@ -516,12 +538,22 @@ async def _fetch_spending_panel_on_page(page, *, silent: bool) -> SpendingPanelI
             )
             if info is not None:
                 return info
+            if _looks_like_spending_shell_only(full_text):
+                # 批量并发时会偶发“仅导航先出现，主内容晚到”，补一次延后重抓。
+                await page.wait_for_timeout(1500)
+                retry_text = await _poll_spending_full_text(page)
+                info = _spending_info_from_full_text(
+                    retry_text, silent=silent, log_url=page.url, log_status=status
+                )
+                if info is not None:
+                    return info
+                full_text = retry_text
             snippet = _compact_text(full_text, limit=300)
             diagnostics.append({
                 "target_url": url,
                 "final_url": page.url,
                 "status": status,
-                "text_snippet": snippet,
+                "text_snippet": snippet or "<empty_text>",
             })
         except Exception as e:
             diagnostics.append({

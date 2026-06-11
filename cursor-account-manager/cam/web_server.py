@@ -1260,9 +1260,9 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
         ]
         scope = "web_bulk" if not requested else "web_partial"
         _spending_progress_start(total=len(work_emails), scope=scope)
-        results: list[dict[str, Any]] = []
-        on_demand_alert_open: list[tuple[str, str]] = []
-        on_demand_alert_hist: list[tuple[str, str]] = []
+        results_by_email: dict[str, dict[str, Any]] = {}
+        on_demand_alert_open_map: dict[str, tuple[str, str]] = {}
+        on_demand_alert_hist_map: dict[str, tuple[str, str]] = {}
         work_rows = [
             row
             for row in targets
@@ -1281,7 +1281,17 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
 
             def _on_result(item: SpendingPanelBatchItem) -> None:
                 with progress_lock:
-                    row_ok = not (item.error or item.info is None)
+                    row = row_by_email.get(_normalize_email(item.email), {})
+                    row_out, row_ok, open_entry, hist_entry = _spending_row_result_from_batch_item(
+                        store, row, item,
+                    )
+                    email_key = _normalize_email(str(row_out.get("email") or item.email or ""))
+                    if email_key:
+                        results_by_email[email_key] = row_out
+                    if open_entry:
+                        on_demand_alert_open_map[_normalize_email(open_entry[0])] = open_entry
+                    if hist_entry:
+                        on_demand_alert_hist_map[_normalize_email(hist_entry[0])] = hist_entry
                     _spending_progress_after_email(ok=row_ok)
 
             batch_items = fetch_spending_panels_batch(
@@ -1290,20 +1300,32 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
                 on_account=_on_account,
                 on_result=_on_result,
             )
+            # 兜底：理论上 on_result 会覆盖全部账号；若某项回调缺失，补做一次持久化。
             for item in batch_items:
-                row = row_by_email.get(_normalize_email(item.email), {})
+                email_key = _normalize_email(item.email)
+                if email_key and email_key in results_by_email:
+                    continue
+                row = row_by_email.get(email_key, {})
                 row_out, row_ok, open_entry, hist_entry = _spending_row_result_from_batch_item(
                     store, row, item,
                 )
-                with progress_lock:
-                    if open_entry:
-                        on_demand_alert_open.append(open_entry)
-                    if hist_entry:
-                        on_demand_alert_hist.append(hist_entry)
-                    results.append(row_out)
-            on_demand_alert_open.sort(key=lambda x: x[0].lower())
-            on_demand_alert_hist.sort(key=lambda x: x[0].lower())
-            results.sort(key=lambda r: str(r.get("email") or "").lower())
+                if email_key:
+                    results_by_email[email_key] = row_out
+                if open_entry:
+                    on_demand_alert_open_map[_normalize_email(open_entry[0])] = open_entry
+                if hist_entry:
+                    on_demand_alert_hist_map[_normalize_email(hist_entry[0])] = hist_entry
+                _spending_progress_after_email(ok=row_ok)
+
+            on_demand_alert_open = sorted(
+                on_demand_alert_open_map.values(), key=lambda x: x[0].lower()
+            )
+            on_demand_alert_hist = sorted(
+                on_demand_alert_hist_map.values(), key=lambda x: x[0].lower()
+            )
+            results = sorted(
+                results_by_email.values(), key=lambda r: str(r.get("email") or "").lower()
+            )
             if on_demand_alert_open or on_demand_alert_hist:
                 parts: list[str] = []
                 if on_demand_alert_open:
