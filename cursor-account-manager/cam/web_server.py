@@ -1279,10 +1279,16 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
                 with progress_lock:
                     _spending_progress_before_email(email, index=index, total=total)
 
+            def _on_result(item: SpendingPanelBatchItem) -> None:
+                with progress_lock:
+                    row_ok = not (item.error or item.info is None)
+                    _spending_progress_after_email(ok=row_ok)
+
             batch_items = fetch_spending_panels_batch(
                 accounts,
                 silent=False,
                 on_account=_on_account,
+                on_result=_on_result,
             )
             for item in batch_items:
                 row = row_by_email.get(_normalize_email(item.email), {})
@@ -1295,7 +1301,6 @@ def _run_refresh_account_spending_locked(req: RefreshAccountPlanRequest) -> dict
                     if hist_entry:
                         on_demand_alert_hist.append(hist_entry)
                     results.append(row_out)
-                    _spending_progress_after_email(ok=row_ok)
             on_demand_alert_open.sort(key=lambda x: x[0].lower())
             on_demand_alert_hist.sort(key=lambda x: x[0].lower())
             results.sort(key=lambda r: str(r.get("email") or "").lower())
@@ -1527,6 +1532,24 @@ async def sync_run_detail(run_id: str):
         "stages": store.list_stage_logs(run_id),
         "accounts": store.list_account_logs(run_id),
     }
+
+
+@app.delete("/api/sync/run/{run_id}")
+async def sync_run_delete(run_id: str):
+    """删除单条同步日志（含阶段/账号明细）。"""
+    with _task_lock:
+        running_same = any(
+            str(t.get("run_id") or "") == run_id and str(t.get("status") or "") == "running"
+            for t in _sync_runtime.values()
+        )
+    if running_same:
+        raise HTTPException(status_code=409, detail="该任务仍在运行，无法删除")
+
+    store = get_default_sync_log_store()
+    deleted = store.delete_run(run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="run_id 不存在")
+    return {"ok": True, "run_id": run_id}
 
 
 @app.post("/api/sync/run")

@@ -331,6 +331,20 @@ class SyncLogStore:
                 ).fetchall()
             return [dict(r) for r in rows]
 
+    def delete_run(self, run_id: str) -> bool:
+        """删除单次 run 及其阶段/账号明细日志。"""
+        with self._conn() as conn:
+            conn.execute("BEGIN")
+            try:
+                conn.execute("DELETE FROM sync_job_stage_log WHERE run_id = ?", (run_id,))
+                conn.execute("DELETE FROM sync_job_account_log WHERE run_id = ?", (run_id,))
+                cur = conn.execute("DELETE FROM sync_job_run WHERE run_id = ?", (run_id,))
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            return int(cur.rowcount or 0) > 0
+
 
 _default_sync_log_store: SyncLogStore | None = None
 

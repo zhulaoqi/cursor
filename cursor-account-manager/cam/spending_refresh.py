@@ -5,13 +5,14 @@ from __future__ import annotations
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 from .alerting import send_alert
 from .config import SETTINGS
 from .models import Account
 from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
 from .logger import get
-from .sync_log_store import get_default_sync_log_store
+from .sync_log_store import SyncLogStore, get_default_sync_log_store
 from .token_store import TokenStore, get_default_store
 
 log = get("spending")
@@ -55,11 +56,11 @@ def _apply_batch_item(
     store: TokenStore,
     row: dict,
     item: SpendingPanelBatchItem,
-) -> tuple[bool, bool, bool]:
-    """持久化单条批量结果。返回 (ok, on_demand_open, on_demand_historical)。"""
+) -> tuple[bool, bool, bool, str, str]:
+    """持久化单条批量结果。返回 (ok, on_demand_open, on_demand_historical, email, error)。"""
     email = _normalize_email(item.email or str(row.get("email") or ""))
     if not email:
-        return False, False, False
+        return False, False, False, "", "empty_email"
     if item.error or item.info is None:
         err = item.error or "消费页解析失败"
         store.update_account_spending_snapshot(
@@ -69,16 +70,32 @@ def _apply_batch_item(
             on_demand_historical=None,
             spending_error=err,
         )
-        return False, False, False
+        return False, False, False, email, err
 
     info = item.info
     persist_spending_panel(store, email, info)
     on_open = _on_demand_open_flag(info.on_demand_enabled)
     on_hist = (not on_open) and bool(info.on_demand_historical)
-    return True, on_open, on_hist
+    return True, on_open, on_hist, email, ""
 
 
-def _run_spending_refresh_core() -> dict[str, int]:
+def _summarize_errors(errors: list[str]) -> str:
+    if not errors:
+        return ""
+    from collections import Counter
+
+    counter = Counter(err.strip() for err in errors if str(err).strip())
+    if not counter:
+        return ""
+    parts = [f"{msg} x{cnt}" for msg, cnt in counter.most_common(5)]
+    return "；".join(parts)
+
+
+def _run_spending_refresh_core(
+    *,
+    run_id: Optional[str] = None,
+    log_store: Optional[SyncLogStore] = None,
+) -> dict[str, Any]:
     store = get_default_store()
     rows = store.list_accounts()
     accounts: list[Account] = []
@@ -98,12 +115,23 @@ def _run_spending_refresh_core() -> dict[str, int]:
             )
         )
 
+    if run_id and log_store:
+        log_store.add_stage(
+            run_id=run_id,
+            stage="fetch",
+            status="start",
+            message=f"spending_refresh accounts={len(accounts)}",
+        )
+
     batch_items = fetch_spending_panels_batch(accounts, silent=True)
 
     ok = failed = on_demand_open = on_demand_historical = 0
+    error_messages: list[str] = []
     for item in batch_items:
+        started_at = int(time.time())
         row = row_by_email.get(_normalize_email(item.email), {})
-        row_ok, on_open, on_hist = _apply_batch_item(store, row, item)
+        row_ok, on_open, on_hist, email, error_message = _apply_batch_item(store, row, item)
+        ended_at = int(time.time())
         if row_ok:
             ok += 1
             if on_open:
@@ -112,6 +140,41 @@ def _run_spending_refresh_core() -> dict[str, int]:
                 on_demand_historical += 1
         else:
             failed += 1
+            if error_message:
+                error_messages.append(error_message)
+
+        if run_id and log_store and email:
+            log_store.add_account_log(
+                run_id=run_id,
+                account_email=email,
+                account_source=str(row.get("source") or "db"),
+                is_new_account=False,
+                status="success" if row_ok else "failed",
+                started_at=started_at,
+                ended_at=ended_at,
+                fetch_rows=0,
+                load_rows=0,
+                error_message=error_message,
+            )
+
+    error_summary = _summarize_errors(error_messages)
+    if run_id and log_store:
+        log_store.add_stage(
+            run_id=run_id,
+            stage="fetch",
+            status="success" if failed == 0 else "failed",
+            message=(
+                f"ok={ok} failed={failed} "
+                f"on_demand_open={on_demand_open} on_demand_historical={on_demand_historical}"
+                + (f" errors={error_summary}" if error_summary else "")
+            )[:2000],
+        )
+        log_store.add_stage(
+            run_id=run_id,
+            stage="finalize",
+            status="success",
+            message=f"status={'success' if failed == 0 else ('partial_failed' if ok > 0 else 'failed')}",
+        )
 
     return {
         "ok": ok,
@@ -119,10 +182,11 @@ def _run_spending_refresh_core() -> dict[str, int]:
         "total": ok + failed,
         "on_demand_open": on_demand_open,
         "on_demand_historical": on_demand_historical,
+        "error_summary": error_summary,
     }
 
 
-def run_daily_spending_refresh_silent() -> dict[str, int]:
+def run_daily_spending_refresh_silent() -> dict[str, Any]:
     """遍历账号库刷新消费页（无飞书、仅写库）。供兼容调用。"""
     return _run_spending_refresh_core()
 
@@ -139,7 +203,7 @@ def run_daily_spending_refresh_scheduled(
     *,
     trigger_type: str = "spending_scheduler",
     trigger_date: str | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """定时调度：刷新全库套餐档位与按需开关，写库并可选发送飞书汇总。"""
     now = datetime.now(BJ_TZ)
     date_key = trigger_date or now.strftime("%Y-%m-%d")
@@ -156,13 +220,21 @@ def run_daily_spending_refresh_scheduled(
         account_snapshot_total=account_total,
         new_account_count=0,
     )
+    log_store.add_stage(run_id=run_id, stage="init", status="start")
+    log_store.add_stage(
+        run_id=run_id,
+        stage="init",
+        status="success",
+        message=f"account_total={account_total}",
+    )
 
     try:
-        result = _run_spending_refresh_core()
+        result = _run_spending_refresh_core(run_id=run_id, log_store=log_store)
         ok = int(result.get("ok") or 0)
         failed = int(result.get("failed") or 0)
         on_open = int(result.get("on_demand_open") or 0)
         on_hist = int(result.get("on_demand_historical") or 0)
+        err_summary = str(result.get("error_summary") or "")
         if failed == 0:
             status = "success"
         elif ok > 0:
@@ -177,7 +249,7 @@ def run_daily_spending_refresh_scheduled(
             account_failed=failed,
             event_total=0,
             ods_rows=0,
-            error_summary="" if failed == 0 else f"failed={failed}",
+            error_summary="" if failed == 0 else (err_summary or f"failed={failed}"),
         )
         log.info(
             "消费页定时刷新完成 date=%s ok=%s failed=%s on_demand_open=%s on_demand_hist=%s",

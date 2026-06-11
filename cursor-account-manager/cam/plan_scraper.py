@@ -460,10 +460,15 @@ def _spending_info_from_full_text(
                 + describe_on_demand_parse_for_log(full_text)
             )
         log.info(msg)
+    parse_error = ""
+    if od.currently_enabled is None:
+        parse_error = "未解析到 Monthly Limit 开关状态"
+        if od.spend_amount is not None:
+            parse_error += f"（On-Demand Spending=${od.spend_amount}）"
     return SpendingPanelInfo(
         plan_name=plan_name,
         on_demand_enabled=od.currently_enabled,
-        error="",
+        error=parse_error,
         plan_snapshot=plan_snapshot_from_spending_full_text(full_text),
         on_demand_historical=od.had_historical_spend,
     )
@@ -653,6 +658,7 @@ async def _scrape_spending_panels_batch_async(
     silent: bool,
     max_parallel: int,
     on_account: Optional[Callable[[str, int, int], None]] = None,
+    on_result: Optional[Callable[[SpendingPanelBatchItem], None]] = None,
 ) -> list[SpendingPanelBatchItem]:
     """单 Chromium + 多 Context 并发解析消费页。"""
     import asyncio
@@ -691,11 +697,19 @@ async def _scrape_spending_panels_batch_async(
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         try:
-            tasks = [
-                asyncio.create_task(_one(acc, browser, idx))
-                for idx, acc in enumerate(accounts)
-            ]
-            gathered = await asyncio.gather(*tasks, return_exceptions=True)
+            tasks = [asyncio.create_task(_one(acc, browser, idx)) for idx, acc in enumerate(accounts)]
+            gathered: list[SpendingPanelBatchItem | BaseException] = []
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    item = await fut
+                    gathered.append(item)
+                    if isinstance(item, SpendingPanelBatchItem) and on_result:
+                        try:
+                            on_result(item)
+                        except Exception:
+                            pass
+                except BaseException as e:
+                    gathered.append(e)
         finally:
             await browser.close()
 
@@ -715,6 +729,7 @@ def fetch_spending_panels_batch(
     manager: Optional["TokenManager"] = None,
     silent: bool = False,
     on_account: Optional[Callable[[str, int, int], None]] = None,
+    on_result: Optional[Callable[[SpendingPanelBatchItem], None]] = None,
 ) -> list[SpendingPanelBatchItem]:
     """批量解析消费页（单 Chromium，并发受 SPENDING_REFRESH / INVOICE_ACTIVE 限制）。"""
     from .token_manager import get_default_manager
@@ -736,6 +751,7 @@ def fetch_spending_panels_batch(
             silent=silent,
             max_parallel=max_parallel,
             on_account=on_account,
+            on_result=on_result,
         )
 
     with _PLAN_BROWSER_SEM:
