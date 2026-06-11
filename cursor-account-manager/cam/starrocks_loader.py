@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional, TypeVar
 
 import pymysql
 from dbutils.pooled_db import PooledDB
@@ -18,6 +18,17 @@ from .logger import get
 
 _JDBC_RE = re.compile(r"^jdbc:mysql://(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db>[^?]+)")
 _JOB_ID_RE = re.compile(r"job_id\s*=\s*(\d+)")
+_RETRYABLE_DB_ERROR_CODES = {2006, 2013, 2014, 1205, 1213}
+_RETRYABLE_DB_MESSAGE_KEYWORDS = (
+    "lost connection to mysql server during query",
+    "server has gone away",
+    "connection was killed",
+    "timed out",
+    "read timed out",
+    "broken pipe",
+    "connection reset by peer",
+)
+_T = TypeVar("_T")
 log = get("starrocks")
 
 # ── BI 双写备用库（硬编码，停用双跑时改 False 或删除本段与 DualStarRocksLoader）──
@@ -26,7 +37,7 @@ BI_SYNC_BACKUP_JDBC_URL = (
     "jdbc:mysql://fe-c-211cbbee7a09d77e-internal.starrocks.aliyuncs.com:9030/dataeye_customer"
 )
 BI_SYNC_BACKUP_USERNAME = "pro"
-BI_SYNC_BACKUP_PASSWORD = "34x1Wx#1x36F(G"
+BI_SYNC_BACKUP_PASSWORD = "***"
 
 
 def _to_decimal(value: object) -> Optional[Decimal]:
@@ -77,6 +88,19 @@ def _parse_jdbc_url(jdbc_url: str, *, label: str) -> tuple[str, int, str]:
     return m.group("host"), int(m.group("port") or 9030), m.group("db")
 
 
+def _is_retryable_db_error(err: BaseException) -> bool:
+    if isinstance(err, (pymysql.err.OperationalError, pymysql.err.InterfaceError)):
+        code = None
+        if getattr(err, "args", None):
+            first = err.args[0]
+            if isinstance(first, int):
+                code = first
+        if code in _RETRYABLE_DB_ERROR_CODES:
+            return True
+    msg = str(err).strip().lower()
+    return any(k in msg for k in _RETRYABLE_DB_MESSAGE_KEYWORDS)
+
+
 class StarRocksLoader:
     ODS_TABLE = "ods_cursor_usage_events_di"
 
@@ -114,8 +138,13 @@ class StarRocksLoader:
             self.pool_min_cached = self.pool_max_connections
         self.pool_blocking = bool(SETTINGS.bi_sync_db_pool_blocking)
         self.pool_ping = max(0, int(SETTINGS.bi_sync_db_pool_ping or 0))
+        self.pool_max_usage = max(0, int(SETTINGS.bi_sync_db_pool_max_usage or 0))
         self.connect_retry_times = max(1, int(SETTINGS.bi_sync_db_connect_retry_times or 3))
         self.connect_retry_backoff_sec = max(0, int(SETTINGS.bi_sync_db_connect_retry_backoff_sec or 2))
+        self.execute_retry_times = max(1, int(SETTINGS.bi_sync_db_execute_retry_times or 3))
+        self.execute_retry_backoff_sec = max(
+            0, int(SETTINGS.bi_sync_db_execute_retry_backoff_sec or 2)
+        )
         self._dynamic_partition_policy_checked: set[str] = set()
         self._pool = self._create_pool()
         log.info(
@@ -123,7 +152,8 @@ class StarRocksLoader:
             f"host={self.host} port={self.port} db={self.db} "
             f"min_cached={self.pool_min_cached} max_cached={self.pool_max_cached} "
             f"max_connections={self.pool_max_connections} blocking={self.pool_blocking} "
-            f"ping={self.pool_ping} connect_timeout={self.connect_timeout_sec} "
+            f"ping={self.pool_ping} max_usage={self.pool_max_usage} "
+            f"connect_timeout={self.connect_timeout_sec} "
             f"read_timeout={self.read_timeout_sec} write_timeout={self.write_timeout_sec}"
         )
 
@@ -135,6 +165,7 @@ class StarRocksLoader:
             maxconnections=self.pool_max_connections,
             blocking=self.pool_blocking,
             ping=self.pool_ping,
+            maxusage=self.pool_max_usage,
             host=self.host,
             port=self.port,
             user=self.username,
@@ -180,52 +211,58 @@ class StarRocksLoader:
             conn.close()
 
     def check_connection(self) -> None:
-        with self._conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1")
+        def _run() -> None:
+            with self._conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
+
+        self._run_db_operation_with_retry(op_name="check_connection", fn=_run)
 
     def ensure_tables(self) -> None:
-        with self._conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.db}.{self.ODS_TABLE} (
-                    dt                      DATE            NOT NULL,
-                    account_email           VARCHAR(320)    NOT NULL,
-                    event_time              DATETIME        NOT NULL,
-                    run_id                  VARCHAR(128)    NOT NULL,
-                    feishu_email            VARCHAR(320)    NULL,
-                    plan_amount             DECIMAL(10,2)   NULL,
-                    kind                    VARCHAR(128)    NULL,
-                    model_name              VARCHAR(65533)  NULL,
-                    max_mode                VARCHAR(64)     NULL,
-                    input_tokens_wo_cache_write BIGINT      NULL,
-                    input_tokens_w_cache_write  BIGINT      NULL,
-                    output_tokens           BIGINT          NULL,
-                    total_tokens            BIGINT          NULL,
-                    cost                    VARCHAR(128)    NULL,
-                    raw_event_json          JSON            NULL,
-                    ingest_time             DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
+        def _run() -> None:
+            with self._conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.db}.{self.ODS_TABLE} (
+                        dt                      DATE            NOT NULL,
+                        account_email           VARCHAR(320)    NOT NULL,
+                        event_time              DATETIME        NOT NULL,
+                        run_id                  VARCHAR(128)    NOT NULL,
+                        feishu_email            VARCHAR(320)    NULL,
+                        plan_amount             DECIMAL(10,2)   NULL,
+                        kind                    VARCHAR(128)    NULL,
+                        model_name              VARCHAR(65533)  NULL,
+                        max_mode                VARCHAR(64)     NULL,
+                        input_tokens_wo_cache_write BIGINT      NULL,
+                        input_tokens_w_cache_write  BIGINT      NULL,
+                        output_tokens           BIGINT          NULL,
+                        total_tokens            BIGINT          NULL,
+                        cost                    VARCHAR(128)    NULL,
+                        raw_event_json          JSON            NULL,
+                        ingest_time             DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    ENGINE=OLAP
+                    DUPLICATE KEY(dt, account_email, event_time)
+                    PARTITION BY RANGE(dt) ()
+                    DISTRIBUTED BY HASH(account_email) BUCKETS 16
+                    PROPERTIES (
+                        "dynamic_partition.enable" = "true",
+                        "dynamic_partition.time_unit" = "DAY",
+                        "dynamic_partition.start" = "-90",
+                        "dynamic_partition.end" = "7",
+                        "dynamic_partition.create_history_partition" = "true",
+                        "dynamic_partition.prefix" = "p",
+                        "dynamic_partition.buckets" = "16",
+                        "replication_num" = "2",
+                        "in_memory" = "false",
+                        "enable_persistent_index" = "false",
+                        "replicated_storage" = "true",
+                        "storage_medium" = "SSD",
+                        "compression" = "LZ4"
+                    )
+                    """
                 )
-                ENGINE=OLAP
-                DUPLICATE KEY(dt, account_email, event_time)
-                PARTITION BY RANGE(dt) ()
-                DISTRIBUTED BY HASH(account_email) BUCKETS 16
-                PROPERTIES (
-                    "dynamic_partition.enable" = "true",
-                    "dynamic_partition.time_unit" = "DAY",
-                    "dynamic_partition.start" = "-90",
-                    "dynamic_partition.end" = "7",
-                    "dynamic_partition.create_history_partition" = "true",
-                    "dynamic_partition.prefix" = "p",
-                    "dynamic_partition.buckets" = "16",
-                    "replication_num" = "2",
-                    "in_memory" = "false",
-                    "enable_persistent_index" = "false",
-                    "replicated_storage" = "true",
-                    "storage_medium" = "SSD",
-                    "compression" = "LZ4"
-                )
-                """
-            )
+
+        self._run_db_operation_with_retry(op_name="ensure_tables", fn=_run)
 
     def _build_tracking_error_message(self, conn: pymysql.connections.Connection, err: Exception) -> str:
         msg = str(err)
@@ -385,8 +422,36 @@ class StarRocksLoader:
         在任务拉取前完成 ODS 分区就绪检查。
         如果目标分区不可用，直接抛错，阻断后续拉取/写入。
         """
-        with self._conn() as conn:
-            self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
+        def _run() -> None:
+            with self._conn() as conn:
+                self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
+
+        self._run_db_operation_with_retry(op_name="ensure_biz_date_partitions_ready", fn=_run)
+
+    def _run_db_operation_with_retry(self, *, op_name: str, fn: Callable[[], _T]) -> _T:
+        last_err: Optional[BaseException] = None
+        for attempt in range(1, self.execute_retry_times + 1):
+            try:
+                return fn()
+            except BaseException as e:
+                last_err = e
+                if attempt >= self.execute_retry_times or not _is_retryable_db_error(e):
+                    raise
+                sleep_sec = self.execute_retry_backoff_sec * attempt
+                log.warning(
+                    "StarRocks SQL 执行失败，准备重试 "
+                    f"op={op_name} host={self.host} db={self.db} "
+                    f"attempt={attempt}/{self.execute_retry_times} sleep_sec={sleep_sec} "
+                    f"error={type(e).__name__}: {e}"
+                )
+                if sleep_sec > 0:
+                    time.sleep(sleep_sec)
+        raise RuntimeError(
+            "StarRocks SQL 执行重试后仍失败 "
+            f"op={op_name} host={self.host} db={self.db} "
+            f"retry_times={self.execute_retry_times} "
+            f"error={type(last_err).__name__}: {last_err}"
+        )
 
     def _normalize_ods_row(self, row: dict) -> dict:
         # 字符串字段保持原样（不 trim、不截断、不改写）；仅对非字符串做 str() 兜底。
@@ -430,34 +495,37 @@ class StarRocksLoader:
         return row
 
     def replace_ods_rows(self, *, biz_date: str, rows: list[dict]) -> int:
-        with self._conn() as conn, conn.cursor() as cur:
-            self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
-            cur.execute(
-                f"DELETE FROM {self.db}.{self.ODS_TABLE} WHERE dt = %s",
-                (biz_date,),
-            )
-            if not rows:
-                return 0
-            sql = (
-                f"INSERT INTO {self.db}.{self.ODS_TABLE} ("
-                "dt, run_id, account_email, event_time, "
-                "feishu_email, plan_amount, "
-                "kind, model_name, max_mode, "
-                "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
-                "output_tokens, total_tokens, cost, raw_event_json"
-                ") VALUES ("
-                "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
-                "%(feishu_email)s, %(plan_amount)s, "
-                "%(kind)s, %(model_name)s, %(max_mode)s, "
-                "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
-                "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
-                ")"
-            )
-            try:
-                cur.executemany(sql, rows)
-            except Exception as e:
-                raise RuntimeError(self._build_tracking_error_message(conn, e)) from e
-            return len(rows)
+        def _run() -> int:
+            with self._conn() as conn, conn.cursor() as cur:
+                self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
+                cur.execute(
+                    f"DELETE FROM {self.db}.{self.ODS_TABLE} WHERE dt = %s",
+                    (biz_date,),
+                )
+                if not rows:
+                    return 0
+                sql = (
+                    f"INSERT INTO {self.db}.{self.ODS_TABLE} ("
+                    "dt, run_id, account_email, event_time, "
+                    "feishu_email, plan_amount, "
+                    "kind, model_name, max_mode, "
+                    "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
+                    "output_tokens, total_tokens, cost, raw_event_json"
+                    ") VALUES ("
+                    "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
+                    "%(feishu_email)s, %(plan_amount)s, "
+                    "%(kind)s, %(model_name)s, %(max_mode)s, "
+                    "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
+                    "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
+                    ")"
+                )
+                try:
+                    cur.executemany(sql, rows)
+                except Exception as e:
+                    raise RuntimeError(self._build_tracking_error_message(conn, e)) from e
+                return len(rows)
+
+        return self._run_db_operation_with_retry(op_name="replace_ods_rows", fn=_run)
 
     def replace_ods_rows_for_account(
         self,
@@ -470,35 +538,38 @@ class StarRocksLoader:
         按账号+日期覆盖写入 ODS。
         语义：仅清理该账号该日期历史数据，然后写入新数据。
         """
-        with self._conn() as conn, conn.cursor() as cur:
-            self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
-            cur.execute(
-                f"DELETE FROM {self.db}.{self.ODS_TABLE} WHERE dt = %s AND account_email = %s",
-                (biz_date, account_email),
-            )
-            if not rows:
-                return 0
-            normalized_rows = [self._normalize_ods_row(dict(r)) for r in rows]
-            sql = (
-                f"INSERT INTO {self.db}.{self.ODS_TABLE} ("
-                "dt, run_id, account_email, event_time, "
-                "feishu_email, plan_amount, "
-                "kind, model_name, max_mode, "
-                "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
-                "output_tokens, total_tokens, cost, raw_event_json"
-                ") VALUES ("
-                "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
-                "%(feishu_email)s, %(plan_amount)s, "
-                "%(kind)s, %(model_name)s, %(max_mode)s, "
-                "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
-                "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
-                ")"
-            )
-            try:
-                cur.executemany(sql, normalized_rows)
-            except Exception as e:
-                raise RuntimeError(self._build_tracking_error_message(conn, e)) from e
-            return len(normalized_rows)
+        def _run() -> int:
+            with self._conn() as conn, conn.cursor() as cur:
+                self._ensure_date_partition(conn=conn, table_name=self.ODS_TABLE, biz_date=biz_date)
+                cur.execute(
+                    f"DELETE FROM {self.db}.{self.ODS_TABLE} WHERE dt = %s AND account_email = %s",
+                    (biz_date, account_email),
+                )
+                if not rows:
+                    return 0
+                normalized_rows = [self._normalize_ods_row(dict(r)) for r in rows]
+                sql = (
+                    f"INSERT INTO {self.db}.{self.ODS_TABLE} ("
+                    "dt, run_id, account_email, event_time, "
+                    "feishu_email, plan_amount, "
+                    "kind, model_name, max_mode, "
+                    "input_tokens_wo_cache_write, input_tokens_w_cache_write, "
+                    "output_tokens, total_tokens, cost, raw_event_json"
+                    ") VALUES ("
+                    "%(dt)s, %(run_id)s, %(account_email)s, %(event_time)s, "
+                    "%(feishu_email)s, %(plan_amount)s, "
+                    "%(kind)s, %(model_name)s, %(max_mode)s, "
+                    "%(input_tokens_wo_cache_write)s, %(input_tokens_w_cache_write)s, "
+                    "%(output_tokens)s, %(total_tokens)s, %(cost)s, %(raw_event_json)s"
+                    ")"
+                )
+                try:
+                    cur.executemany(sql, normalized_rows)
+                except Exception as e:
+                    raise RuntimeError(self._build_tracking_error_message(conn, e)) from e
+                return len(normalized_rows)
+
+        return self._run_db_operation_with_retry(op_name="replace_ods_rows_for_account", fn=_run)
 
     def normalize_decimal_fields(self, row: dict) -> dict:
         return self._normalize_ods_row(row)

@@ -84,8 +84,11 @@ class Settings:
     bi_sync_db_pool_max_connections: int
     bi_sync_db_pool_blocking: bool
     bi_sync_db_pool_ping: int
+    bi_sync_db_pool_max_usage: int
     bi_sync_db_connect_retry_times: int
     bi_sync_db_connect_retry_backoff_sec: int
+    bi_sync_db_execute_retry_times: int
+    bi_sync_db_execute_retry_backoff_sec: int
     bi_sync_biz_tz: str
     bi_sync_cron: str
     bi_sync_lock_file: str
@@ -156,9 +159,12 @@ def load_settings() -> Settings:
         bi_sync_db_pool_max_cached=_env_int("BI_SYNC_DB_POOL_MAX_CACHED", 4),
         bi_sync_db_pool_max_connections=_env_int("BI_SYNC_DB_POOL_MAX_CONNECTIONS", 8),
         bi_sync_db_pool_blocking=_env_bool("BI_SYNC_DB_POOL_BLOCKING", True),
-        bi_sync_db_pool_ping=_env_int("BI_SYNC_DB_POOL_PING", 1),
+        bi_sync_db_pool_ping=_env_int("BI_SYNC_DB_POOL_PING", 7),
+        bi_sync_db_pool_max_usage=_env_int("BI_SYNC_DB_POOL_MAX_USAGE", 200),
         bi_sync_db_connect_retry_times=_env_int("BI_SYNC_DB_CONNECT_RETRY_TIMES", 3),
         bi_sync_db_connect_retry_backoff_sec=_env_int("BI_SYNC_DB_CONNECT_RETRY_BACKOFF_SEC", 2),
+        bi_sync_db_execute_retry_times=_env_int("BI_SYNC_DB_EXECUTE_RETRY_TIMES", 3),
+        bi_sync_db_execute_retry_backoff_sec=_env_int("BI_SYNC_DB_EXECUTE_RETRY_BACKOFF_SEC", 2),
         bi_sync_biz_tz=os.environ.get("BI_SYNC_BIZ_TZ", "Asia/Shanghai").strip() or "Asia/Shanghai",
         bi_sync_cron=os.environ.get("BI_SYNC_CRON", "30 1 * * *").strip() or "30 1 * * *",
         bi_sync_lock_file=os.environ.get("BI_SYNC_LOCK_FILE", "/tmp/cam_bi_sync.lock").strip() or "/tmp/cam_bi_sync.lock",
