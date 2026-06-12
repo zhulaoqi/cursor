@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -10,7 +11,12 @@ from typing import Any, Optional
 from .alerting import send_alert
 from .config import SETTINGS
 from .models import Account
-from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
+from .plan_scraper import (
+    PlanInfo,
+    SpendingPanelBatchItem,
+    SpendingPanelInfo,
+    fetch_spending_panels_batch,
+)
 from .logger import get
 from .sync_log_store import SyncLogStore, get_default_sync_log_store
 from .token_store import TokenStore, get_default_store
@@ -52,6 +58,47 @@ def persist_spending_panel(store: TokenStore, email: str, info) -> None:
         )
 
 
+def materialize_spending_info_from_error(error_message: str) -> Optional[SpendingPanelInfo]:
+    """将可识别的消费页解析异常转为业务结果（不计失败）。"""
+    err = (error_message or "").strip()
+    if not err:
+        return None
+    low = err.lower()
+    # 登录态缺失/无 token 属于真实失败，不能降级。
+    if "未登录" in err or "workoscursorsessiontoken 为空" in low:
+        return None
+    if "消费页解析失败" not in err:
+        return None
+
+    # 明确未开通付费套餐：按业务结果处理（成功 + not_enabled）。
+    if re.search(
+        r"upgrade\s+to\s+pro|requires\s+a\s+paid\s+plan|(?:^|\s)free(?:\s|$)|"
+        r"升级\s*到\s*pro|需要付费套餐|未开通付费套餐",
+        err,
+        re.I,
+    ):
+        return SpendingPanelInfo(
+            plan_name="Free",
+            on_demand_enabled=None,
+            error="当前账号未开通付费套餐（Free），消费页无 Monthly Limit 开关",
+            plan_snapshot=PlanInfo(status="not_enabled", amount=None, error=""),
+            on_demand_historical=False,
+        )
+
+    # 页面已打开（HTTP 200 + spending URL）但未命中 Monthly Limit，按“未知”落库，不计失败。
+    has_spending_path = "/dashboard/spending" in low
+    has_status_200 = "status=200" in low
+    if has_spending_path and has_status_200:
+        return SpendingPanelInfo(
+            plan_name="",
+            on_demand_enabled=None,
+            error="消费页已打开，但未解析到 Monthly Limit 开关状态",
+            plan_snapshot=None,
+            on_demand_historical=False,
+        )
+    return None
+
+
 def _apply_batch_item(
     store: TokenStore,
     row: dict,
@@ -63,6 +110,12 @@ def _apply_batch_item(
         return False, False, False, "", "empty_email"
     if item.error or item.info is None:
         err = item.error or "消费页解析失败"
+        inferred_info = materialize_spending_info_from_error(err)
+        if inferred_info is not None:
+            persist_spending_panel(store, email, inferred_info)
+            on_open = _on_demand_open_flag(inferred_info.on_demand_enabled)
+            on_hist = (not on_open) and bool(inferred_info.on_demand_historical)
+            return True, on_open, on_hist, email, ""
         store.update_account_spending_snapshot(
             email=email,
             plan_name="",
@@ -276,6 +329,13 @@ def run_daily_spending_refresh_scheduled(
                 ),
                 level=level,
             )
+        result = dict(result)
+        result.update({
+            "run_id": run_id,
+            "biz_date": date_key,
+            "trigger_type": trigger_type,
+            "status": status,
+        })
         return result
     except Exception as e:
         err = f"{type(e).__name__}: {e}"

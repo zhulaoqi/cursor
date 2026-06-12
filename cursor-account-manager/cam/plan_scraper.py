@@ -461,10 +461,12 @@ def _spending_info_from_full_text(
     low_head = full_text[:1200].lower()
     if re.search(r"sign\s+in|log\s+in|登录", low_head, re.I) and "current plan" not in low_head:
         raise RuntimeError("消费页疑似未登录（未看到 Current Plan），请检查账号登录态")
+    plan_snapshot = plan_snapshot_from_spending_full_text(full_text)
     plan_name = extract_plan_name_from_spending_text(full_text)
     od = parse_on_demand_panel_from_text(full_text)
     if not (
         plan_name
+        or plan_snapshot is not None
         or od.currently_enabled is not None
         or od.had_historical_spend
         or od.spend_amount is not None
@@ -484,14 +486,17 @@ def _spending_info_from_full_text(
         log.info(msg)
     parse_error = ""
     if od.currently_enabled is None:
-        parse_error = "未解析到 Monthly Limit 开关状态"
-        if od.spend_amount is not None:
-            parse_error += f"（On-Demand Spending=${od.spend_amount}）"
+        if plan_snapshot is not None and plan_snapshot.status == "not_enabled":
+            parse_error = "当前账号未开通付费套餐（Free），消费页无 Monthly Limit 开关"
+        else:
+            parse_error = "未解析到 Monthly Limit 开关状态"
+            if od.spend_amount is not None:
+                parse_error += f"（On-Demand Spending=${od.spend_amount}）"
     return SpendingPanelInfo(
         plan_name=plan_name,
         on_demand_enabled=od.currently_enabled,
         error=parse_error,
-        plan_snapshot=plan_snapshot_from_spending_full_text(full_text),
+        plan_snapshot=plan_snapshot,
         on_demand_historical=od.had_historical_spend,
     )
 

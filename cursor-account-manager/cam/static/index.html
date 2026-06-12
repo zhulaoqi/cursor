@@ -880,11 +880,41 @@
       margin: 0 0 12px;
       border-style: dashed;
     }
+    .sync-note-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
     .sync-note-title {
       font-size: var(--text-sm);
       font-weight: 700;
-      margin-bottom: 6px;
+      margin-bottom: 0;
       color: var(--text);
+    }
+    .sync-note-action-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      border: 1px solid #DBEAFE;
+      background: #EFF6FF;
+      color: #2563EB;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .sync-note-action-btn:hover:not(:disabled) {
+      background: #DBEAFE;
+      border-color: #BFDBFE;
+      color: #1D4ED8;
+    }
+    .sync-note-action-btn:disabled {
+      cursor: not-allowed;
+      opacity: .55;
     }
     .sync-note-text {
       margin: 0;
@@ -4053,7 +4083,27 @@
 
     <div class="sync-task-card sync-note-card"
       x-show="schedulerMeta.spending_refresh_enable">
-      <div class="sync-note-title">消费页 / 按量付费（定时调度）</div>
+      <div class="sync-note-head">
+        <div class="sync-note-title">消费页 / 按量付费（定时调度）</div>
+        <button type="button"
+          class="sync-note-action-btn"
+          :disabled="syncSubmittingSpending || syncIsRunning"
+          :title="syncSubmittingSpending ? '正在触发调度' : (syncIsRunning ? '有任务执行中，请稍后' : '手动触发真实调度')"
+          aria-label="手动触发消费页按量付费定时调度"
+          @click="triggerSpendingSchedulerRun()">
+          <template x-if="!syncSubmittingSpending">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <polygon points="8,6 18,12 8,18"></polygon>
+            </svg>
+          </template>
+          <template x-if="syncSubmittingSpending">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="animate-spin">
+              <circle cx="12" cy="12" r="9" opacity=".25"></circle>
+              <path d="M21 12a9 9 0 0 0-9-9"></path>
+            </svg>
+          </template>
+        </button>
+      </div>
       <p class="sync-note-text">
         服务端按 cron <code class="mono" x-text="schedulerMeta.spending_refresh_cron || '0 3 * * *'"></code>
         自动全库刷新套餐档位与按量开关（与 BI 主同步<strong>不同锁</strong>，可并行；与账号库表头全库刷新<strong>不共用长时间文件锁</strong>）。完成后会发飞书汇总（与 BI 调度成功卡片类似）；失败原因亦写入各账号「消费页错误」，可在账号库悬停「当前套餐」查看。
@@ -4814,6 +4864,7 @@ function app() {
     syncSubmittingDaily: false,
     syncSubmittingReplay: false,
     syncSubmittingRetry: false,
+    syncSubmittingSpending: false,
     syncDailyDatePanelOpen: false,
     syncReplayDatePanelOpen: false,
     syncDailyCalendarCursor: '',
@@ -5698,6 +5749,8 @@ function app() {
       const t = String(trigger || '').toLowerCase();
       if (t === 'scheduler') return '调度执行';
       if (t === 'manual') return '手动执行';
+      if (t === 'manual_spending') return '手动触发按量调度';
+      if (t === 'spending_scheduler') return '按量定时调度';
       if (t === 'retry') return '失败补拉';
       if (t === 'replay') return '自定义补偿';
       if (t === 'daily') return '每日同步';
@@ -5799,6 +5852,31 @@ function app() {
         this.addLog('var(--danger)', `启动同步失败：${e.message || e}`);
       } finally {
         this.syncSubmittingDaily = false;
+      }
+    },
+    async triggerSpendingSchedulerRun() {
+      if (this.syncSubmittingSpending || this.syncIsRunning) return;
+      this.syncSubmittingSpending = true;
+      this.syncServerRunning = true;
+      this.syncTaskNotice = null;
+      try {
+        const res = await fetch('/api/spending/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) throw new Error(await this._readApiError(res, `HTTP ${res.status}`));
+        const d = await res.json();
+        this.syncTaskId = d.sync_task_id;
+        await this.loadSyncRunsOnly();
+        this.syncLiveRun = null;
+        this.syncLiveStages = [];
+        this.syncLiveProgress = null;
+        this.addLog('var(--primary)', `按量调度任务已启动：${this.syncTaskId}`);
+        this._pollSyncTask(this.syncTaskId);
+      } catch (e) {
+        this.addLog('var(--danger)', `启动按量调度失败：${e.message || e}`);
+      } finally {
+        this.syncSubmittingSpending = false;
       }
     },
     async retryTodayFailed() {

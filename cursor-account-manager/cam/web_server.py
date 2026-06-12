@@ -47,7 +47,11 @@ from .logger import get
 from .models import Account, AccountSnapshot
 from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
 from .scheduler import _try_lock, run_scheduler_loop
-from .spending_refresh import persist_spending_panel
+from .spending_refresh import (
+    materialize_spending_info_from_error,
+    persist_spending_panel,
+    run_daily_spending_refresh_scheduled,
+)
 from .sync_log_store import get_default_sync_log_store
 from .token_store import get_default_store
 
@@ -1104,6 +1108,24 @@ def _spending_row_result_from_batch_item(
     fei = str(row.get("feishu_email") or "").strip()
     if item.error or item.info is None:
         err = item.error or "消费页解析失败"
+        inferred_info = materialize_spending_info_from_error(err)
+        if inferred_info is not None:
+            persist_spending_panel(store, email, inferred_info)
+            row_out: dict[str, Any] = {
+                "email": email,
+                "ok": True,
+                "plan_name": inferred_info.plan_name,
+                "on_demand_enabled": inferred_info.on_demand_enabled,
+                "on_demand_historical": bool(inferred_info.on_demand_historical),
+            }
+            if inferred_info.plan_snapshot is not None:
+                row_out["plan_status"] = inferred_info.plan_snapshot.status
+                row_out["plan_amount"] = (
+                    str(inferred_info.plan_snapshot.amount)
+                    if inferred_info.plan_snapshot.amount is not None else ""
+                )
+                row_out["plan_error"] = inferred_info.plan_snapshot.error or ""
+            return (row_out, True, None, None)
         store.update_account_spending_snapshot(
             email=email,
             plan_name="",
@@ -1572,6 +1594,54 @@ async def sync_run_delete(run_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="run_id 不存在")
     return {"ok": True, "run_id": run_id}
+
+
+@app.post("/api/spending/run")
+async def trigger_spending_run():
+    """手动触发“消费页/按量付费”真实调度链路（与 cron 同实现）。"""
+    with _task_lock:
+        if _has_running_sync_task():
+            raise HTTPException(status_code=409, detail="已有调度任务在执行中，请稍后再试")
+        sync_task_id = secrets.token_hex(8)
+        _sync_runtime[sync_task_id] = {
+            "status": "running",
+            "result": None,
+            "error": "",
+            "run_id": "",
+            "biz_date": _today_bj(),
+            "started_at": int(time.time()),
+            "finished_at": None,
+        }
+
+    def _worker() -> None:
+        try:
+            result = run_daily_spending_refresh_scheduled(trigger_type="manual_spending")
+            run_id = str(result.get("run_id") or "")
+            biz_date = str(result.get("biz_date") or _today_bj())
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "finished"
+                _sync_runtime[sync_task_id]["result"] = result
+                _sync_runtime[sync_task_id]["run_id"] = run_id
+                _sync_runtime[sync_task_id]["biz_date"] = biz_date
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            send_alert(
+                "套餐/按量付费 手动调度异常",
+                f"trigger=manual_spending\nerror={err}",
+                level="error",
+            )
+            with _task_lock:
+                _sync_runtime[sync_task_id]["status"] = "failed"
+                _sync_runtime[sync_task_id]["error"] = err
+                _sync_runtime[sync_task_id]["finished_at"] = int(time.time())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {
+        "sync_task_id": sync_task_id,
+        "run_id": "",
+        "biz_date": _today_bj(),
+    }
 
 
 @app.post("/api/sync/run")
