@@ -1575,7 +1575,7 @@ async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict
     """抓取 Billing Invoices 五列表格，返回含 date/description/status/amountText/url 的 dict 列表。"""
     requested_month = _billing_month_key(invoice_month)
     payload = _billing_month_select_payload(invoice_month) if requested_month else {}
-    retry_times = max(1, SETTINGS.billing_ledger_retry_times)
+    retry_times = max(1, min(SETTINGS.billing_ledger_retry_times, 2))
     retry_backoff = max(0, SETTINGS.billing_ledger_retry_backoff_sec)
 
     for billing_url in _BILLING_URLS:

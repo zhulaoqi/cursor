@@ -215,7 +215,7 @@ $envContent = @(
     "",
     "# ─── 账期净支出抓取重试 ───",
     "BILLING_LEDGER_CONCURRENCY=$(Get-UserVal 'BILLING_LEDGER_CONCURRENCY' '3')",
-    "BILLING_LEDGER_RETRY_TIMES=$(Get-UserVal 'BILLING_LEDGER_RETRY_TIMES' '4')",
+    "BILLING_LEDGER_RETRY_TIMES=$(Get-UserVal 'BILLING_LEDGER_RETRY_TIMES' '2')",
     "BILLING_LEDGER_RETRY_BACKOFF_SEC=$(Get-UserVal 'BILLING_LEDGER_RETRY_BACKOFF_SEC' '3')",
     "",
     "# ─── Turnstile 兜底求解器 ───",

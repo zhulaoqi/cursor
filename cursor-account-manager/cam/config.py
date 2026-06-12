@@ -178,7 +178,7 @@ def load_settings() -> Settings:
             1,
             _env_int("SPENDING_REFRESH_CONCURRENCY", 4),
         ),
-        billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 4),
+        billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 2),
         billing_ledger_retry_backoff_sec=_env_int("BILLING_LEDGER_RETRY_BACKOFF_SEC", 3),
         billing_ledger_concurrency=max(1, _env_int("BILLING_LEDGER_CONCURRENCY", 3)),
         spending_refresh_alert_enable=_env_bool("SPENDING_REFRESH_ALERT_ENABLE", True),
