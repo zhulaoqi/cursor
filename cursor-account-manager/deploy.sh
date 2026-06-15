@@ -297,7 +297,7 @@ log "检查 Python 依赖..."
 NEED_PIP=$(ssh_run "
     cd ${REMOTE_DIR}
     # 检查核心包是否已安装
-    if ${VENV_PIP} show fastapi patchright uvicorn openpyxl >/dev/null 2>&1; then
+    if ${VENV_PIP} show fastapi patchright uvicorn openpyxl cryptography >/dev/null 2>&1; then
         echo 'installed'
     else
         echo 'missing'

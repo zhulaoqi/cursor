@@ -380,7 +380,7 @@ def scrape_billing_ledger_batch(
                 return
 
             _cb(acc.email, "ledger", "解析账单列表…")
-            retry_times = max(1, min(SETTINGS.billing_ledger_retry_times, 2))
+            retry_times = max(1, min(SETTINGS.billing_ledger_retry_times, 1))
             retry_backoff = max(0, SETTINGS.billing_ledger_retry_backoff_sec)
             raw_items: list[dict] = []
             last_err: Optional[str] = None
