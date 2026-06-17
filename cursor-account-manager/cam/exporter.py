@@ -993,6 +993,19 @@ async (target) => {
   };
   const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
   const textOf = el => norm(`${el?.innerText || el?.textContent || ''} ${el?.getAttribute?.('aria-label') || ''} ${el?.getAttribute?.('title') || ''}`);
+  const ownTextOf = el => norm([...el.childNodes || []]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const invoiceHeadingTop = () => {
+    const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+      .filter(isVisible)
+      .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
+      .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
+    if (!nodes.length) return null;
+    return nodes[0].el.getBoundingClientRect().top;
+  };
+  const invoiceTop = invoiceHeadingTop();
   const openTrigger = el => {
     // 仅用于打开下拉，不点选项
     if (!el) return;
@@ -1014,6 +1027,7 @@ async (target) => {
   const triggers = [...document.querySelectorAll(triggerSelector)]
     .filter(isVisible)
     .map(el => ({ el, text: textOf(el), open: el.getAttribute('aria-expanded') === 'true' || el.getAttribute('data-state') === 'open' }))
+    .filter(item => invoiceTop == null || item.el.getBoundingClientRect().top >= invoiceTop - 12)
     .filter(item => monthPattern.test(item.text) || item.open || /账单|发票|invoice|billing|month|月份/i.test(item.text));
   result.triggerCount = triggers.length;
 
@@ -1064,6 +1078,20 @@ _BILLING_MONTH_REFRESH_STATE_JS = """
     const lower = norm(text).toLowerCase();
     return labels.some(label => lower === label || lower.includes(label));
   };
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownTextOf = el => norm([...el.childNodes || []]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const invoiceHeadingTop = () => {
+    const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+      .filter(isVisible)
+      .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
+      .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
+    if (!nodes.length) return null;
+    return nodes[0].el.getBoundingClientRect().top;
+  };
+  const invoiceTop = invoiceHeadingTop();
   const monthKey = value => {
     const s = norm(value);
     const m = s.match(/(\\d{4})\\D+(\\d{1,2})/);
@@ -1071,7 +1099,8 @@ _BILLING_MONTH_REFRESH_STATE_JS = """
     return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}`;
   };
   const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button,[role="button"]';
-  const triggers = [...document.querySelectorAll(triggerSelector)];
+  const triggers = [...document.querySelectorAll(triggerSelector)]
+    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
   const trigger = triggers.find(el => matchesTarget(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || ''));
   if (trigger) {
     state.selectedIndicator = true;
@@ -1112,7 +1141,18 @@ _BILLING_MONTH_CURRENT_JS = """
   if (!target || !Array.isArray(target.labels)) return false;
   const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
   const labels = target.labels.map(norm).filter(Boolean);
-  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')];
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownTextOf = el => (el ? [...el.childNodes || []]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' ') : '').replace(/\\s+/g, ' ').trim();
+  const heading = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+    .filter(isVisible)
+    .map(el => ({ el, text: ownTextOf(el) || (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim() }))
+    .find(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
+  const invoiceTop = heading ? heading.el.getBoundingClientRect().top : null;
+  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')]
+    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
   return candidates.some(el => {
     const text = norm(el.innerText || el.textContent || '');
     const aria = norm(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`);
@@ -1125,7 +1165,18 @@ _BILLING_MONTH_TRIGGER_TEXT_JS = """
 () => {
   const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
   const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
-  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')];
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownTextOf = el => norm([...el.childNodes || []]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const heading = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+    .filter(isVisible)
+    .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
+    .find(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
+  const invoiceTop = heading ? heading.el.getBoundingClientRect().top : null;
+  const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')]
+    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
   const trigger = candidates.find(el => monthPattern.test(norm(el.innerText || el.textContent || '')));
   return trigger ? norm(trigger.innerText || trigger.textContent || '') : '';
 }
@@ -1195,6 +1246,30 @@ _BILLING_PAGE_READY_JS = """
 """
 
 
+async def _invoice_section_top(page) -> Optional[float]:
+    """返回 Invoices 区块标题的纵坐标，用于排除 On-Demand 等其它月份下拉。"""
+    try:
+        value = await page.evaluate(
+            """() => {
+              const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+              const ownText = el => norm([...el.childNodes || []]
+                .filter(node => node.nodeType === Node.TEXT_NODE)
+                .map(node => node.textContent || '')
+                .join(' '));
+              const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+                .filter(isVisible)
+                .map(el => ({ el, text: ownText(el) || norm(el.innerText || el.textContent || '') }))
+                .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
+              if (!nodes.length) return null;
+              return nodes[0].el.getBoundingClientRect().top;
+            }"""
+        )
+        return float(value) if value is not None else None
+    except Exception:
+        return None
+
+
 async def _wait_billing_page_ready(page, *, timeout_ms: int = 25000) -> bool:
     """等待账单区域真正渲染完成。
 
@@ -1249,6 +1324,7 @@ async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
         options_already_visible = False
 
     try:
+        invoice_top = await _invoice_section_top(page)
         all_triggers = page.locator("button").filter(
             has_text=_INVOICE_TRIGGER_EXACT_MONTH_RE
         )
@@ -1268,6 +1344,10 @@ async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
                 continue
             if not _INVOICE_TRIGGER_EXACT_MONTH_RE.match(text):
                 continue
+            if invoice_top is not None:
+                box = await candidate.bounding_box(timeout=1500)
+                if not box or float(box.get("y", 0)) < invoice_top - 12:
+                    continue
             trigger = candidate
             log.info(f"账单页过滤器定位成功: text={text!r}")
             break
