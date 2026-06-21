@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .exporter import (
+    BillingFetchInconclusive,
     _PAID_BILLING_STATUSES,
     _billing_month_key,
     _fetch_billing_list_in_ctx,
@@ -310,6 +311,8 @@ async def _scrape_account_billing_list(
     cookie_val: str,
     invoice_month: str,
     browser,
+    *,
+    account_label: str = "",
 ) -> list[dict]:
     from patchright.async_api import Browser
 
@@ -326,7 +329,11 @@ async def _scrape_account_billing_list(
         }])
         page = await ctx.new_page()
         try:
-            return await _fetch_billing_list_in_ctx(page, invoice_month=invoice_month)
+            return await _fetch_billing_list_in_ctx(
+                page,
+                invoice_month=invoice_month,
+                account_label=account_label,
+            )
         finally:
             await page.close()
     finally:
@@ -380,7 +387,7 @@ def scrape_billing_ledger_batch(
                 return
 
             _cb(acc.email, "ledger", "解析账单列表…")
-            retry_times = max(1, min(SETTINGS.billing_ledger_retry_times, 1))
+            retry_times = max(1, SETTINGS.billing_ledger_retry_times)
             retry_backoff = max(0, SETTINGS.billing_ledger_retry_backoff_sec)
             raw_items: list[dict] = []
             last_err: Optional[str] = None
@@ -388,8 +395,27 @@ def scrape_billing_ledger_batch(
             for attempt in range(1, retry_times + 1):
                 try:
                     raw_items = await _scrape_account_billing_list(
-                        cookie_val, month_key, browser,
+                        cookie_val,
+                        month_key,
+                        browser,
+                        account_label=acc.email,
                     )
+                except BillingFetchInconclusive as e:
+                    last_err = f"账单页状态未确认，未写 0: {e}"
+                    log.warning(
+                        f"[{acc.email}] {last_err} "
+                        f"({attempt}/{retry_times})"
+                    )
+                    if attempt < retry_times:
+                        _cb(
+                            acc.email,
+                            "ledger",
+                            f"页面未确认，{retry_backoff}s 后重试 ({attempt}/{retry_times})…",
+                        )
+                        await asyncio.sleep(retry_backoff)
+                        continue
+                    _cb(acc.email, "error", last_err)
+                    return
                 except Exception as e:
                     last_err = str(e)
                     log.warning(

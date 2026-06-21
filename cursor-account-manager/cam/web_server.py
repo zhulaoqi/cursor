@@ -244,6 +244,21 @@ def _has_zip_output_requested(*, with_summary: bool, with_invoices: bool, with_r
     return with_summary or with_invoices or with_raw
 
 
+def _ledger_summary_payload(summaries: list) -> list[dict]:
+    """给前端展示账期净支出结果，避免只显示“成功”看不到金额。"""
+    out: list[dict] = []
+    for s in summaries or []:
+        out.append({
+            "email": getattr(s, "email", ""),
+            "billing_month": getattr(s, "billing_month", ""),
+            "net_spend_usd": str(getattr(s, "net_spend_usd", "")),
+            "amount_total_usd": str(getattr(s, "amount_total_usd", "")),
+            "refund_total_usd": str(getattr(s, "refund_total_usd", "")),
+            "row_count": int(getattr(s, "row_count", 0) or 0),
+        })
+    return out
+
+
 def _normalize_email(email: str) -> str:
     """统一邮箱：去空白/零宽字符并转小写，避免 CSV/Excel 导入更新不命中。"""
     if not email:
@@ -659,6 +674,7 @@ async def run_task(req: RunRequest):
                 "run_mode": "billing_ledger",
                 "ledger_export_mode": export_mode,
                 "db_result_msg": db_result_msg,
+                "ledger_results": _ledger_summary_payload(summaries),
             })
         except Exception as e:
             log.exception("账期净支出导出失败")

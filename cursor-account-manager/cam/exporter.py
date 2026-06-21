@@ -8,7 +8,7 @@ import io
 import json
 import re
 from urllib.parse import urlsplit, urlunsplit
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -19,6 +19,10 @@ from .models import Account, AccountSnapshot
 from .token_manager import TokenManager, get_default_manager
 
 log = get("export")
+
+
+def _log_prefix(account_label: str = "") -> str:
+    return f"[{account_label}] " if account_label else ""
 
 
 def _parse_usage_csv(csv_text: str) -> tuple[list[str], list[list[str]]]:
@@ -690,17 +694,23 @@ def _billing_month_select_payload(value: str) -> dict:
     return {"value": key, "year": year, "month": month, "labels": labels}
 
 
-def _month_distance_descending(current_value: str, target_value: str) -> Optional[int]:
-    """按月份下拉降序列表计算从当前月到目标月需要 ArrowDown 的次数。"""
-    current = _billing_month_key(current_value)
-    target = _billing_month_key(target_value)
-    if not current or not target:
-        return None
-    current_y, current_m = current.split("-", 1)
-    target_y, target_m = target.split("-", 1)
-    current_index = int(current_y) * 12 + int(current_m)
-    target_index = int(target_y) * 12 + int(target_m)
-    return current_index - target_index
+def _billing_month_keys_from_text(value: str) -> set[str]:
+    """从下拉选项文本中提取所有 YYYY-MM 月份。"""
+    text = value or ""
+    keys: set[str] = set()
+    for m in re.finditer(r"(\d{4})\s*年\s*(\d{1,2})\s*月", text):
+        keys.add(f"{m.group(1)}-{int(m.group(2)):02d}")
+    for m in re.finditer(r"(\d{4})[-/.](\d{1,2})", text):
+        keys.add(f"{m.group(1)}-{int(m.group(2)):02d}")
+    return keys
+
+
+def _billing_month_absent_but_later_options_present(
+    option_texts: list[str],
+    target_month: str,
+) -> bool:
+    """缺失目标月不能作为确认 0 的证据，保留函数名兼容旧测试。"""
+    return False
 
 
 def _normalize_status_text(s: str) -> str:
@@ -839,7 +849,26 @@ _STATUS_JS = """
   const STATUS_KEYS = ['paid','open','refunded','void','uncollectible','draft',
     '已支付','待支付','未支付','退款','草稿','作废','无法收款'];
   const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
-  for (const tr of document.querySelectorAll('tr')) {
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownText = el => norm([...(el?.childNodes || [])]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const findInvoicesCard = () => {
+    const headings = [...document.querySelectorAll('p,h1,h2,h3,h4,div,span')]
+      .filter(isVisible)
+      .filter(el => /^Invoices$/i.test(ownText(el) || norm(el.textContent || '')));
+    for (const heading of headings) {
+      let node = heading;
+      for (let i = 0; i < 8 && node; i += 1, node = node.parentElement) {
+        if (node.querySelector?.('button[aria-haspopup="true"]') && node.querySelector?.('table')) return node;
+      }
+    }
+    return null;
+  };
+  const card = findInvoicesCard();
+  if (!card) return out;
+  for (const tr of card.querySelectorAll('tbody tr')) {
     const a = tr.querySelector('a[href*="invoice.stripe.com"]');
     if (!a) continue;
     const tds = [...tr.querySelectorAll('td')];
@@ -871,12 +900,31 @@ _BILLING_LIST_JS = """
   const STATUS_KEYS = ['paid','open','refunded','void','uncollectible','draft',
     '已支付','待支付','未支付','退款','草稿','作废','无法收款'];
   const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownText = el => norm([...(el?.childNodes || [])]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const findInvoicesCard = () => {
+    const headings = [...document.querySelectorAll('p,h1,h2,h3,h4,div,span')]
+      .filter(isVisible)
+      .filter(el => /^Invoices$/i.test(ownText(el) || norm(el.textContent || '')));
+    for (const heading of headings) {
+      let node = heading;
+      for (let i = 0; i < 8 && node; i += 1, node = node.parentElement) {
+        if (node.querySelector?.('button[aria-haspopup="true"]') && node.querySelector?.('table')) return node;
+      }
+    }
+    return null;
+  };
   const amountColRe = /^\\d+(?:\\.\\d+)?\\s*USD$/i;
   const statusLike = t => {
     const lower = (t || '').toLowerCase();
     return STATUS_KEYS.some(k => lower.includes(k.toLowerCase()));
   };
-  for (const tr of document.querySelectorAll('tr')) {
+  const card = findInvoicesCard();
+  if (!card) return out;
+  for (const tr of card.querySelectorAll('tbody tr')) {
     const a = tr.querySelector('a[href*="invoice.stripe.com"]');
     if (!a) continue;
     const tds = [...tr.querySelectorAll('td')].map(td => norm(td.innerText || td.textContent));
@@ -904,163 +952,6 @@ _BILLING_LIST_JS = """
 }
 """
 
-_BILLING_MONTH_SELECT_JS = """
-async (target) => {
-  if (!target || !target.value || !Array.isArray(target.labels)) return false;
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const labels = target.labels.map(norm).filter(Boolean);
-  const lowerLabels = labels.map(s => s.toLowerCase());
-  const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
-  const matches = (text, value = '') => {
-    const candidates = [norm(text), norm(value)].filter(Boolean);
-    return candidates.some(candidate => {
-      const lower = candidate.toLowerCase();
-      return lowerLabels.some(label => lower === label || lower.includes(label));
-    });
-  };
-  const fire = el => {
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-
-  for (const select of document.querySelectorAll('select')) {
-    const options = [...select.options];
-    const option = options.find(o => matches(o.textContent, o.value));
-    if (!option) continue;
-    select.value = option.value;
-    select.selectedIndex = options.indexOf(option);
-    fire(select);
-    return true;
-  }
-
-  const clickables = [...document.querySelectorAll('button,[role="button"],[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="menu"],div[tabindex],span[tabindex]')];
-  const trigger = clickables.find(el => {
-    const text = norm(el.innerText || el.textContent);
-    const aria = norm(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`);
-    if (matches(text) || matches(aria)) return true;
-    if (text.length <= 36 && monthPattern.test(text)) return true;
-    return /账单|发票|invoice|billing|month|月份/i.test(aria) && text.length <= 50;
-  });
-  if (trigger && matches(trigger.innerText || trigger.textContent, trigger.getAttribute('aria-label') || trigger.getAttribute('title') || '')) {
-    return true;
-  }
-  if (trigger) {
-    const isOpen = trigger.getAttribute('aria-expanded') === 'true' || trigger.getAttribute('data-state') === 'open';
-    if (!isOpen) {
-      trigger.click();
-      await sleep(450);
-    }
-  }
-
-  const optionSelectors = '[role="option"],[role="menuitem"],[data-radix-collection-item],button,li,div[tabindex],span[tabindex]';
-  for (let i = 0; i < 8; i += 1) {
-    const options = [...document.querySelectorAll(optionSelectors)]
-      .filter(el => el.offsetParent !== null || el.getClientRects().length > 0);
-    const option = options.find(el => matches(el.innerText || el.textContent, el.getAttribute('aria-label') || el.getAttribute('title') || ''));
-    if (option) {
-      option.click();
-      await sleep(700);
-      return true;
-    }
-    await sleep(250);
-  }
-  return false;
-}
-"""
-
-_BILLING_MONTH_PROBE_SELECT_JS = """
-async (target) => {
-  // 这个脚本只负责「发现」：打开下拉、读取选项列表、找到匹配文本。
-  // 不再用 dispatchEvent 合成点击选项——合成事件不经过 React fiber，
-  // 无法触发 React state update，需由 Playwright 真实点击来完成。
-  const result = { selected: false, triggerText: '', matchedLabel: '', optionTexts: [], triggerCount: 0, reason: '' };
-  if (!target || !target.value || !Array.isArray(target.labels)) {
-    result.reason = 'invalid target';
-    return result;
-  }
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const labels = target.labels.map(norm).filter(Boolean);
-  const lowerLabels = labels.map(s => s.toLowerCase());
-  const monthPattern = /\\d{4}\\s*年\\s*\\d{1,2}\\s*月|\\d{4}[-/.]\\d{1,2}|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\b/i;
-  const matches = (text, value = '') => {
-    const candidates = [norm(text), norm(value)].filter(Boolean);
-    return candidates.some(candidate => {
-      const lower = candidate.toLowerCase();
-      return lowerLabels.some(label => lower === label || lower.includes(label));
-    });
-  };
-  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
-  const textOf = el => norm(`${el?.innerText || el?.textContent || ''} ${el?.getAttribute?.('aria-label') || ''} ${el?.getAttribute?.('title') || ''}`);
-  const ownTextOf = el => norm([...el.childNodes || []]
-    .filter(node => node.nodeType === Node.TEXT_NODE)
-    .map(node => node.textContent || '')
-    .join(' '));
-  const invoiceHeadingTop = () => {
-    const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
-      .filter(isVisible)
-      .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
-      .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
-    if (!nodes.length) return null;
-    return nodes[0].el.getBoundingClientRect().top;
-  };
-  const invoiceTop = invoiceHeadingTop();
-  const openTrigger = el => {
-    // 仅用于打开下拉，不点选项
-    if (!el) return;
-    el.scrollIntoView?.({ block: 'center', inline: 'center' });
-    el.focus?.();
-    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-      const event = type.startsWith('pointer')
-        ? new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 })
-        : new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 });
-      el.dispatchEvent(event);
-    }
-  };
-  const optionSelector = '[role="option"],[role="menuitem"],[data-radix-collection-item],button,li,div[tabindex],span[tabindex]';
-  const readOptions = () => [...document.querySelectorAll(optionSelector)]
-    .filter(isVisible)
-    .map(el => ({ el, text: textOf(el) }))
-    .filter(item => item.text && item.text.length <= 80);
-  const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button,[role="button"]';
-  const triggers = [...document.querySelectorAll(triggerSelector)]
-    .filter(isVisible)
-    .map(el => ({ el, text: textOf(el), open: el.getAttribute('aria-expanded') === 'true' || el.getAttribute('data-state') === 'open' }))
-    .filter(item => invoiceTop == null || item.el.getBoundingClientRect().top >= invoiceTop - 12)
-    .filter(item => monthPattern.test(item.text) || item.open || /账单|发票|invoice|billing|month|月份/i.test(item.text));
-  result.triggerCount = triggers.length;
-
-  for (const item of triggers) {
-    result.triggerText = item.text;
-    if (matches(item.text)) {
-      result.selected = true;
-      result.matchedLabel = item.text;
-      result.reason = 'trigger already selected';
-      return result;
-    }
-    if (!item.open) {
-      openTrigger(item.el);
-      await sleep(500);
-    }
-    for (let i = 0; i < 8; i += 1) {
-      const options = readOptions();
-      result.optionTexts = options.map(o => o.text).slice(0, 20);
-      const option = options.find(o => matches(o.text));
-      if (option) {
-        // 发现了匹配选项，记录文字供 Playwright 真实点击，不在 JS 侧点击
-        result.matchedLabel = option.text;
-        result.reason = 'matched portal option';
-        return result;
-      }
-      await sleep(250);
-    }
-  }
-  result.reason = result.optionTexts.length ? 'target option not found' : 'no dropdown options found';
-  return result;
-}
-"""
-
 _BILLING_MONTH_REFRESH_STATE_JS = """
 (target) => {
   const state = {
@@ -1070,6 +961,7 @@ _BILLING_MONTH_REFRESH_STATE_JS = """
     rowDates: [],
     targetRowDates: [],
     staleRowDates: [],
+    sectionFound: false,
   };
   if (!target || !target.value || !Array.isArray(target.labels)) return state;
   const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
@@ -1079,35 +971,42 @@ _BILLING_MONTH_REFRESH_STATE_JS = """
     return labels.some(label => lower === label || lower.includes(label));
   };
   const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
-  const ownTextOf = el => norm([...el.childNodes || []]
+  const ownTextOf = el => norm([...(el?.childNodes || [])]
     .filter(node => node.nodeType === Node.TEXT_NODE)
     .map(node => node.textContent || '')
     .join(' '));
-  const invoiceHeadingTop = () => {
-    const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
+  const findInvoicesCard = () => {
+    const headings = [...document.querySelectorAll('p,h1,h2,h3,h4,div,span')]
       .filter(isVisible)
-      .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
-      .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
-    if (!nodes.length) return null;
-    return nodes[0].el.getBoundingClientRect().top;
+      .filter(el => /^Invoices$/i.test(ownTextOf(el) || norm(el.textContent || '')));
+    for (const heading of headings) {
+      let node = heading;
+      for (let i = 0; i < 8 && node; i += 1, node = node.parentElement) {
+        if (node.querySelector?.('button[aria-haspopup="true"]') && node.querySelector?.('table')) {
+          return node;
+        }
+      }
+    }
+    return null;
   };
-  const invoiceTop = invoiceHeadingTop();
+  const card = findInvoicesCard();
+  if (!card) return state;
+  state.sectionFound = true;
   const monthKey = value => {
     const s = norm(value);
     const m = s.match(/(\\d{4})\\D+(\\d{1,2})/);
     if (!m) return '';
     return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}`;
   };
-  const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button,[role="button"]';
-  const triggers = [...document.querySelectorAll(triggerSelector)]
-    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
+  const triggerSelector = 'button[aria-haspopup="true"],button[aria-expanded],[role="combobox"]';
+  const triggers = [...card.querySelectorAll(triggerSelector)];
   const trigger = triggers.find(el => matchesTarget(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || ''));
   if (trigger) {
     state.selectedIndicator = true;
     state.triggerText = norm(trigger.innerText || trigger.textContent || trigger.getAttribute('aria-label') || trigger.getAttribute('title') || '');
   }
   const rows = [];
-  for (const tr of document.querySelectorAll('tr')) {
+  for (const tr of card.querySelectorAll('tbody tr')) {
     const a = tr.querySelector('a[href*="invoice.stripe.com"]');
     if (!a) continue;
     const firstCell = tr.querySelector('td');
@@ -1151,8 +1050,9 @@ _BILLING_MONTH_CURRENT_JS = """
     .map(el => ({ el, text: ownTextOf(el) || (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim() }))
     .find(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
   const invoiceTop = heading ? heading.el.getBoundingClientRect().top : null;
+  if (invoiceTop == null) return false;
   const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')]
-    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
+    .filter(el => el.getBoundingClientRect().top >= invoiceTop - 12);
   return candidates.some(el => {
     const text = norm(el.innerText || el.textContent || '');
     const aria = norm(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`);
@@ -1175,8 +1075,9 @@ _BILLING_MONTH_TRIGGER_TEXT_JS = """
     .map(el => ({ el, text: ownTextOf(el) || norm(el.innerText || el.textContent || '') }))
     .find(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
   const invoiceTop = heading ? heading.el.getBoundingClientRect().top : null;
+  if (invoiceTop == null) return '';
   const candidates = [...document.querySelectorAll('button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"]')]
-    .filter(el => invoiceTop == null || el.getBoundingClientRect().top >= invoiceTop - 12);
+    .filter(el => el.getBoundingClientRect().top >= invoiceTop - 12);
   const trigger = candidates.find(el => monthPattern.test(norm(el.innerText || el.textContent || '')));
   return trigger ? norm(trigger.innerText || trigger.textContent || '') : '';
 }
@@ -1191,6 +1092,31 @@ _BILLING_URLS = [
 ]
 
 
+class BillingFetchInconclusive(RuntimeError):
+    """账单页状态未确认，不能把空结果当成真实无账单。"""
+
+
+@dataclass
+class BillingMonthSelectionResult:
+    """Invoices 月份选择结果。"""
+
+    status: str
+    reason: str = ""
+    options: list[str] = field(default_factory=list)
+
+    @property
+    def selected(self) -> bool:
+        return self.status == "selected"
+
+    @property
+    def confirmed_empty(self) -> bool:
+        return self.status == "confirmed_empty"
+
+    @property
+    def inconclusive(self) -> bool:
+        return self.status == "inconclusive"
+
+
 _INVOICE_TRIGGER_EXACT_MONTH_RE = re.compile(
     r"^\s*\d{4}\s*年\s*\d{1,2}\s*月\s*$|"
     r"^\s*\d{4}[-/.]\d{1,2}\s*$|"
@@ -1202,72 +1128,51 @@ _CYCLE_OR_NOISE_RE = re.compile(
     re.I,
 )
 
-_BILLING_MONTH_OPTIONS_VISIBLE_JS = """
-(target) => {
-  // 探测目标月份选项当前是否已经在 DOM 中可见。
-  // probe 阶段用合成 PointerEvent 可能已经打开了下拉；若我们再 click trigger
-  // 会把它"toggle 关闭"，所以点击 trigger 之前先用此脚本判断。
-  if (!target || !Array.isArray(target.labels)) return false;
-  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const lowerLabels = target.labels.map(s => norm(s).toLowerCase()).filter(Boolean);
-  if (!lowerLabels.length) return false;
-  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
-  const optionSelector = '[role="option"],[role="menuitem"],[data-radix-collection-item]';
-  for (const el of document.querySelectorAll(optionSelector)) {
-    if (!isVisible(el)) continue;
-    const text = norm(el.innerText || el.textContent).toLowerCase();
-    if (!text || text.length > 80) continue;
-    if (/cycle starting|cancel|adjust plan|manage in stripe/i.test(text)) continue;
-    if (lowerLabels.some(label => text === label)) return true;
-  }
-  return false;
-}
-"""
-
 _BILLING_PAGE_READY_JS = """
 () => {
   // 严格的账单页就绪判定（避免被导航栏 button/a 提前误判）：
   // 1) 已出现 Stripe 发票链接（当前筛选下有账单）
   // 2) 已出现精确月份 trigger（可进行月份切换）
   // 3) 已出现明确空态文案（无账单）
-  if (document.querySelector('a[href*="invoice.stripe.com"]')) return true;
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownText = el => norm([...el.childNodes || []]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const findInvoicesCard = () => {
+    const headings = [...document.querySelectorAll('p,h1,h2,h3,h4,div,span')]
+      .filter(isVisible)
+      .filter(el => /^Invoices$/i.test(ownText(el) || norm(el.textContent || '')));
+    for (const heading of headings) {
+      let node = heading;
+      for (let i = 0; i < 8 && node; i += 1, node = node.parentElement) {
+        if (node.querySelector?.('button[aria-haspopup="true"]') && node.querySelector?.('table')) {
+          return node;
+        }
+      }
+    }
+    return null;
+  };
+  const card = findInvoicesCard();
+  if (!card) return false;
+  if (card.querySelector('a[href*="invoice.stripe.com"]')) return true;
   const monthRe = /^\\s*\\d{4}\\s*年\\s*\\d{1,2}\\s*月\\s*$|^\\s*\\d{4}[-/.]\\d{1,2}\\s*$|^\\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\s+\\d{4}\\s*$/i;
   const triggerSelector = 'button[aria-expanded][aria-controls],button[aria-haspopup],[role="combobox"],button';
-  for (const el of document.querySelectorAll(triggerSelector)) {
-    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+  for (const el of card.querySelectorAll(triggerSelector)) {
+    const text = norm(el.innerText || el.textContent || '');
     if (text && monthRe.test(text)) return true;
   }
-  const pageText = (document.body?.innerText || '').replace(/\\s+/g, ' ');
-  if (/no invoices|no past invoices|没有账单|没有发票|暂无账单|暂无发票/i.test(pageText)) {
+  const invoiceText = [...card.querySelectorAll('section,div,article')]
+    .filter(isVisible)
+    .map(el => norm(el.innerText || el.textContent || ''))
+    .find(text => /Invoices|发票|账单/i.test(text)) || '';
+  if (/no invoices|no past invoices|没有账单|没有发票|暂无账单|暂无发票/i.test(invoiceText)) {
     return true;
   }
   return false;
 }
 """
-
-
-async def _invoice_section_top(page) -> Optional[float]:
-    """返回 Invoices 区块标题的纵坐标，用于排除 On-Demand 等其它月份下拉。"""
-    try:
-        value = await page.evaluate(
-            """() => {
-              const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
-              const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
-              const ownText = el => norm([...el.childNodes || []]
-                .filter(node => node.nodeType === Node.TEXT_NODE)
-                .map(node => node.textContent || '')
-                .join(' '));
-              const nodes = [...document.querySelectorAll('h1,h2,h3,h4,div,span,p')]
-                .filter(isVisible)
-                .map(el => ({ el, text: ownText(el) || norm(el.innerText || el.textContent || '') }))
-                .filter(item => /^Invoices$/i.test(item.text) || /^发票$/.test(item.text) || /^账单$/.test(item.text));
-              if (!nodes.length) return null;
-              return nodes[0].el.getBoundingClientRect().top;
-            }"""
-        )
-        return float(value) if value is not None else None
-    except Exception:
-        return None
 
 
 async def _wait_billing_page_ready(page, *, timeout_ms: int = 25000) -> bool:
@@ -1284,152 +1189,200 @@ async def _wait_billing_page_ready(page, *, timeout_ms: int = 25000) -> bool:
         return False
 
 
-async def _select_billing_month_via_playwright(page, payload: dict) -> bool:
-    """用 Playwright 严格定位 Invoices 表头的月份过滤器并点击切换。
+_INVOICES_MONTH_TRIGGER_HANDLE_JS = """
+() => {
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const ownText = el => norm([...(el?.childNodes || [])]
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent || '')
+    .join(' '));
+  const monthRe = /^\\s*\\d{4}\\s*年\\s*\\d{1,2}\\s*月\\s*$|^\\s*\\d{4}[-/.]\\d{1,2}\\s*$/;
+  const headings = [...document.querySelectorAll('p,h1,h2,h3,h4,div,span')]
+    .filter(isVisible)
+    .filter(el => /^Invoices$/i.test(ownText(el) || norm(el.textContent || '')));
+  for (const heading of headings) {
+    let node = heading;
+    for (let i = 0; i < 8 && node; i += 1, node = node.parentElement) {
+      if (!node.querySelector?.('table')) continue;
+      const triggers = [...node.querySelectorAll('button[aria-haspopup="true"],button[aria-expanded],[role="combobox"]')]
+        .filter(isVisible)
+        .filter(el => monthRe.test(norm(el.innerText || el.textContent || '')));
+      if (triggers.length) return triggers[0];
+    }
+  }
+  return null;
+}
+"""
 
-    页面上存在多个看起来像"月份下拉"的控件（例如订阅周期管理弹窗里的
-    "Cycle Starting 2026年X月XX日" 选项），但它们和 Invoices 列表完全无关。
-    真正的过滤器特征是：trigger 文本是简短且精确的 "YYYY年M月" 格式，
-    选项文本同样是简短的月份。所以这里采用：
-      1) 用 ^YYYY年M月$ 的精确正则只匹配简短月份按钮
-      2) 排除任何包含 "Cycle Starting / Adjust plan / Cancel" 等噪声词的元素
-      3) 由 Playwright 真实点击触发 React 事件
-    """
-    labels = [str(v) for v in payload.get("labels", []) if v]
-    if not labels:
-        return False
-    target_value = str(payload.get("value", ""))
+_VISIBLE_BILLING_MONTH_MENU_OPTIONS_JS = """
+() => {
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const isVisible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length > 0));
+  const monthOnly = text => /^\\d{4}\\s*年\\s*\\d{1,2}\\s*月$|^\\d{4}[-/.]\\d{1,2}$/.test(norm(text));
+  const menus = [...document.querySelectorAll('.dropdown-items-container[role="menu"],[role="menu"]')]
+    .filter(isVisible)
+    .map(menu => ({
+      menu,
+      options: [...menu.querySelectorAll('button[role="menuitem"][data-radix-collection-item],button[role="menuitem"],[data-radix-collection-item]')]
+        .filter(isVisible)
+        .map(el => norm(el.innerText || el.textContent || ''))
+        .filter(Boolean),
+    }))
+    .filter(item => item.options.length > 0 && item.options.every(monthOnly));
+  const item = menus[menus.length - 1];
+  return item ? item.options : [];
+}
+"""
 
+
+async def _find_invoices_month_trigger(page):
     try:
-        probe = await page.evaluate(_BILLING_MONTH_PROBE_SELECT_JS, payload)
-        if isinstance(probe, dict):
-            options = probe.get("optionTexts") or []
-            if options:
-                log.info(
-                    "账单页月份下拉探测(诊断): "
-                    f"trigger={str(probe.get('triggerText', ''))[:40]!r}, "
-                    f"options={options[:12]}"
-                )
+        handle = await page.evaluate_handle(_INVOICES_MONTH_TRIGGER_HANDLE_JS)
+        return handle.as_element() if handle else None
+    except Exception:
+        return None
+
+
+async def _visible_billing_month_menu_options(page) -> list[str]:
+    try:
+        values = await page.evaluate(_VISIBLE_BILLING_MONTH_MENU_OPTIONS_JS)
+        if isinstance(values, list):
+            return [str(v) for v in values if str(v).strip()]
     except Exception:
         pass
+    return []
 
-    # probe 阶段可能用合成 PointerEvent 已经打开了 Radix portal 下拉；
-    # 若再 click trigger 会切换关闭，导致下面找不到选项。所以先探测：
-    options_already_visible = False
-    try:
-        options_already_visible = bool(
-            await page.evaluate(_BILLING_MONTH_OPTIONS_VISIBLE_JS, payload)
-        )
-    except Exception:
-        options_already_visible = False
 
-    try:
-        invoice_top = await _invoice_section_top(page)
-        all_triggers = page.locator("button").filter(
-            has_text=_INVOICE_TRIGGER_EXACT_MONTH_RE
-        )
-        trigger_count = await all_triggers.count()
-        if trigger_count == 0 and not options_already_visible:
-            log.info("账单页未找到精确 'YYYY年M月' 格式的过滤器按钮")
-            return False
+async def _wait_visible_billing_month_menu_options(
+    page,
+    *,
+    timeout_ms: int = 5000,
+) -> list[str]:
+    attempts = max(1, timeout_ms // 250)
+    last_options: list[str] = []
+    for _ in range(attempts):
+        options = await _visible_billing_month_menu_options(page)
+        if options:
+            return options
+        last_options = options
+        await page.wait_for_timeout(250)
+    return last_options
 
-        trigger = None
-        for i in range(min(trigger_count, 5)):
-            candidate = all_triggers.nth(i)
-            try:
-                text = (await candidate.inner_text(timeout=1500)).strip()
-            except Exception:
-                continue
-            if _CYCLE_OR_NOISE_RE.search(text):
-                continue
-            if not _INVOICE_TRIGGER_EXACT_MONTH_RE.match(text):
-                continue
-            if invoice_top is not None:
-                box = await candidate.bounding_box(timeout=1500)
-                if not box or float(box.get("y", 0)) < invoice_top - 12:
-                    continue
-            trigger = candidate
-            log.info(f"账单页过滤器定位成功: text={text!r}")
-            break
 
-        if trigger is None and not options_already_visible:
-            log.info("账单页 'YYYY年M月' 候选按钮均不通过过滤")
-            return False
-
-        if trigger is not None and not options_already_visible:
-            try:
-                current_text = (await trigger.inner_text(timeout=1500)).strip()
-            except Exception:
-                current_text = ""
-            if current_text and any(
-                label.lower() in current_text.lower() for label in labels
-            ):
-                log.info(f"账单页过滤器已是目标月份: current={current_text!r}")
-                return True
-
-        if options_already_visible:
-            log.info("账单页下拉已打开（probe 已展开），跳过 trigger click 直接选项点击")
-        else:
-            await trigger.scroll_into_view_if_needed(timeout=2000)
-            await trigger.click(timeout=3000)
-            await page.wait_for_timeout(700)
-    except Exception as e:
-        log.info(f"账单页过滤器点击触发器失败: {e}")
-        return False
-
+async def _click_visible_billing_month_option(
+    page,
+    labels: list[str],
+    *,
+    account_label: str = "",
+) -> bool:
     option_selector = (
-        '[role="option"],[role="menuitem"],[data-radix-collection-item]'
+        '.dropdown-items-container[role="menu"] '
+        'button[role="menuitem"][data-radix-collection-item], '
+        '.dropdown-items-container[role="menu"] button[role="menuitem"]'
     )
     for label in labels:
         exact_re = re.compile(rf"^\s*{re.escape(label)}\s*$")
         try:
-            option = (
-                page.locator(option_selector)
-                .filter(has_text=exact_re)
-                .filter(has_not_text=_CYCLE_OR_NOISE_RE)
-                .first
-            )
-            if await option.count() == 0:
-                continue
-            await option.scroll_into_view_if_needed(timeout=1500)
-            await option.click(timeout=3000)
-            await page.wait_for_timeout(800)
-            log.info(f"账单页过滤器已点击月份选项: {label!r}")
-            return True
+            options = page.locator(option_selector).filter(has_text=exact_re)
+            count = await options.count()
+            for i in range(count - 1, -1, -1):
+                option = options.nth(i)
+                box = await option.bounding_box(timeout=1000)
+                if not box:
+                    continue
+                await option.click(timeout=3000)
+                await page.wait_for_timeout(800)
+                log.info(
+                    f"{_log_prefix(account_label)}账单页过滤器已点击月份选项: "
+                    f"{label!r}"
+                )
+                return True
         except Exception:
             continue
+    return False
 
-    for label in labels:
-        try:
-            option = (
-                page.locator(option_selector)
-                .filter(has_text=label)
-                .filter(has_not_text=_CYCLE_OR_NOISE_RE)
-                .first
-            )
-            if await option.count() == 0:
-                continue
-            await option.scroll_into_view_if_needed(timeout=1500)
-            await option.click(timeout=3000)
-            await page.wait_for_timeout(800)
-            log.info(f"账单页过滤器已点击月份选项(模糊): {label!r}")
-            return True
-        except Exception:
-            continue
+
+async def _select_billing_month_via_playwright(
+    page,
+    payload: dict,
+    *,
+    account_label: str = "",
+) -> BillingMonthSelectionResult:
+    """真实点击 Invoices 卡片月份下拉，返回 selected/confirmed_empty/inconclusive。"""
+    labels = [str(v) for v in payload.get("labels", []) if v]
+    if not labels:
+        return BillingMonthSelectionResult("inconclusive", "invalid target")
+
+    trigger = await _find_invoices_month_trigger(page)
+    if trigger is None:
+        log.info(f"{_log_prefix(account_label)}账单页未找到 Invoices 月份过滤器")
+        return BillingMonthSelectionResult("inconclusive", "invoice trigger not found")
 
     try:
-        current_text = str(await page.evaluate(_BILLING_MONTH_TRIGGER_TEXT_JS) or "")
-        distance = _month_distance_descending(current_text, target_value)
-        if distance is None or distance < 0 or distance > 36:
-            return False
-        for _ in range(distance):
-            await page.keyboard.press("ArrowDown")
-            await page.wait_for_timeout(80)
-        await page.keyboard.press("Enter")
-        await page.wait_for_timeout(800)
-        return True
+        current_text = (await trigger.inner_text(timeout=1500)).strip()
     except Exception:
-        return False
+        current_text = ""
+    if current_text and any(label.lower() in current_text.lower() for label in labels):
+        log.info(
+            f"{_log_prefix(account_label)}账单页过滤器已是目标月份: "
+            f"current={current_text!r}"
+        )
+        return BillingMonthSelectionResult("selected")
+
+    try:
+        await trigger.scroll_into_view_if_needed(timeout=2000)
+        await trigger.click(timeout=3000)
+        await page.wait_for_timeout(400)
+        await page.wait_for_selector(
+            '.dropdown-items-container[role="menu"]',
+            state="visible",
+            timeout=4000,
+        )
+    except Exception as e:
+        return BillingMonthSelectionResult("inconclusive", f"open month menu failed: {e}")
+
+    options = await _wait_visible_billing_month_menu_options(page)
+    log.info(
+        f"{_log_prefix(account_label)}账单页 Invoices 月份菜单: "
+        f"trigger={current_text[:40]!r}, options={options[:12]}"
+    )
+    if not options:
+        return BillingMonthSelectionResult("inconclusive", "month menu empty")
+
+    if _billing_month_absent_but_later_options_present(
+        options,
+        str(payload.get("value", "")),
+    ):
+        return BillingMonthSelectionResult(
+            "confirmed_empty",
+            "target month absent but later months present",
+            options,
+        )
+
+    has_target_option = any(
+        _billing_month_key(option) == str(payload.get("value", ""))
+        or any(label.lower() == option.lower() for label in labels)
+        for option in options
+    )
+    if not has_target_option:
+        return BillingMonthSelectionResult(
+            "inconclusive",
+            "target month option not found",
+            options,
+        )
+
+    if await _click_visible_billing_month_option(
+        page,
+        labels,
+        account_label=account_label,
+    ):
+        return BillingMonthSelectionResult("selected", options=options)
+    return BillingMonthSelectionResult(
+        "inconclusive",
+        "target month option visible but click failed",
+        options,
+    )
 
 
 async def _billing_page_is_loading(page) -> bool:
@@ -1449,7 +1402,13 @@ async def _billing_month_refresh_state(page, payload: dict) -> dict:
     return {}
 
 
-async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: int = 20000) -> bool:
+async def _wait_for_billing_month_refresh(
+    page,
+    payload: dict,
+    *,
+    timeout_ms: int = 20000,
+    account_label: str = "",
+) -> bool:
     """点击月份后等待列表就绪：有目标月行，或确认该月无账单（非加载中）。"""
     attempts = max(1, timeout_ms // 500)
     last_state: dict = {}
@@ -1462,14 +1421,14 @@ async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: in
                 if state.get("ready"):
                     row_dates = state.get("rowDates") or []
                     log.info(
-                        "账单页月份刷新确认: "
+                        f"{_log_prefix(account_label)}账单页月份刷新确认: "
                         f"trigger={str(state.get('triggerText', ''))[:40]!r}, "
                         f"rows={row_dates[:8]}"
                     )
                     return True
                 if _billing_empty_from_refresh_state(state, payload, loading=loading):
                     log.info(
-                        "账单页目标月无账单（筛选已生效）: "
+                        f"{_log_prefix(account_label)}账单页目标月无账单（筛选已生效）: "
                         f"target={payload.get('value')}, "
                         f"trigger={str(state.get('triggerText', ''))[:40]!r}, "
                         f"stale={(state.get('staleRowDates') or [])[:4]}"
@@ -1481,13 +1440,13 @@ async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: in
     loading = await _billing_page_is_loading(page)
     if _billing_empty_from_refresh_state(last_state, payload, loading=loading):
         log.info(
-            "账单页目标月无账单（等待结束，残留旧月行已忽略）: "
+            f"{_log_prefix(account_label)}账单页目标月无账单（等待结束）: "
             f"target={payload.get('value')}, "
             f"trigger={str(last_state.get('triggerText', ''))[:40]!r}"
         )
         return True
     log.warning(
-        "账单页月份切换后列表未确认刷新: "
+        f"{_log_prefix(account_label)}账单页月份切换后列表未确认刷新: "
         f"target={payload.get('value')}, "
         f"trigger={str(last_state.get('triggerText', ''))[:40]!r}, "
         f"rows={(last_state.get('rowDates') or [])[:8]}, "
@@ -1497,37 +1456,62 @@ async def _wait_for_billing_month_refresh(page, payload: dict, *, timeout_ms: in
     return False
 
 
-async def _select_billing_month_in_ctx(page, invoice_month: str) -> bool:
+async def _select_billing_month_in_ctx(
+    page,
+    invoice_month: str,
+    *,
+    account_label: str = "",
+) -> BillingMonthSelectionResult:
     """先把账单页月份控件切到用户选择的月份，再解析列表。
 
-    月份下拉点击成功即返回 True；刷新确认超时不视为失败，避免整页跳过抓取。
+    返回 selected/confirmed_empty/inconclusive 三态，避免未确认 DOM 被当成结果。
   """
     payload = _billing_month_select_payload(invoice_month)
     if not payload:
-        return False
+        return BillingMonthSelectionResult("inconclusive", "invalid month")
     try:
-        selected = await _select_billing_month_via_playwright(page, payload)
-        if not selected:
-            selected = bool(await page.evaluate(_BILLING_MONTH_SELECT_JS, payload))
-        if selected:
-            refreshed = await _wait_for_billing_month_refresh(page, payload)
+        result = await _select_billing_month_via_playwright(
+            page,
+            payload,
+            account_label=account_label,
+        )
+        if result.confirmed_empty:
+            log.info(
+                f"{_log_prefix(account_label)}账单页确认 {payload['value']} "
+                "不在 Invoices 下拉且无历史账单"
+            )
+            return result
+        if result.selected:
+            refreshed = await _wait_for_billing_month_refresh(
+                page,
+                payload,
+                account_label=account_label,
+            )
             if refreshed:
-                log.info(f"账单页月份已切换到 {payload['value']}")
+                log.info(
+                    f"{_log_prefix(account_label)}账单页月份已切换到 "
+                    f"{payload['value']}"
+                )
+                return result
             else:
                 log.warning(
-                    f"账单页月份 {payload['value']} 切换后列表未确认刷新，"
-                    "仍将读取当前 DOM 并按日期过滤"
+                    f"{_log_prefix(account_label)}账单页月份 {payload['value']} "
+                    "切换后列表未确认刷新，"
+                    "不会读取当前 DOM"
                 )
-                await page.wait_for_timeout(1200)
-        else:
-            log.warning(
-                f"账单页未找到可切换到 {payload['value']} 的月份控件，"
-                "将读取当前列表并按日期过滤兜底"
-            )
-        return selected
+                return BillingMonthSelectionResult(
+                    "inconclusive",
+                    f"month refresh not confirmed: {payload['value']}",
+                    result.options,
+                )
+        log.warning(
+            f"{_log_prefix(account_label)}账单页未确认可切换到 "
+            f"{payload['value']}: {result.reason}"
+        )
+        return result
     except Exception as e:
-        log.warning(f"账单页月份切换失败: {e}")
-        return False
+        log.warning(f"{_log_prefix(account_label)}账单页月份切换失败: {e}")
+        return BillingMonthSelectionResult("inconclusive", str(e))
 
 
 def _billing_empty_from_refresh_state(
@@ -1538,7 +1522,7 @@ def _billing_empty_from_refresh_state(
 ) -> bool:
     """目标账期无账单且页面已稳定（非加载中）。
 
-    月份筛选已对准、无目标月行时，即使 DOM 仍显示旧月残留行，也视为该月无数据。
+    旧月残留行表示列表刷新尚未确认完成，不能直接判 0。
     """
     if loading or not payload or not isinstance(state, dict):
         return False
@@ -1546,6 +1530,10 @@ def _billing_empty_from_refresh_state(
     stale = state.get("staleRowDates") or []
     rows = state.get("rowDates") or []
     selected = state.get("selectedIndicator")
+    if not state.get("sectionFound"):
+        return False
+    if stale:
+        return False
     if state.get("ready") and not target_rows and not stale:
         return True
     if selected and not target_rows:
@@ -1651,35 +1639,71 @@ def _billing_list_items_from_rows(found_rows: list) -> list[dict]:
     ]
 
 
-async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict]:
+async def _fetch_billing_list_in_ctx(
+    page,
+    invoice_month: str = "",
+    *,
+    account_label: str = "",
+) -> list[dict]:
     """抓取 Billing Invoices 五列表格，返回含 date/description/status/amountText/url 的 dict 列表。"""
     requested_month = _billing_month_key(invoice_month)
     payload = _billing_month_select_payload(invoice_month) if requested_month else {}
-    retry_times = max(1, min(SETTINGS.billing_ledger_retry_times, 1))
+    # Cursor 账单页是 SPA，首轮 domcontentloaded 后 Invoices 卡片偶发未 hydrate。
+    # 这里至少等两轮“未确认状态”，但仍然不会把未确认的空列表写成 0。
+    retry_times = max(2, SETTINGS.billing_ledger_retry_times)
     retry_backoff = max(0, SETTINGS.billing_ledger_retry_backoff_sec)
+    inconclusive_reasons: list[str] = []
 
     for billing_url in _BILLING_URLS:
         for attempt in range(1, retry_times + 1):
             try:
-                await page.goto(billing_url, wait_until="load", timeout=20000)
+                goto_err: Optional[BaseException] = None
+                try:
+                    await page.goto(
+                        billing_url,
+                        wait_until="domcontentloaded",
+                        timeout=20000,
+                    )
+                except Exception as e:
+                    goto_err = e
                 ready = await _wait_billing_page_ready(page)
                 if not ready:
+                    if goto_err is not None:
+                        raise goto_err
+                    inconclusive_reasons.append(f"核心区域未就绪: {billing_url}")
                     log.info(
-                        f"账单页核心区域未就绪 ({attempt}/{retry_times}): {billing_url}"
+                        f"{_log_prefix(account_label)}账单页核心区域未就绪 "
+                        f"({attempt}/{retry_times}): {billing_url}"
                     )
                     if attempt < retry_times:
                         await asyncio.sleep(retry_backoff)
                     continue
-
-                if requested_month:
-                    await _select_billing_month_in_ctx(page, invoice_month)
-                    await _wait_for_billing_month_refresh(
-                        page, payload, timeout_ms=25000,
+                if goto_err is not None:
+                    log.info(
+                        f"{_log_prefix(account_label)}账单页 domcontentloaded 超时但 "
+                        f"Invoices 区域已就绪，继续解析: {billing_url}"
                     )
 
+                if requested_month:
+                    selection = await _select_billing_month_in_ctx(
+                        page,
+                        invoice_month,
+                        account_label=account_label,
+                    )
+                    if selection.confirmed_empty:
+                        return []
+                    if selection.inconclusive:
+                        inconclusive_reasons.append(
+                            f"未确认可切换到目标月份: {billing_url} "
+                            f"month={requested_month} reason={selection.reason}"
+                        )
+                        continue
+
                 if not await _billing_page_auth_ok(page):
+                    inconclusive_reasons.append(f"未登录或会话失效: {billing_url}")
                     log.warning(
-                        f"账单页未登录或会话失效 ({attempt}/{retry_times}): "
+                        f"{_log_prefix(account_label)}账单页未登录或会话失效 "
+                        f"({attempt}/{retry_times}): "
                         f"{billing_url}"
                     )
                     if attempt < retry_times:
@@ -1688,8 +1712,10 @@ async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict
 
                 found_rows, items = await _read_billing_list_items(page)
                 if await _billing_page_is_loading(page):
+                    inconclusive_reasons.append(f"列表仍在加载: {billing_url}")
                     log.info(
-                        f"账单列表仍在加载 ({attempt}/{retry_times}): {billing_url}"
+                        f"{_log_prefix(account_label)}账单列表仍在加载 "
+                        f"({attempt}/{retry_times}): {billing_url}"
                     )
                     if attempt < retry_times:
                         await asyncio.sleep(retry_backoff)
@@ -1699,20 +1725,23 @@ async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict
                     items = _filter_billing_items_by_month(items, requested_month)
 
                 log.info(
-                    f"账单页 {billing_url} ({attempt}/{retry_times}): "
+                    f"{_log_prefix(account_label)}账单页 {billing_url} "
+                    f"({attempt}/{retry_times}): "
                     f"DOM {len(found_rows or [])} 行, 账期匹配 {len(items)}"
                 )
                 if items:
                     for row in items[:8]:
                         log.info(
-                            f"  date={row['date']!r} status={row['status']!r} "
+                            f"{_log_prefix(account_label)}  "
+                            f"date={row['date']!r} status={row['status']!r} "
                             f"amount={row['amountText']!r} url={row['url'][:70]}"
                         )
                     return items
 
                 if await _billing_list_confirmed_empty(page, payload):
                     log.info(
-                        f"账单页确认账期 {requested_month or '(全部)'} 无账单: {billing_url}"
+                        f"{_log_prefix(account_label)}账单页确认账期 "
+                        f"{requested_month or '(全部)'} 无账单: {billing_url}"
                     )
                     return []
 
@@ -1720,24 +1749,32 @@ async def _fetch_billing_list_in_ctx(page, invoice_month: str = "") -> list[dict
                     page, payload, requested_month=requested_month,
                 ):
                     log.info(
-                        f"账单页账期 {requested_month} 无匹配账单（筛选已生效，不重试）: "
+                        f"{_log_prefix(account_label)}账单页账期 {requested_month} "
+                        "无匹配账单（筛选已生效，不重试）: "
                         f"{billing_url}"
                     )
                     return []
 
                 log.warning(
-                    f"账单页列表未就绪将重试 ({attempt}/{retry_times}): "
+                    f"{_log_prefix(account_label)}账单页列表未就绪将重试 "
+                    f"({attempt}/{retry_times}): "
                     f"{billing_url} month={requested_month or '-'}"
+                )
+                inconclusive_reasons.append(
+                    f"列表未确认刷新: {billing_url} month={requested_month or '-'}"
                 )
                 if attempt < retry_times:
                     await asyncio.sleep(retry_backoff)
             except Exception as e:
+                inconclusive_reasons.append(f"抓取异常: {billing_url}: {e}")
                 log.warning(
-                    f"账单页抓取异常 ({attempt}/{retry_times}) {billing_url}: {e}"
+                    f"{_log_prefix(account_label)}账单页抓取异常 "
+                    f"({attempt}/{retry_times}) {billing_url}: {e}"
                 )
                 if attempt < retry_times:
                     await asyncio.sleep(retry_backoff)
-    return []
+    reason = "；".join(inconclusive_reasons[-4:]) or "账单页未确认"
+    raise BillingFetchInconclusive(reason)
 
 
 async def _fetch_billing_items_in_ctx(page, invoice_month: str = "") -> list[tuple[str, str, str]]:
@@ -1891,8 +1928,8 @@ async def _billing_page_get_stripe_items(cookie_val: str, invoice_month: str = "
                 except Exception:
                     continue
                 if _billing_month_key(invoice_month):
-                    selected = await _select_billing_month_in_ctx(page, invoice_month)
-                    if not selected:
+                    selection = await _select_billing_month_in_ctx(page, invoice_month)
+                    if not selection.selected:
                         continue
 
                 # 同一行内抓 URL / Date / Status

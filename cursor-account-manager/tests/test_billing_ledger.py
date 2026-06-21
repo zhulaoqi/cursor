@@ -12,6 +12,7 @@ from cam.billing_ledger import (
 )
 from cam.exporter import (
     _billing_empty_from_refresh_state,
+    _billing_month_absent_but_later_options_present,
     _filter_billing_items_by_month,
 )
 
@@ -95,6 +96,7 @@ def test_billing_empty_from_refresh_state_confirmed():
         {
             "ready": True,
             "selectedIndicator": True,
+            "sectionFound": True,
             "rowDates": [],
             "targetRowDates": [],
             "staleRowDates": [],
@@ -110,6 +112,7 @@ def test_billing_empty_not_confirmed_while_loading():
         {
             "ready": False,
             "selectedIndicator": True,
+            "sectionFound": True,
             "rowDates": [],
             "targetRowDates": [],
             "staleRowDates": [],
@@ -119,13 +122,14 @@ def test_billing_empty_not_confirmed_while_loading():
     )
 
 
-def test_billing_empty_confirmed_when_filter_set_but_stale_rows():
-    """筛选已是目标月、仅残留旧月行 → 该月无账单，不重试。"""
+def test_billing_empty_not_confirmed_when_stale_rows_remain():
+    """筛选看似已到目标月，但仍残留旧月行时不能判 0，需继续确认/重试。"""
     payload = {"value": "2026-05", "labels": ["2026年5月"]}
-    assert _billing_empty_from_refresh_state(
+    assert not _billing_empty_from_refresh_state(
         {
             "ready": False,
             "selectedIndicator": True,
+            "sectionFound": True,
             "rowDates": ["2026年4月21日"],
             "targetRowDates": [],
             "staleRowDates": ["2026年4月21日"],
@@ -141,6 +145,7 @@ def test_billing_empty_from_refresh_state_not_confirmed_when_stale_and_filter_wr
         {
             "ready": False,
             "selectedIndicator": False,
+            "sectionFound": True,
             "rowDates": ["2026年3月14日"],
             "targetRowDates": [],
             "staleRowDates": ["2026年3月14日"],
@@ -157,6 +162,34 @@ def test_filter_billing_items_by_month():
     out = _filter_billing_items_by_month(items, "2026-05")
     assert len(out) == 1
     assert out[0]["date"] == "2026年5月10日"
+
+
+def test_billing_month_absent_but_later_options_present_is_not_confirmed_empty():
+    assert not _billing_month_absent_but_later_options_present(
+        ["2026年6月", "2026年5月", "2026年4月"],
+        "2026-03",
+    )
+
+
+def test_billing_month_absent_without_later_options_is_not_confirmed_empty():
+    assert not _billing_month_absent_but_later_options_present(
+        ["2026年2月"],
+        "2026-03",
+    )
+
+
+def test_billing_month_present_is_not_absent_empty():
+    assert not _billing_month_absent_but_later_options_present(
+        ["2026年6月 2026年5月 2026年4月 2026年3月"],
+        "2026-03",
+    )
+
+
+def test_billing_month_absent_rejects_non_invoice_cycle_options():
+    assert not _billing_month_absent_but_later_options_present(
+        ["2026年6月", "Cycle Starting 2026年5月21日", "2026年5月", "2026年4月"],
+        "2026-03",
+    )
 
 
 def test_export_billing_ledger_workbook(tmp_path):

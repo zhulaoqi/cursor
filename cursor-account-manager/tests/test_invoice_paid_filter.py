@@ -3,15 +3,12 @@ import unittest
 from cam.exporter import (
     _BILLING_LIST_JS,
     _BILLING_URLS,
-    _BILLING_MONTH_PROBE_SELECT_JS,
     _BILLING_MONTH_REFRESH_STATE_JS,
-    _BILLING_MONTH_SELECT_JS,
     _STATUS_JS,
     _billing_month_key,
     _billing_month_select_payload,
     _fetch_billing_items_in_ctx,
     _filter_paid_billing_items,
-    _month_distance_descending,
 )
 
 _BILLING_PARSE_SCRIPTS = frozenset({_STATUS_JS, _BILLING_LIST_JS})
@@ -89,23 +86,11 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    def test_billing_month_select_script_handles_radix_open_state(self):
-        self.assertIn("data-state", _BILLING_MONTH_SELECT_JS)
-        self.assertIn("aria-expanded", _BILLING_MONTH_SELECT_JS)
-        self.assertIn("data-radix-collection-item", _BILLING_MONTH_SELECT_JS)
-        self.assertIn("!isOpen", _BILLING_MONTH_SELECT_JS)
-
-    def test_billing_month_probe_select_opens_trigger_and_reads_portal_options(self):
-        self.assertIn("pointerdown", _BILLING_MONTH_PROBE_SELECT_JS)
-        self.assertIn("optionTexts", _BILLING_MONTH_PROBE_SELECT_JS)
-        self.assertIn("[data-radix-collection-item]", _BILLING_MONTH_PROBE_SELECT_JS)
-        self.assertIn("triggerText", _BILLING_MONTH_PROBE_SELECT_JS)
-        self.assertIn("matched portal option", _BILLING_MONTH_PROBE_SELECT_JS)
-
     def test_billing_month_refresh_state_rejects_stale_invoice_rows(self):
         self.assertIn("staleRowDates", _BILLING_MONTH_REFRESH_STATE_JS)
         self.assertIn("targetRowDates", _BILLING_MONTH_REFRESH_STATE_JS)
         self.assertIn("selectedIndicator", _BILLING_MONTH_REFRESH_STATE_JS)
+        self.assertIn("findInvoicesCard", _BILLING_MONTH_REFRESH_STATE_JS)
         self.assertIn("ready", _BILLING_MONTH_REFRESH_STATE_JS)
 
     def test_billing_pages_dashboard_tried_first_for_speed(self):
@@ -114,11 +99,6 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://cursor.com/settings/billing", _BILLING_URLS,
                       "settings/billing 应作为备用保留")
         self.assertNotIn("https://cursor.com/cn/dashboard/billing", _BILLING_URLS)
-
-    def test_month_distance_for_keyboard_dropdown_fallback(self):
-        self.assertEqual(_month_distance_descending("2026年4月", "2026-02"), 2)
-        self.assertEqual(_month_distance_descending("2026-04", "2026年4月"), 0)
-        self.assertEqual(_month_distance_descending("2026年2月", "2026-04"), -2)
 
     async def test_fetch_billing_items_selects_requested_month_before_parsing_rows(self):
         """月份选择必须在解析 rows 之前发生，且选择失败时跳过该 URL 不解析。"""
@@ -157,7 +137,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_select(_page, invoice_month):
             select_calls.append(invoice_month)
-            return True
+            return exporter.BillingMonthSelectionResult("selected")
 
         original = exporter._select_billing_month_in_ctx
         exporter._select_billing_month_in_ctx = fake_select
@@ -174,8 +154,8 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         for i, c in enumerate(page.calls[:parse_idx]):
             self.assertNotEqual(c[0], "parse_rows", "rows 解析早于月份选择")
 
-    async def test_fetch_billing_items_skips_url_when_month_select_fails(self):
-        """当 _select_billing_month_in_ctx 返回 False 时，不应解析当前 URL 的列表。"""
+    async def test_fetch_billing_items_raises_when_month_select_inconclusive(self):
+        """当 _select_billing_month_in_ctx 返回 inconclusive 时，不应解析当前 URL 的列表。"""
         from cam import exporter
 
         class FakePage:
@@ -203,44 +183,29 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         page = FakePage()
 
         async def fake_select(_page, invoice_month):
-            return False
+            return exporter.BillingMonthSelectionResult("inconclusive", "not ready")
 
         original = exporter._select_billing_month_in_ctx
         exporter._select_billing_month_in_ctx = fake_select
         try:
-            items = await _fetch_billing_items_in_ctx(page, invoice_month="2026-01")
+            with self.assertRaises(exporter.BillingFetchInconclusive):
+                await _fetch_billing_items_in_ctx(page, invoice_month="2026-01")
         finally:
             exporter._select_billing_month_in_ctx = original
 
-        self.assertEqual(items, [])
-        self.assertFalse(page.parsed, "月份选择失败后不应解析行")
+        self.assertFalse(page.parsed, "月份选择未确认后不应解析行")
 
-    def test_playwright_skips_trigger_click_when_dropdown_already_open(self):
-        """probe JS 用合成事件可能已打开下拉。若直接 await trigger.click()
-        会 toggle 关闭，导致 Radix portal 选项消失。
-        修复后必须先用 _BILLING_MONTH_OPTIONS_VISIBLE_JS 探测 portal 中
-        是否已存在目标月份的可见选项；若已可见则跳过 trigger click 直接
-        点击选项；若不可见再 click trigger 打开。"""
+    def test_playwright_clicks_invoices_trigger_and_visible_dropdown_menu(self):
+        """月份切换必须用真实点击打开 Invoices trigger，再点击可见 dropdown menu 项。"""
         import inspect
         from cam import exporter
-        self.assertTrue(
-            hasattr(exporter, "_BILLING_MONTH_OPTIONS_VISIBLE_JS"),
-            "应有专门的 JS 探测目标月份选项是否已可见",
-        )
-        probe_js = exporter._BILLING_MONTH_OPTIONS_VISIBLE_JS
-        self.assertIn('[role="option"]', probe_js)
-        self.assertIn('[data-radix-collection-item]', probe_js)
-        self.assertIn("labels", probe_js)
 
         fn_src = inspect.getsource(exporter._select_billing_month_via_playwright)
-        self.assertIn("_BILLING_MONTH_OPTIONS_VISIBLE_JS", fn_src,
-                      "_select_billing_month_via_playwright 必须使用该探测脚本")
-        # 关键契约：当选项已可见时，要跳过 trigger click
-        self.assertRegex(
-            fn_src,
-            r"options_already_visible|already_open|dropdown_open",
-            "应有变量明确表达 '下拉已打开/选项已可见' 状态",
-        )
+        self.assertIn("find_invoices_month_trigger", fn_src)
+        self.assertIn('.dropdown-items-container[role="menu"]', fn_src)
+        self.assertIn('[role="menuitem"][data-radix-collection-item]', fn_src)
+        self.assertNotIn("_BILLING_MONTH_OPTIONS_VISIBLE_JS", fn_src)
+        self.assertNotIn("_BILLING_MONTH_PROBE_SELECT_JS", fn_src)
 
     def test_playwright_uses_strict_short_month_trigger_filter(self):
         """新方案核心契约：用 ^YYYY年M月$ 精确正则 + 排除 'Cycle Starting' 噪声词，
@@ -248,12 +213,12 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         import inspect
         from cam import exporter
         fn_src = inspect.getsource(exporter._select_billing_month_via_playwright)
-        self.assertIn("_INVOICE_TRIGGER_EXACT_MONTH_RE", fn_src,
-                      "必须使用精确月份正则匹配 trigger")
-        self.assertIn("_CYCLE_OR_NOISE_RE", fn_src,
-                      "必须排除 Cycle Starting / Cancel 等噪声词")
-        self.assertIn("has_not_text", fn_src,
-                      "选项点击需用 has_not_text 过滤掉噪声选项")
+        self.assertIn("find_invoices_month_trigger", fn_src,
+                      "trigger 必须来自 Invoices 卡片")
+        self.assertNotIn("has_not_text", fn_src,
+                         "选项点击不能再走全局 has_not_text 过滤")
+        self.assertIn("monthRe", exporter._INVOICES_MONTH_TRIGGER_HANDLE_JS)
+        self.assertIn("Invoices", exporter._INVOICES_MONTH_TRIGGER_HANDLE_JS)
 
         regex_pattern = exporter._INVOICE_TRIGGER_EXACT_MONTH_RE
         self.assertIsNotNone(regex_pattern.match("2026年1月"))
@@ -270,12 +235,13 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(cycle_re.search("2026年1月"))
 
     def test_playwright_always_clicks_option_probe_only_discovers(self):
-        """probe JS 只负责诊断收集，不再合成点击；点击全部由 Playwright 完成。"""
+        """净支出月份选择不能再依赖合成点击或键盘盲选。"""
         import inspect
         from cam import exporter
-        probe_js = exporter._BILLING_MONTH_PROBE_SELECT_JS
-        self.assertNotIn("firePointer(option.el)", probe_js,
-                         "probe JS 不应合成点击选项")
+        fn_src = inspect.getsource(exporter._select_billing_month_via_playwright)
+        self.assertNotIn("keyboard.press", fn_src)
+        self.assertNotIn("ArrowDown", fn_src)
+        self.assertNotIn("Enter", fn_src)
 
     def test_fetch_billing_items_waits_for_billing_page_ready(self):
         """账单页解析前必须先等核心区域 ready，不能被导航按钮提前误判。"""
