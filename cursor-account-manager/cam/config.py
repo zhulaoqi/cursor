@@ -99,6 +99,9 @@ class Settings:
     billing_ledger_retry_times: int
     billing_ledger_retry_backoff_sec: int
     billing_ledger_concurrency: int
+    billing_ledger_refresh_enable: bool
+    billing_ledger_refresh_cron: str
+    billing_ledger_refresh_lock_file: str
     spending_refresh_alert_enable: bool
     alert_bot_client_id: str
     alert_bot_secret: str
@@ -181,6 +184,15 @@ def load_settings() -> Settings:
         billing_ledger_retry_times=_env_int("BILLING_LEDGER_RETRY_TIMES", 2),
         billing_ledger_retry_backoff_sec=_env_int("BILLING_LEDGER_RETRY_BACKOFF_SEC", 3),
         billing_ledger_concurrency=max(1, _env_int("BILLING_LEDGER_CONCURRENCY", 3)),
+        billing_ledger_refresh_enable=_env_bool("BILLING_LEDGER_REFRESH_ENABLE", True),
+        billing_ledger_refresh_cron=(
+            os.environ.get("BILLING_LEDGER_REFRESH_CRON", "0 5 * * *").strip()
+            or "0 5 * * *"
+        ),
+        billing_ledger_refresh_lock_file=(
+            os.environ.get("BILLING_LEDGER_REFRESH_LOCK_FILE", "/tmp/cam_billing_ledger_refresh.lock").strip()
+            or "/tmp/cam_billing_ledger_refresh.lock"
+        ),
         spending_refresh_alert_enable=_env_bool("SPENDING_REFRESH_ALERT_ENABLE", True),
         alert_bot_client_id=os.environ.get("ALERT_BOT_CLIENT_ID", "").strip(),
         alert_bot_secret=os.environ.get("ALERT_BOT_SECRET", "").strip(),
