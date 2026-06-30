@@ -4082,7 +4082,7 @@
     </div>
 
     <div class="sync-task-card sync-note-card"
-      x-show="schedulerMeta.spending_refresh_enable">
+      x-show="schedulerMeta.spending_refresh_enable || schedulerMeta.billing_ledger_refresh_enable">
       <div class="sync-note-head">
         <div class="sync-note-title">消费页 / 按量付费（定时调度）</div>
         <button type="button"
@@ -4107,6 +4107,8 @@
       <p class="sync-note-text">
         服务端按 cron <code class="mono" x-text="schedulerMeta.spending_refresh_cron || '0 3 * * *'"></code>
         自动全库刷新套餐档位与按量开关（与 BI 主同步<strong>不同锁</strong>，可并行；与账号库表头全库刷新<strong>不共用长时间文件锁</strong>）。完成后会发飞书汇总（与 BI 调度成功卡片类似）；失败原因亦写入各账号「消费页错误」，可在账号库悬停「当前套餐」查看。
+        账期净支出按 cron <code class="mono" x-text="schedulerMeta.billing_ledger_refresh_cron || '0 5 * * *'"></code>
+        自动刷新<strong>当月</strong>净支出并写入数据库，运行记录同样进入下方「最近运行」。
         BI 主链路 cron 为 <code class="mono" x-text="schedulerMeta.bi_sync_cron || '-'"></code>。
       </p>
     </div>
@@ -4813,6 +4815,8 @@ function app() {
       bi_sync_cron: '',
       spending_refresh_enable: true,
       spending_refresh_cron: '',
+      billing_ledger_refresh_enable: true,
+      billing_ledger_refresh_cron: '',
     },
 
     // ── 日期 / 选项 ──
@@ -4979,6 +4983,8 @@ function app() {
               bi_sync_cron: j.bi_sync_cron || '',
               spending_refresh_enable: j.spending_refresh_enable !== false,
               spending_refresh_cron: j.spending_refresh_cron || '',
+              billing_ledger_refresh_enable: j.billing_ledger_refresh_enable !== false,
+              billing_ledger_refresh_cron: j.billing_ledger_refresh_cron || '',
             };
           } catch {}
         })
@@ -5754,6 +5760,7 @@ function app() {
       if (t === 'manual') return '手动执行';
       if (t === 'manual_spending') return '手动触发按量调度';
       if (t === 'spending_scheduler') return '按量定时调度';
+      if (t === 'billing_ledger_scheduler') return '净支出定时调度';
       if (t === 'retry') return '失败补拉';
       if (t === 'replay') return '自定义补偿';
       if (t === 'daily') return '每日同步';

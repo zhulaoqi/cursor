@@ -10,6 +10,10 @@ from pathlib import Path
 
 from .alerting import send_alert
 from .bi_sync import run_daily_sync
+from .billing_ledger_refresh import (
+    BILLING_LEDGER_TRIGGER_TYPE,
+    run_daily_billing_ledger_refresh_scheduled,
+)
 from .config import SETTINGS
 from .logger import get
 from .spending_refresh import run_daily_spending_refresh_scheduled
@@ -86,11 +90,46 @@ def run_scheduler_once_for_yesterday() -> dict:
         return run_daily_sync(trigger_type="scheduler")
 
 
+def _run_billing_ledger_refresh_if_due(
+    now: datetime,
+    *,
+    last_trigger_date: str,
+    log_store,
+) -> str:
+    date_key = now.strftime("%Y-%m-%d")
+    minute, hour = _parse_cron_hour_min(SETTINGS.billing_ledger_refresh_cron)
+    due_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    try:
+        already_recorded = log_store.has_run_for_trigger(
+            biz_date=date_key,
+            trigger_type=BILLING_LEDGER_TRIGGER_TYPE,
+        )
+    except Exception as e:
+        log.warning(f"账期净支出调度记录检查失败，跳过本轮: {type(e).__name__}: {e}")
+        return last_trigger_date
+
+    if now < due_time or last_trigger_date == date_key or already_recorded:
+        return last_trigger_date
+
+    with _try_lock(SETTINGS.billing_ledger_refresh_lock_file) as ok:
+        if not ok:
+            log.warning("账期净支出调度跳过：检测到已有任务在运行")
+            return date_key
+        log.info(f"账期净支出调度到期，开始执行: trigger_date={date_key}")
+        result = run_daily_billing_ledger_refresh_scheduled(
+            trigger_type=BILLING_LEDGER_TRIGGER_TYPE,
+            trigger_date=date_key,
+        )
+        log.info(f"账期净支出调度执行完成: {result}")
+    return date_key
+
+
 def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
     minute, hour = _parse_cron_hour_min(SETTINGS.bi_sync_cron)
     sp_minute, sp_hour = _parse_cron_hour_min(SETTINGS.spending_refresh_cron)
     last_trigger_date = ""
     last_spending_trigger_date = ""
+    last_billing_ledger_trigger_date = ""
     parts: list[str] = []
     if SETTINGS.bi_sync_enable:
         parts.append(f"BI 每天 {hour:02d}:{minute:02d}")
@@ -99,6 +138,9 @@ def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
             f"套餐/按量刷新 {sp_hour:02d}:{sp_minute:02d}"
             + ("（完成后飞书通知）" if SETTINGS.spending_refresh_alert_enable else "")
         )
+    if SETTINGS.billing_ledger_refresh_enable:
+        ledger_minute, ledger_hour = _parse_cron_hour_min(SETTINGS.billing_ledger_refresh_cron)
+        parts.append(f"账期净支出刷新 {ledger_hour:02d}:{ledger_minute:02d}")
     log.info("调度器启动：" + ("；".join(parts) if parts else "无任务"))
 
     while True:
@@ -164,5 +206,15 @@ def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
                     log.info(f"消费页调度执行完成: {result}")
                 except Exception as e:
                     log.exception(f"消费页调度执行失败: {type(e).__name__}: {e}")
+
+        if SETTINGS.billing_ledger_refresh_enable:
+            try:
+                last_billing_ledger_trigger_date = _run_billing_ledger_refresh_if_due(
+                    now,
+                    last_trigger_date=last_billing_ledger_trigger_date,
+                    log_store=log_store,
+                )
+            except Exception as e:
+                log.exception(f"账期净支出调度执行失败: {type(e).__name__}: {e}")
 
         time.sleep(max(5, poll_interval_sec))

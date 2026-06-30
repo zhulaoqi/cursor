@@ -32,6 +32,7 @@ class ConfigConcurrencyTests(unittest.TestCase):
                 "INVOICE_DOWNLOAD_CONCURRENCY": "",
                 "INVOICE_ACTIVE_CONTEXT_LIMIT": "",
                 "API_CONCURRENCY": "",
+                "BILLING_LEDGER_RETRY_TIMES": "",
             },
             clear=False,
         ):
@@ -41,7 +42,7 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertEqual(settings.invoice_download_concurrency, 10)
         self.assertEqual(settings.invoice_active_context_limit, 6)
         self.assertEqual(settings.api_concurrency, 30)
-        self.assertEqual(settings.billing_ledger_retry_times, 4)
+        self.assertEqual(settings.billing_ledger_retry_times, 2)
         self.assertEqual(settings.billing_ledger_concurrency, 3)
 
     def test_bi_sync_related_defaults(self):
@@ -66,6 +67,9 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertTrue(settings.spending_refresh_enable)
         self.assertEqual(settings.spending_refresh_cron, "0 3 * * *")
         self.assertEqual(settings.spending_refresh_lock_file, "/tmp/cam_spending_refresh.lock")
+        self.assertTrue(settings.billing_ledger_refresh_enable)
+        self.assertEqual(settings.billing_ledger_refresh_cron, "0 5 * * *")
+        self.assertEqual(settings.billing_ledger_refresh_lock_file, "/tmp/cam_billing_ledger_refresh.lock")
         self.assertFalse(settings.alert_bot_enable)
         self.assertEqual(settings.alert_to_emails, "")
 

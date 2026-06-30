@@ -135,8 +135,12 @@ async def _start_embedded_scheduler() -> None:
     global _scheduler_started
     if _scheduler_started:
         return
-    if not SETTINGS.bi_sync_enable and not SETTINGS.spending_refresh_enable:
-        log.info("BI 与套餐/按量定时刷新均未启用，跳过调度器启动")
+    if (
+        not SETTINGS.bi_sync_enable
+        and not SETTINGS.spending_refresh_enable
+        and not SETTINGS.billing_ledger_refresh_enable
+    ):
+        log.info("BI、套餐/按量、账期净支出定时刷新均未启用，跳过调度器启动")
         return
     _scheduler_started = True
     t = threading.Thread(
@@ -147,9 +151,10 @@ async def _start_embedded_scheduler() -> None:
     )
     t.start()
     log.info(
-        "调度器已随 Web 服务启动 bi_cron=%s spending_cron=%s spending_alert=%s",
+        "调度器已随 Web 服务启动 bi_cron=%s spending_cron=%s ledger_cron=%s spending_alert=%s",
         SETTINGS.bi_sync_cron,
         SETTINGS.spending_refresh_cron,
+        SETTINGS.billing_ledger_refresh_cron,
         SETTINGS.spending_refresh_alert_enable,
     )
 
@@ -1544,6 +1549,8 @@ async def api_status():
         "bi_sync_cron": SETTINGS.bi_sync_cron,
         "spending_refresh_enable": SETTINGS.spending_refresh_enable,
         "spending_refresh_cron": SETTINGS.spending_refresh_cron,
+        "billing_ledger_refresh_enable": SETTINGS.billing_ledger_refresh_enable,
+        "billing_ledger_refresh_cron": SETTINGS.billing_ledger_refresh_cron,
     }
 
 
