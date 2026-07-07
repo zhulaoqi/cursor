@@ -44,3 +44,9 @@ python -m aihub_image_test.main edit \
 ```bash
 python -m pytest
 ```
+
+## 退出 Python 虚拟环境
+
+```bash
+deactivate
+```
