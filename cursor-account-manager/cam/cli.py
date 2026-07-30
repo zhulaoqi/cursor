@@ -20,8 +20,20 @@ from .bi_sync import retry_failed_accounts, run_daily_sync
 from .scheduler import run_scheduler_loop, run_scheduler_once_for_yesterday
 from .token_manager import get_default_manager
 from .token_store import get_default_store
+from .usage_snapshot_refresh import (
+    get_usage_runtime,
+    run_usage_periodic,
+    run_usage_pre_reset_due,
+)
 
 log = get("cli")
+
+
+@click.group()
+@click.option("-v", "--verbose", is_flag=True, help="DEBUG 日志")
+def cli(verbose: bool) -> None:
+    """Cursor Account Manager — 批量管理 Cursor 账号。"""
+    setup("DEBUG" if verbose else "INFO")
 
 
 def _pick_accounts(all_flag: bool, email: tuple[str, ...]) -> list[Account]:
@@ -34,6 +46,80 @@ def _pick_accounts(all_flag: bool, email: tuple[str, ...]) -> list[Account]:
             raise click.UsageError(f"CSV 里找不到指定的 email: {list(email)}")
         return filtered
     raise click.UsageError("必须指定 --all 或 --email")
+
+
+def _json_default(value: object) -> object:
+    """将服务层的时间和枚举结果转换为可审计 JSON。"""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None:
+        return enum_value
+    raise TypeError(f"无法转换为 JSON: {type(value).__name__}")
+
+
+def _echo_json(result: object) -> None:
+    """统一输出中文 JSON，保留服务层返回的全部字段。"""
+    payload = asdict(result) if hasattr(result, "__dataclass_fields__") else result
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
+
+
+def _parse_cycle_start(value: str) -> datetime:
+    """解析 repair 命令需要的 ISO8601 UTC 账期开始时间。"""
+    try:
+        cycle_start = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise click.BadParameter("必须是 ISO8601 时间") from exc
+    if cycle_start.tzinfo is None or cycle_start.utcoffset().total_seconds() != 0:
+        raise click.BadParameter("必须是带 UTC 时区的 ISO8601 时间")
+    return cycle_start
+
+
+# ═══ usage（用量快照运维）══════════════════════════════════════════
+
+@cli.command("usage-snapshot")
+@click.option("--all", "all_flag", is_flag=True, help="采集所有可监控账号")
+@click.option("--email", "email", multiple=True, help="仅采集指定邮箱（可重复）")
+@click.option(
+    "--type", "snapshot_type", type=click.Choice(["periodic"]),
+    required=True, help="快照类型（当前仅支持 periodic）",
+)
+def cmd_usage_snapshot(
+    all_flag: bool, email: tuple[str, ...], snapshot_type: str
+) -> None:
+    """执行 periodic 用量快照采集。"""
+    if all_flag and email:
+        raise click.UsageError("--all 与 --email 不能同时使用")
+    if not all_flag and not email:
+        raise click.UsageError("必须指定 --all 或至少一个 --email")
+    # 类型由 Click 限定为 periodic，CLI 只负责将账号范围委派给服务层。
+    _ = snapshot_type
+    _echo_json(run_usage_periodic(emails=None if all_flag else email))
+
+
+@cli.command("usage-pre-reset-due")
+@click.option("--dry-run", is_flag=True, help="只预览即将采集的账号，不写入数据")
+def cmd_usage_pre_reset_due(dry_run: bool) -> None:
+    """采集进入 pre-reset 窗口的账号，或预览待处理账号。"""
+    _echo_json(run_usage_pre_reset_due(dry_run=dry_run))
+
+
+@cli.command("usage-finalize")
+@click.option("--email", required=True, help="需要修复结算的账号邮箱")
+@click.option("--cycle-start", required=True, help="账期开始 ISO8601 UTC 时间")
+@click.option("--actor", required=True, help="执行修复的操作者")
+@click.option("--reason", required=True, help="修复原因")
+def cmd_usage_finalize(
+    email: str, cycle_start: str, actor: str, reason: str
+) -> None:
+    """显式修复指定账号账期的最终结算状态。"""
+    result = get_usage_runtime().store.repair_finalize_cycle(
+        email,
+        _parse_cycle_start(cycle_start),
+        actor=actor,
+        reason=reason,
+    )
+    _echo_json(result)
 
 
 def _print_summary(title: str, ok: list[str], fail: list[tuple[str, str]]) -> None:
@@ -49,13 +135,6 @@ def _print_summary(title: str, ok: list[str], fail: list[tuple[str, str]]) -> No
         click.echo("✗ 失败:")
         for e, err in fail:
             click.echo(f"    {e}: {err[:120]}")
-
-
-@click.group()
-@click.option("-v", "--verbose", is_flag=True, help="DEBUG 日志")
-def cli(verbose: bool) -> None:
-    """Cursor Account Manager — 批量管理 Cursor 账号。"""
-    setup("DEBUG" if verbose else "INFO")
 
 
 # ═══ login ════════════════════════════════════════════════════════

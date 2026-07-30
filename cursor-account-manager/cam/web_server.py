@@ -26,6 +26,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -52,8 +53,17 @@ from .spending_refresh import (
     persist_spending_panel,
     run_daily_spending_refresh_scheduled,
 )
-from .sync_log_store import get_default_sync_log_store
+from .sync_log_store import (
+    SyncLogStore,
+    UsageCollectOutcome,
+    get_default_sync_log_store,
+)
 from .token_store import get_default_store
+from .usage_scheduler import start_usage_scheduler_once, stop_usage_scheduler
+from .usage_snapshot_models import CollectionStatus, FinalCycle, FinalSource, KnownCycle
+from .usage_snapshot_refresh import run_usage_manual_collect
+from .usage_snapshot_store import UsageSnapshotStore
+from .usage_waste import classify_waste
 
 log = get("web")
 
@@ -108,6 +118,8 @@ _download_files: Dict[str, Path] = {}
 _task_lock = threading.Lock()
 _sync_runtime: Dict[str, Dict[str, Any]] = {}
 _scheduler_started = False
+_legacy_scheduler_stop = threading.Event()
+_legacy_scheduler_thread: threading.Thread | None = None
 
 _spending_progress_lock = threading.Lock()
 _spending_refresh_progress: Dict[str, Any] = {
@@ -129,27 +141,518 @@ IMAP_PORT_DEFAULT = SETTINGS.default_imap_port
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 
+def _dashboard_datetime(value: object) -> datetime.datetime:
+    """将 MySQL 的 UTC DATETIME 规范为领域模型需要的 UTC 时间。"""
+    if not isinstance(value, datetime.datetime):
+        raise ValueError("看板快照时间字段缺失或格式错误")
+    return (
+        value.replace(tzinfo=datetime.timezone.utc)
+        if value.tzinfo is None
+        else value.astimezone(datetime.timezone.utc)
+    )
+
+
+def _dashboard_decimal(value: object) -> Decimal:
+    """将数据库用量字段转换为精确百分比。"""
+    try:
+        return Decimal(str(value))
+    except Exception as exc:
+        raise ValueError("看板快照用量字段格式错误") from exc
+
+
+def _reason_without_usage_snapshot(
+    outcome: UsageCollectOutcome | None,
+) -> str:
+    """无快照时根据最近采集终态生成数据状态原因（悬停展示）。"""
+    if outcome is None:
+        return "暂无用量快照（尚未采集成功）"
+    detail = (outcome.error_message or "").strip()
+    if outcome.status == "failed":
+        return f"采集失败：{detail or '未知错误'}"
+    if outcome.status == "skipped":
+        return f"采集跳过：{detail or '已跳过'}"
+    return "暂无用量快照（尚未采集成功）"
+
+
+def _build_usage_dashboard_rows(
+    snapshot_rows: list[dict],
+    *,
+    sync_log: SyncLogStore | None = None,
+) -> list[dict]:
+    """按邮箱聚合快照，生成用量看板行和浪费等级。"""
+    accounts: dict[str, dict[str, object]] = {}
+    for snapshot in snapshot_rows:
+        email = str(snapshot.get("email") or "").strip().lower()
+        if not email:
+            raise ValueError("看板账号邮箱为空")
+        account = accounts.setdefault(
+            email,
+            {
+                "email": email,
+                "applicant": snapshot.get("applicant") or "",
+                "department": snapshot.get("department") or "",
+                "snapshots": [],
+            },
+        )
+        if snapshot.get("collected_at") is not None:
+            account["snapshots"].append(snapshot)
+
+    log_store = sync_log or SyncLogStore()
+    emails_without_snapshot = [
+        str(account["email"])
+        for account in accounts.values()
+        if not account["snapshots"]
+    ]
+    collect_outcomes = log_store.map_latest_usage_collect_outcomes(
+        emails_without_snapshot
+    )
+
+    rows: list[dict] = []
+    continuity_tolerance = datetime.timedelta(
+        hours=SETTINGS.usage_cycle_continuity_tolerance_hours
+    )
+    for account in accounts.values():
+        snapshots = list(account["snapshots"])
+        if not snapshots:
+            email = str(account["email"])
+            rows.append(
+                {
+                    "email": email,
+                    "applicant": account["applicant"],
+                    "department": account["department"],
+                    "plan_tier": "unknown",
+                    "plan_status": "unknown",
+                    "billing_cycle_start": None,
+                    "billing_cycle_end": None,
+                    "current_used_pct": None,
+                    "latest_cycle_start": None,
+                    "latest_cycle_end": None,
+                    "latest_final_used_pct": None,
+                    "latest_final_source": None,
+                    "waste_level": "unknown",
+                    "low_usage_streak": 0,
+                    "data_quality_status": "unknown",
+                    "reason": _reason_without_usage_snapshot(
+                        collect_outcomes.get(email)
+                    ),
+                    "collected_at": None,
+                }
+            )
+            continue
+
+        def snapshot_sort_key(item: dict) -> tuple:
+            return (
+                _dashboard_datetime(item["collected_at"]),
+                int(item.get("snapshot_id") or 0),
+            )
+
+        current = max(snapshots, key=snapshot_sort_key)
+        known_by_cycle: dict[tuple, KnownCycle] = {}
+        final_by_cycle: dict[tuple, tuple[dict, FinalCycle]] = {}
+        for snapshot in snapshots:
+            cycle_start = _dashboard_datetime(snapshot["billing_cycle_start"])
+            cycle_end = _dashboard_datetime(snapshot["billing_cycle_end"])
+            plan_tier = str(snapshot.get("plan_tier") or "unknown")
+            cycle_key = (cycle_start, cycle_end, plan_tier)
+            known_by_cycle.setdefault(
+                cycle_key,
+                KnownCycle(
+                    email=str(account["email"]),
+                    plan_tier=plan_tier,
+                    billing_cycle_start=cycle_start,
+                    billing_cycle_end=cycle_end,
+                ),
+            )
+            if bool(snapshot.get("is_cycle_final")):
+                final = FinalCycle(
+                    email=str(account["email"]),
+                    plan_tier=plan_tier,
+                    billing_cycle_start=cycle_start,
+                    billing_cycle_end=cycle_end,
+                    total_used_pct=_dashboard_decimal(snapshot["total_used_pct"]),
+                    final_source=FinalSource(str(snapshot.get("final_source"))),
+                )
+                existing = final_by_cycle.get(cycle_key)
+                if existing is None or snapshot_sort_key(snapshot) > snapshot_sort_key(existing[0]):
+                    final_by_cycle[cycle_key] = (snapshot, final)
+
+        final_pairs = list(final_by_cycle.values())
+        final_cycles = [item[1] for item in final_pairs]
+        assessment = classify_waste(
+            current_plan_tier=str(current.get("plan_tier") or "unknown"),
+            known_cycles=list(known_by_cycle.values()),
+            final_cycles=final_cycles,
+            low_threshold_pct=SETTINGS.usage_low_threshold_pct,
+            continuity_tolerance=continuity_tolerance,
+        )
+        latest_final = (
+            max(
+                final_pairs,
+                key=lambda item: (
+                    item[1].billing_cycle_end,
+                    snapshot_sort_key(item[0]),
+                ),
+            )[0]
+            if final_pairs
+            else None
+        )
+        rows.append(
+            {
+                "email": account["email"],
+                "applicant": account["applicant"],
+                "department": account["department"],
+                "plan_tier": current.get("plan_tier") or "unknown",
+                "plan_status": current.get("plan_status") or "unknown",
+                "billing_cycle_start": current.get("billing_cycle_start"),
+                "billing_cycle_end": current.get("billing_cycle_end"),
+                "current_used_pct": _dashboard_decimal(current["total_used_pct"]),
+                "latest_cycle_start": (
+                    latest_final.get("billing_cycle_start")
+                    if latest_final is not None
+                    else None
+                ),
+                "latest_cycle_end": (
+                    latest_final.get("billing_cycle_end")
+                    if latest_final is not None
+                    else None
+                ),
+                "latest_final_used_pct": (
+                    _dashboard_decimal(latest_final["total_used_pct"])
+                    if latest_final is not None
+                    else None
+                ),
+                "latest_final_source": (
+                    latest_final.get("final_source")
+                    if latest_final is not None
+                    else None
+                ),
+                "waste_level": assessment.level.value,
+                "low_usage_streak": assessment.low_usage_streak,
+                "data_quality_status": assessment.data_quality_status,
+                "reason": assessment.reason,
+                "collected_at": current["collected_at"],
+            }
+        )
+    return rows
+
+
+def _filter_and_sort_usage_dashboard_rows(
+    rows: list[dict],
+    *,
+    query: str,
+    department: str,
+    waste_level: str,
+) -> list[dict]:
+    """应用看板过滤条件并按浪费等级、用量和邮箱确定性排序。"""
+    normalized_query = query.strip().lower()
+    normalized_department = department.strip()
+    normalized_level = waste_level.strip().lower()
+    level_order = {"l3": 0, "l2": 1, "l1": 2, "l0": 3, "unknown": 4}
+    filtered = [
+        row
+        for row in rows
+        if (
+            not normalized_query
+            or normalized_query
+            in " ".join(
+                str(row.get(field) or "").lower()
+                for field in ("email", "applicant", "department")
+            )
+        )
+        and (
+            not normalized_department
+            or row["department"] == normalized_department
+        )
+        and (
+            not normalized_level
+            or row["waste_level"] == normalized_level
+        )
+    ]
+    return sorted(
+        filtered,
+        key=lambda row: (
+            level_order.get(str(row["waste_level"]), len(level_order)),
+            (
+                Decimal("Infinity")
+                if row["current_used_pct"] is None
+                else Decimal(str(row["current_used_pct"]))
+            ),
+            str(row["email"]),
+        ),
+    )
+
+
+def _normalize_usage_email(email: str) -> str:
+    """规范化用量监控路径中的邮箱。"""
+    return str(email or "").strip().lower()
+
+
+def _build_usage_account_cycles(store: UsageSnapshotStore, email: str) -> dict:
+    """组装单账号当前账期、完整账期历史与浪费等级摘要。"""
+    account = store.get_monitor_account(email)
+    if account is None:
+        raise LookupError("account_not_found")
+
+    latest = store.get_latest_snapshot(email)
+    finals_raw = store.list_final_cycles(email)
+    threshold = SETTINGS.usage_low_threshold_pct
+    continuity_tolerance = datetime.timedelta(
+        hours=SETTINGS.usage_cycle_continuity_tolerance_hours
+    )
+
+    known_cycles: list[KnownCycle] = []
+    final_cycles: list[FinalCycle] = []
+    finals: list[dict] = []
+    for row in finals_raw:
+        cycle_start = _dashboard_datetime(row["billing_cycle_start"])
+        cycle_end = _dashboard_datetime(row["billing_cycle_end"])
+        plan_tier = str(row.get("plan_tier") or "unknown")
+        used_pct = _dashboard_decimal(row["total_used_pct"])
+        known_cycles.append(
+            KnownCycle(
+                email=email,
+                plan_tier=plan_tier,
+                billing_cycle_start=cycle_start,
+                billing_cycle_end=cycle_end,
+            )
+        )
+        final_cycles.append(
+            FinalCycle(
+                email=email,
+                plan_tier=plan_tier,
+                billing_cycle_start=cycle_start,
+                billing_cycle_end=cycle_end,
+                total_used_pct=used_pct,
+                final_source=FinalSource(str(row.get("final_source"))),
+            )
+        )
+        finals.append(
+            {
+                "billing_cycle_start": row.get("billing_cycle_start"),
+                "billing_cycle_end": row.get("billing_cycle_end"),
+                "used_pct": used_pct,
+                "final_source": row.get("final_source"),
+                "finalized_at": row.get("finalized_at"),
+                "plan_tier": plan_tier,
+                "is_low": used_pct < threshold,
+            }
+        )
+
+    if latest is not None:
+        known_cycles.append(
+            KnownCycle(
+                email=email,
+                plan_tier=str(latest.get("plan_tier") or "unknown"),
+                billing_cycle_start=_dashboard_datetime(latest["billing_cycle_start"]),
+                billing_cycle_end=_dashboard_datetime(latest["billing_cycle_end"]),
+            )
+        )
+        current = {
+            "billing_cycle_start": latest.get("billing_cycle_start"),
+            "billing_cycle_end": latest.get("billing_cycle_end"),
+            "used_pct": _dashboard_decimal(latest["total_used_pct"]),
+            "collected_at": latest.get("collected_at"),
+            "plan_tier": latest.get("plan_tier") or "unknown",
+            "is_final": bool(latest.get("is_cycle_final")),
+        }
+        current_plan_tier = str(latest.get("plan_tier") or "unknown")
+    else:
+        current = None
+        current_plan_tier = "unknown"
+
+    if known_cycles or final_cycles:
+        assessment = classify_waste(
+            current_plan_tier=current_plan_tier,
+            known_cycles=known_cycles,
+            final_cycles=final_cycles,
+            low_threshold_pct=threshold,
+            continuity_tolerance=continuity_tolerance,
+        )
+        waste_level = assessment.level.value
+        low_usage_streak = assessment.low_usage_streak
+        data_quality_status = assessment.data_quality_status
+        reason = assessment.reason
+    else:
+        waste_level = "unknown"
+        low_usage_streak = 0
+        data_quality_status = "unknown"
+        outcome = SyncLogStore().get_latest_usage_collect_outcome(email)
+        reason = _reason_without_usage_snapshot(outcome)
+
+    return {
+        "email": email,
+        "applicant": account.get("applicant") or "",
+        "department": account.get("department") or "",
+        "current": current,
+        "finals": finals,
+        "waste_level": waste_level,
+        "low_usage_streak": low_usage_streak,
+        "data_quality_status": data_quality_status,
+        "reason": reason,
+        "low_threshold_pct": threshold,
+    }
+
+
+@app.get("/api/usage-monitor/dashboard")
+async def usage_monitor_dashboard(
+    q: str = "",
+    department: str = "",
+    waste_level: str = "",
+):
+    """返回用量监控看板的汇总和按账号聚合后的数据行。"""
+    try:
+        raw_rows = UsageSnapshotStore().list_usage_dashboard_snapshots()
+        rows = _filter_and_sort_usage_dashboard_rows(
+            _build_usage_dashboard_rows(raw_rows, sync_log=SyncLogStore()),
+            query=q,
+            department=department,
+            waste_level=waste_level,
+        )
+    except Exception as exc:
+        # 数据库异常可能携带 DSN 或认证信息，日志和响应均不输出原始错误。
+        log.error("读取用量监控看板数据失败，错误类型=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="用量监控数据暂不可用，请稍后重试",
+        ) from None
+
+    summary = {
+        "total": len(rows),
+        "l3": sum(row["waste_level"] == "l3" for row in rows),
+        "l2": sum(row["waste_level"] == "l2" for row in rows),
+        "l1": sum(row["waste_level"] == "l1" for row in rows),
+        "l0": sum(row["waste_level"] == "l0" for row in rows),
+        "unknown": sum(row["waste_level"] == "unknown" for row in rows),
+    }
+    return {
+        "summary": summary,
+        "rows": rows,
+        "low_threshold_pct": SETTINGS.usage_low_threshold_pct,
+    }
+
+
+@app.get("/api/usage-monitor/accounts/{email}/cycles")
+async def usage_monitor_account_cycles(email: str):
+    """返回单账号当前账期与已结算完整账期历史（只读）。"""
+    normalized = _normalize_usage_email(email)
+    if not normalized:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    try:
+        return _build_usage_account_cycles(UsageSnapshotStore(), normalized)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="账号不存在") from None
+    except Exception as exc:
+        log.error(
+            "读取账号历史账期失败，错误类型=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="用量监控数据暂不可用，请稍后重试",
+        ) from None
+
+
+def _load_usage_dashboard_row_for_email(email: str) -> dict | None:
+    """采集成功后重读该账号看板行。"""
+    normalized = _normalize_usage_email(email)
+    raw_rows = UsageSnapshotStore().list_usage_dashboard_snapshots()
+    filtered = [
+        row
+        for row in raw_rows
+        if _normalize_usage_email(str(row.get("email") or "")) == normalized
+    ]
+    rows = _build_usage_dashboard_rows(filtered)
+    return rows[0] if rows else None
+
+
+def _usage_collect_http_error(status: CollectionStatus, message: str) -> HTTPException:
+    """将单账号采集状态映射为 HTTP 错误。"""
+    detail = (message or "").strip()
+    if status is CollectionStatus.NOT_COLLECTABLE:
+        return HTTPException(
+            status_code=404,
+            detail=detail or "账号不存在或无法采集",
+        )
+    if status is CollectionStatus.LOCK_BUSY:
+        return HTTPException(
+            status_code=409,
+            detail=detail or "该账号正在采集，请稍后",
+        )
+    if status is CollectionStatus.AUTH_CIRCUIT_OPEN:
+        return HTTPException(
+            status_code=503,
+            detail=detail or "认证熔断中，请稍后重试",
+        )
+    return HTTPException(
+        status_code=502,
+        detail=detail or "采集失败，请稍后重试",
+    )
+
+
+@app.post("/api/usage-monitor/accounts/{email}/collect")
+async def usage_monitor_account_collect(email: str):
+    """强制采集单个账号当前用量，并返回更新后的看板行。"""
+    normalized = _normalize_usage_email(email)
+    if not normalized:
+        raise HTTPException(status_code=404, detail="账号不存在或无法采集")
+    try:
+        result = await asyncio.to_thread(run_usage_manual_collect, normalized)
+    except Exception as exc:
+        log.error(
+            "手动采集用量失败，错误类型=%s email=%s",
+            type(exc).__name__,
+            normalized,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="用量采集暂不可用，请稍后重试",
+        ) from None
+
+    if result.status is not CollectionStatus.SUCCESS:
+        raise _usage_collect_http_error(result.status, result.error_message)
+
+    try:
+        row = await asyncio.to_thread(_load_usage_dashboard_row_for_email, normalized)
+    except Exception as exc:
+        log.error(
+            "采集后读取看板行失败，错误类型=%s email=%s",
+            type(exc).__name__,
+            normalized,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="采集已完成，但看板数据暂不可用，请刷新列表",
+        ) from None
+    return {"ok": True, "row": row}
+
+
 @app.on_event("startup")
 async def _start_embedded_scheduler() -> None:
-    """Web 服务启动时同步启动 BI 调度循环。"""
-    global _scheduler_started
+    """Web 服务启动时按需启动旧调度器与独立用量调度器。"""
+    global _scheduler_started, _legacy_scheduler_thread
     if _scheduler_started:
         return
+    if SETTINGS.usage_snapshot_enable:
+        start_usage_scheduler_once()
     if (
         not SETTINGS.bi_sync_enable
         and not SETTINGS.spending_refresh_enable
         and not SETTINGS.billing_ledger_refresh_enable
     ):
-        log.info("BI、套餐/按量、账期净支出定时刷新均未启用，跳过调度器启动")
+        if SETTINGS.usage_snapshot_enable:
+            log.info("仅启用用量快照独立调度器")
+        else:
+            log.info("所有定时刷新均未启用，跳过调度器启动")
         return
     _scheduler_started = True
-    t = threading.Thread(
+    _legacy_scheduler_stop.clear()
+    _legacy_scheduler_thread = threading.Thread(
         target=run_scheduler_loop,
-        kwargs={"poll_interval_sec": 30},
+        kwargs={"poll_interval_sec": 30, "stop_event": _legacy_scheduler_stop},
         name="cam-bi-scheduler",
         daemon=True,
     )
-    t.start()
+    _legacy_scheduler_thread.start()
     log.info(
         "调度器已随 Web 服务启动 bi_cron=%s spending_cron=%s ledger_cron=%s spending_alert=%s",
         SETTINGS.bi_sync_cron,
@@ -157,6 +660,18 @@ async def _start_embedded_scheduler() -> None:
         SETTINGS.billing_ledger_refresh_cron,
         SETTINGS.spending_refresh_alert_enable,
     )
+
+
+@app.on_event("shutdown")
+async def _stop_embedded_scheduler() -> None:
+    """关闭时停止独立调度器，并让旧调度线程退出。"""
+    global _scheduler_started, _legacy_scheduler_thread
+    _legacy_scheduler_stop.set()
+    stop_usage_scheduler(timeout_sec=30)
+    if _legacy_scheduler_thread is not None:
+        _legacy_scheduler_thread.join(timeout=35)
+    _legacy_scheduler_thread = None
+    _scheduler_started = False
 
 
 # ─── 数据模型 ─────────────────────────────────────────────────────

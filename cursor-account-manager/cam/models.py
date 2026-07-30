@@ -50,6 +50,10 @@ class TokenAcquisitionError(Exception):
     """所有获取 token 路径都失败。"""
 
 
+class AuthCircuitOpenError(TokenAcquisitionError):
+    """认证熔断器开启，当前不允许刷新或浏览器登录。"""
+
+
 class TokenExpiredError(Exception):
     """API 返回 401，当前 access_token 已失效。"""
 

@@ -1,0 +1,59 @@
+<h2>用量监控页面布局</h2>
+<p class="subtitle">推荐在现有“账号库”旁新增一级菜单“用量监控”，默认按浪费等级从 L3 到 UNKNOWN 排序。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Cursor Account Manager</div>
+  <div style="display:flex;min-height:430px">
+    <div class="mock-sidebar">
+      <strong>工作台</strong><br><br>
+      账号库<br><br>
+      <strong style="color:#2563eb">用量监控</strong><br><br>
+      同步记录
+    </div>
+    <div class="mock-content" style="padding:22px">
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
+        <div>
+          <div class="label">订阅与用量</div>
+          <h3 style="margin:6px 0">用量监控</h3>
+          <p style="margin:0">优先处理连续低用量的账号；账期数据按 Cursor 滚动周期统计。</p>
+        </div>
+        <button class="mock-button">刷新数据</button>
+      </div>
+      <div style="display:flex;gap:12px;margin:20px 0">
+        <div class="card" style="flex:1;padding:12px"><strong>高浪费 L3</strong><br><span style="font-size:24px">12</span></div>
+        <div class="card" style="flex:1;padding:12px"><strong>需关注 L2</strong><br><span style="font-size:24px">21</span></div>
+        <div class="card" style="flex:1;padding:12px"><strong>数据待确认</strong><br><span style="font-size:24px">8</span></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:14px">
+        <input class="mock-input" style="flex:1" placeholder="搜索邮箱、申请人或部门">
+        <button class="mock-button">部门筛选</button>
+        <button class="mock-button">仅看 L2/L3</button>
+      </div>
+      <div class="placeholder" style="padding:0">
+        <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr 1fr;padding:12px;border-bottom:1px solid #ddd;font-weight:600">
+          <span>账号 / 人员</span><span>套餐</span><span>当前账期</span><span>最终用量</span><span>浪费等级</span><span>数据状态</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr 1fr;padding:12px">
+          <span>user@example.com<br><small>张三 · 研发部</small></span><span>Pro+</span><span>07/07 — 08/07</span><span>8.2%</span><span><b>L3</b> · 连续 3 期</span><span>期末快照</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="recommended" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>推荐：独立看板 + 账号库菜单</h3>
+      <p>保留账号库作为主数据管理入口，用量监控专注排序、筛选和趋势；适合日常运营。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="embedded" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>备选：账号库内增加用量列</h3>
+      <p>改动较小，但筛选、排序、趋势与数据状态会让现有账号表变得拥挤。</p>
+    </div>
+  </div>
+</div>

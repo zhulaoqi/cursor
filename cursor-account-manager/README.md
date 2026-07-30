@@ -104,6 +104,79 @@ ALERT_TO_EMAILS=alice@company.com,bob@company.com
 
 ---
 
+## Cursor 用量监控
+
+用量监控是独立于 BI 日同步与账期净支出的后台能力；启用后会采集 Cursor 当前滚动账期的套餐与用量快照，并在账期结束时形成可用于低用量分析的最终记录。
+
+### 配置与启动边界
+
+在 `.env` 中配置以下开关与参数：
+
+```ini
+# 总开关；设为 false 时不启动用量调度器
+USAGE_SNAPSHOT_ENABLE=true
+
+# periodic：按固定间隔记录当前账期的普通快照
+USAGE_PERIODIC_INTERVAL_HOURS=24
+USAGE_BOOTSTRAP_STALE_HOURS=36
+USAGE_SNAPSHOT_CONCURRENCY=10
+
+# pre-reset：扫描即将结束的账期，并在目标窗口采集最终候选快照
+USAGE_PRE_RESET_SCAN_INTERVAL_MIN=15
+USAGE_PRE_RESET_WINDOW_START_MIN=360
+USAGE_PRE_RESET_TARGET_OFFSET_MIN=180
+USAGE_PRE_RESET_WINDOW_END_MIN=30
+
+# 跨进程任务锁和账号锁
+USAGE_PERIODIC_LOCK_FILE=data/cam_usage_periodic.lock
+USAGE_PRE_RESET_LOCK_FILE=data/cam_usage_pre_reset.lock
+USAGE_ACCOUNT_LOCK_DIR=data/usage-account-locks
+```
+
+`periodic` 用于观察账期内的趋势，同一账期可有多个时间槽快照；`pre-reset` 面向账期临近重置时的最终快照，按账号和账期去重。系统以 API 返回的账期起止时间为准，不以本地日历推断重置时间。
+
+数据使用 `cursor_accounts` 关联账号归属，`cursor_usage_snapshot` 保存 UTC 毫秒级用量快照和账期最终状态，`cursor_billing_ledger_summary` 保留既有自然月账单汇总。三者通过规范化 email 关联，但时间粒度不同：快照对应滚动账期，Ledger 对应自然月。
+
+### CLI 运维命令
+
+```bash
+# 采集所有可监控账号的 periodic 快照
+.venv/bin/python -m cam usage-snapshot --all --type periodic
+
+# 仅采集指定账号（--email 可重复）
+.venv/bin/python -m cam usage-snapshot --email user@example.com --type periodic
+
+# 执行到期的 pre-reset 采集；先用 dry-run 预览
+.venv/bin/python -m cam usage-pre-reset-due --dry-run
+.venv/bin/python -m cam usage-pre-reset-due
+
+# 显式修复某个账期的结算状态（需保留操作者和原因）
+.venv/bin/python -m cam usage-finalize \
+  --email user@example.com \
+  --cycle-start 2026-07-01T00:00:00Z \
+  --actor operator@example.com \
+  --reason "人工核对后的修复"
+```
+
+上述命令以当前工作区的 `cam/cli.py` 实现为准。若目标分支尚未合入该 CLI 改动，请仅将其视为规划命令，不要据此执行真实环境操作。
+
+### 数据口径与等级
+
+- 套餐档位取自 Cursor 返回的套餐名称并规范化；**不得**根据金额、发票金额或 Ledger 金额推断套餐。
+- `pre_reset` 是优先使用的账期最终来源。若账期切换时没有可用的 `pre-reset`，系统可能以该账期最后一条 `periodic` 快照结算并标记 `periodic_fallback`。这表示降级来源，不能与真实 pre-reset 采集等同。
+- 低用量等级按当前连续套餐档位段中已经完成且数据连续的账期计算：`L0` 为无连续低用量账期，`L1`/`L2`/`L3` 分别为连续 1/2/至少 3 个低用量账期；套餐未知、账期未结算或数据断裂时为 `UNKNOWN`，不应据此作业务判断。
+- `cursor_billing_ledger_summary` 的金额是自然月账单口径，不是 Cursor 滚动账期的精确成本；不得将其作为滚动账期用量或套餐成本的精确结论。
+
+### MySQL 测试与安全
+
+真实 MySQL 集成测试仅在完整设置以下环境变量后运行：`CAM_TEST_MYSQL_HOST`、`CAM_TEST_MYSQL_PORT`、`CAM_TEST_MYSQL_USER`、`CAM_TEST_MYSQL_PASSWORD`、`CAM_TEST_MYSQL_DATABASE`。测试库名必须包含 `test`；发布矩阵还需设置 `CAM_REQUIRE_MYSQL_TESTS=1` 和 `CAM_TEST_MYSQL_EXPECTED_VERSION=5.7` 或 `8.0`。未配置时测试会明确跳过，不代表已验证真实 MySQL。
+
+数据库密码、IMAP 密码、Token、Cookie、代理凭据和告警密钥只能放在未提交的 `.env` 或部署环境密钥管理中；不要写入 README、账号 CSV、日志、原始 payload 或版本库。
+
+Windows 服务运行账户必须对 `USAGE_ACCOUNT_LOCK_DIR`、`USAGE_PERIODIC_LOCK_FILE` 和 `USAGE_PRE_RESET_LOCK_FILE` 的父目录拥有创建及写入权限。建议在服务启动前创建 `data\usage-account-locks`，并使用服务账户实际验证锁目录可写。
+
+---
+
 ## 使用方式一：Web UI（推荐）
 
 ### 启动服务

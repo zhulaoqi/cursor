@@ -6,7 +6,7 @@ import base64
 import json
 import threading
 import time
-from typing import Optional
+from typing import Optional, Protocol
 from urllib.parse import unquote
 
 import requests
@@ -22,6 +22,7 @@ from .config import (
 from .logger import get
 from .models import (
     Account,
+    AuthCircuitOpenError,
     BrowserLoginError,
     RefreshTokenInvalidError,
     TokenAcquisitionError,
@@ -30,6 +31,20 @@ from .models import (
 from .token_store import TokenStore, get_default_store
 
 log = get("token")
+
+
+class AuthPolicy(Protocol):
+    """约束刷新令牌和浏览器登录是否允许执行。"""
+
+    def allow_refresh_or_login(self) -> bool:
+        """返回当前是否允许发起认证动作。"""
+
+
+class AllowAllAuthPolicy:
+    """默认认证策略，保持既有调用行为。"""
+
+    def allow_refresh_or_login(self) -> bool:
+        return True
 
 
 _email_locks: dict[str, threading.Lock] = {}
@@ -123,7 +138,13 @@ class TokenManager:
     def __init__(self, store: Optional[TokenStore] = None):
         self.store = store or get_default_store()
 
-    def get_valid_token(self, account: Account, *, force_refresh: bool = False) -> str:
+    def get_valid_token(
+        self,
+        account: Account,
+        *,
+        force_refresh: bool = False,
+        auth_policy: AuthPolicy | None = None,
+    ) -> str:
         """
         返回当前有效的 access_token。策略：
           1. 缓存命中且未过期 → 直接返回
@@ -131,6 +152,7 @@ class TokenManager:
           3. 刷新失败或无 refresh_token → 浏览器重登
           4. 浏览器登录失败 → 失败计数 +1，达上限则 disable
         """
+        policy = auth_policy or AllowAllAuthPolicy()
         lock = _lock_for(account.email)
         with lock:
             rec = self.store.get(account.email) or TokenRecord(email=account.email)
@@ -146,6 +168,7 @@ class TokenManager:
                 return rec.access_token
 
             if rec.refresh_token:
+                self._require_auth_permitted(policy)
                 try:
                     access, refresh, exp = _refresh_via_api(
                         rec.refresh_token, proxy=SETTINGS.proxy,
@@ -164,7 +187,14 @@ class TokenManager:
                     log.warning(f"[{account.email}] refresh 异常（非失效）: {e}")
                     self.store.log(account.email, "refresh_error", str(e))
 
+            self._require_auth_permitted(policy)
             return self._browser_login_and_save(account)
+
+    @staticmethod
+    def _require_auth_permitted(policy: AuthPolicy) -> None:
+        """在执行刷新或浏览器登录前检查认证熔断策略。"""
+        if not policy.allow_refresh_or_login():
+            raise AuthCircuitOpenError("认证熔断器开启，暂不执行刷新或浏览器登录")
 
     # 这些关键词出现在异常信息里，视为临时网络抖动，重试不计入失败次数
     _TRANSIENT_ERRORS = (
@@ -227,9 +257,16 @@ class TokenManager:
         self.store.log(account.email, "browser_login_ok", f"exp={exp}")
         return access
 
-    def force_relogin(self, account: Account) -> str:
+    def force_relogin(
+        self,
+        account: Account,
+        *,
+        auth_policy: AuthPolicy | None = None,
+    ) -> str:
         """不走缓存 / 不走 refresh，直接浏览器登录。"""
+        policy = auth_policy or AllowAllAuthPolicy()
         with _lock_for(account.email):
+            self._require_auth_permitted(policy)
             return self._browser_login_and_save(account, force_fresh=True)
 
     def mark_access_token_expired(self, email: str) -> None:

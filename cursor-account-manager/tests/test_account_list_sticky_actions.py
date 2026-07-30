@@ -123,6 +123,24 @@ class AccountListStickyActionsTests(unittest.TestCase):
         self.assertIn("min-width: 32px", html)
         self.assertIn("min-height: 32px", html)
 
+    def test_account_list_table_aligns_identity_and_status_with_usage_style(self):
+        """账号库表格：邮箱+飞书合并、IMAP 合并、状态用统一 badge，对齐用量监控观感。"""
+        html = STATIC_INDEX.read_text(encoding="utf-8")
+        self.assertIn("account-identity", html)
+        self.assertIn("account-identity-email", html)
+        self.assertIn("account-identity-feishu", html)
+        self.assertIn("account-imap", html)
+        self.assertIn("account-meta-badge", html)
+        self.assertIn("accountSourceBadgeClass(a)", html)
+        self.assertIn("accountStatusBadgeClass(a)", html)
+        self.assertIn('col class="account-col-width"', html)
+        self.assertIn('col class="imap-col-width"', html)
+        self.assertNotIn('col class="feishu-col-width"', html)
+        self.assertNotIn('col class="port-col-width"', html)
+        self.assertNotIn(".account-list-table tbody tr:nth-child(even)", html)
+        self.assertIn(".account-list-table th {\n      white-space: nowrap;\n      color: #64748B;\n      background: #F8FAFC;", html)
+        self.assertIn(".account-list-table tbody tr:hover {\n      background: #F8FBFF;", html)
+
     def test_single_account_delete_uses_custom_dialog_not_native_confirm(self):
         """单账号删除按钮不能再用浏览器原生 confirm()，必须用站内统一风格弹窗。"""
         html = STATIC_INDEX.read_text(encoding="utf-8")

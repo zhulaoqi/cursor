@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS sync_job_run (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_job_run_biz_date ON sync_job_run(biz_date);
 CREATE INDEX IF NOT EXISTS idx_sync_job_run_status ON sync_job_run(status);
+CREATE INDEX IF NOT EXISTS idx_sync_job_run_trigger
+ON sync_job_run(trigger_type, run_id);
 
 CREATE TABLE IF NOT EXISTS sync_job_account_log (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +56,8 @@ CREATE TABLE IF NOT EXISTS sync_job_account_log (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_job_account_run ON sync_job_account_log(run_id);
 CREATE INDEX IF NOT EXISTS idx_sync_job_account_email ON sync_job_account_log(account_email);
+CREATE INDEX IF NOT EXISTS idx_sync_job_account_email_run
+ON sync_job_account_log(account_email, run_id, ended_at);
 
 CREATE TABLE IF NOT EXISTS sync_job_stage_log (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +69,25 @@ CREATE TABLE IF NOT EXISTS sync_job_stage_log (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_job_stage_run ON sync_job_stage_log(run_id);
 """
+
+
+@dataclass(frozen=True)
+class AccountAttemptState:
+    """账号在一个触发时间槽内的持久尝试状态。"""
+
+    attempts: int
+    last_failed_at: int | None
+    succeeded: bool
+
+
+@dataclass(frozen=True)
+class UsageCollectOutcome:
+    """账号最近一次用量采集终态（供看板数据状态悬停）。"""
+
+    email: str
+    status: str
+    error_message: str
+    ended_at: int
 
 
 class SyncLogStore:
@@ -296,6 +320,108 @@ class SyncLogStore:
                 (biz_date, trigger_type),
             ).fetchone()
             return row is not None
+
+    def get_latest_usage_collect_outcome(
+        self,
+        account_email: str,
+    ) -> UsageCollectOutcome | None:
+        """读取账号最近一条用量快照采集终态（failed/skipped/success）。"""
+        if not isinstance(account_email, str) or not account_email.strip():
+            raise ValueError("account_email 去除首尾空白后不能为空")
+        normalized = account_email.strip().lower()
+        mapping = self.map_latest_usage_collect_outcomes([normalized])
+        return mapping.get(normalized)
+
+    def map_latest_usage_collect_outcomes(
+        self,
+        emails: list[str],
+    ) -> dict[str, UsageCollectOutcome]:
+        """批量读取若干账号最近一次用量快照采集终态。"""
+        normalized = sorted(
+            {
+                email.strip().lower()
+                for email in emails
+                if isinstance(email, str) and email.strip()
+            }
+        )
+        if not normalized:
+            return {}
+
+        placeholders = ",".join("?" for _ in normalized)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT account_email, status, error_message, ended_at
+                FROM (
+                    SELECT
+                        lower(trim(account_email)) AS account_email,
+                        status,
+                        COALESCE(error_message, '') AS error_message,
+                        ended_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY lower(trim(account_email))
+                            ORDER BY ended_at DESC, id DESC
+                        ) AS rn
+                    FROM sync_job_account_log
+                    WHERE account_source = 'usage_snapshot'
+                      AND status IN ('success', 'failed', 'skipped')
+                      AND lower(trim(account_email)) IN ({placeholders})
+                )
+                WHERE rn = 1
+                """,
+                normalized,
+            ).fetchall()
+
+        return {
+            str(row["account_email"]): UsageCollectOutcome(
+                email=str(row["account_email"]),
+                status=str(row["status"]),
+                error_message=str(row["error_message"] or ""),
+                ended_at=int(row["ended_at"]),
+            )
+            for row in rows
+        }
+
+    def get_account_attempt_state(
+        self,
+        *,
+        account_email: str,
+        trigger_type: str,
+    ) -> AccountAttemptState:
+        """规范化账号后读取精确触发时间槽内的终态日志汇总。"""
+        if not isinstance(account_email, str) or not account_email.strip():
+            raise ValueError("account_email 去除首尾空白后不能为空")
+        normalized_email = account_email.strip().lower()
+        if not isinstance(trigger_type, str) or not trigger_type.strip():
+            raise ValueError("trigger_type 不能为空")
+
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS attempts,
+                    MAX(CASE WHEN a.status = 'failed' THEN a.ended_at END)
+                        AS last_failed_at,
+                    MAX(CASE WHEN a.status = 'success' THEN 1 ELSE 0 END)
+                        AS succeeded
+                FROM sync_job_account_log AS a
+                JOIN sync_job_run AS r ON r.run_id = a.run_id
+                WHERE a.account_email = ?
+                  AND r.trigger_type = ?
+                  AND a.status IN ('success', 'failed', 'skipped')
+                """,
+                (normalized_email, trigger_type),
+            ).fetchone()
+
+        return AccountAttemptState(
+            attempts=int(row["attempts"] or 0),
+            last_failed_at=(
+                int(row["last_failed_at"])
+                if row["last_failed_at"] is not None
+                else None
+            ),
+            succeeded=bool(row["succeeded"]),
+        )
 
     def list_stage_logs(self, run_id: str) -> list[dict]:
         with self._conn() as conn:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from .config import SETTINGS
 from .logger import get
 from .spending_refresh import run_daily_spending_refresh_scheduled
 from .sync_log_store import get_default_sync_log_store
+from .usage_scheduler import start_usage_scheduler_once
 
 try:
     import fcntl  # POSIX only
@@ -124,7 +126,16 @@ def _run_billing_ledger_refresh_if_due(
     return date_key
 
 
-def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
+def run_scheduler_loop(
+    poll_interval_sec: int = 30,
+    *,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """运行旧调度任务，并在启用时托管独立的用量调度器。"""
+    stopper = stop_event or threading.Event()
+    usage_coordinator = (
+        start_usage_scheduler_once() if SETTINGS.usage_snapshot_enable else None
+    )
     minute, hour = _parse_cron_hour_min(SETTINGS.bi_sync_cron)
     sp_minute, sp_hour = _parse_cron_hour_min(SETTINGS.spending_refresh_cron)
     last_trigger_date = ""
@@ -143,7 +154,7 @@ def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
         parts.append(f"账期净支出刷新 {ledger_hour:02d}:{ledger_minute:02d}")
     log.info("调度器启动：" + ("；".join(parts) if parts else "无任务"))
 
-    while True:
+    while not stopper.is_set():
         now = datetime.now(BJ_TZ)
         date_key = now.strftime("%Y-%m-%d")
         log_store = get_default_sync_log_store()
@@ -217,4 +228,7 @@ def run_scheduler_loop(poll_interval_sec: int = 30) -> None:
             except Exception as e:
                 log.exception(f"账期净支出调度执行失败: {type(e).__name__}: {e}")
 
-        time.sleep(max(5, poll_interval_sec))
+        stopper.wait(max(5, poll_interval_sec))
+
+    if usage_coordinator is not None:
+        usage_coordinator.stop()

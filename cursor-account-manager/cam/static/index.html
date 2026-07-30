@@ -2144,49 +2144,27 @@
     }
     .account-list-table {
       width: 100%;
-      min-width: 1180px;
+      min-width: 1080px;
+      border-collapse: collapse;
       table-layout: fixed;
     }
-    /* 账号表：列宽合计 100%。飞书列按实际邮箱长度收拢，套餐/按量/Host 紧跟其后 */
+    /* 账号表：邮箱+飞书合并；IMAP host/port 合并；列宽合计 100% */
     .account-list-table col.select-col-width { width: 3%; }
-    .account-list-table col.email-col-width { width: 17%; }
-    .account-list-table col.feishu-col-width { width: 19%; }
-    .account-list-table col.current-plan-col-width { width: 6%; }
-    .account-list-table col.on-demand-col-width { width: 8%; }
-    .account-list-table col.host-col-width { width: 9%; }
-    .account-list-table col.port-col-width { width: 3%; }
-    .account-list-table col.source-col-width { width: 4%; }
-    .account-list-table col.status-col-width { width: 4%; }
-    .account-list-table col.data-updated-col-width { width: 6%; }
-    .account-list-table col.actions-col-width { width: 10%; }
+    .account-list-table col.account-col-width { width: 26%; }
+    .account-list-table col.current-plan-col-width { width: 9%; }
+    .account-list-table col.on-demand-col-width { width: 10%; }
+    .account-list-table col.imap-col-width { width: 14%; }
+    .account-list-table col.source-col-width { width: 7%; }
+    .account-list-table col.status-col-width { width: 9%; }
+    .account-list-table col.data-updated-col-width { width: 10%; }
+    .account-list-table col.actions-col-width { width: 12%; }
     .account-list-table th,
     .account-list-table td {
-      padding: 10px 8px;
+      padding: 12px 10px;
       vertical-align: middle;
-    }
-    .account-list-table th:nth-child(7),
-    .account-list-table td:nth-child(7),
-    .account-list-table th:nth-child(8),
-    .account-list-table td:nth-child(8),
-    .account-list-table th:nth-child(9),
-    .account-list-table td:nth-child(9),
-    .account-list-table th:nth-child(10),
-    .account-list-table td:nth-child(10) {
-      padding: 10px 4px;
-    }
-    .account-list-table th:nth-child(11),
-    .account-list-table td:nth-child(11) {
-      padding: 10px 8px;
-    }
-    .account-list-table th:nth-child(5),
-    .account-list-table td:nth-child(5) {
-      padding-left: 6px;
-      padding-right: 6px;
-    }
-    .account-list-table th:nth-child(6),
-    .account-list-table td:nth-child(6) {
-      padding-left: 4px;
-      padding-right: 4px;
+      min-width: 0;
+      border-bottom: 1px solid var(--line-soft, #F0F4F8);
+      text-align: left;
     }
     .account-list-table td {
       overflow: hidden;
@@ -2194,20 +2172,14 @@
     }
     .account-list-table th {
       white-space: nowrap;
-    }
-    .account-list-table thead th {
-      background: #FFFFFF;
       color: #64748B;
-      border-bottom: 1px solid #E8EEF5;
-    }
-    .account-list-table tbody td {
-      border-bottom: 1px solid #F0F4F8;
-    }
-    .account-list-table tbody tr:nth-child(even) {
-      background: #FFFFFF;
+      background: #F8FAFC;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .02em;
     }
     .account-list-table tbody tr:hover {
-      background: #F8FAFC !important;
+      background: #F8FBFF;
     }
     .account-list-table .account-col-center {
       text-align: center;
@@ -2224,29 +2196,67 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    /* 飞书邮箱：完整展示，不截断（悬停 title 仍保留作复制参考） */
-    .account-list-table th.feishu-col,
-    .account-list-table td.feishu-col {
-      overflow: visible;
-      padding-left: 8px;
-      padding-right: 4px;
+    .account-identity {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
     }
+    .account-identity-email {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      color: #0F172A;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .account-identity-feishu {
+      color: #64748B;
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .account-identity-feishu.is-empty { color: #94A3B8; }
+    .account-imap {
+      display: block;
+      min-width: 0;
+      color: #64748B;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .account-meta-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      min-width: 44px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+      border: 1px solid transparent;
+    }
+    .account-source-manual { color: #1D4ED8; background: #EFF6FF; border-color: #BFDBFE; }
+    .account-source-upload { color: #15803D; background: #F0FDF4; border-color: #BBF7D0; }
+    .account-source-other { color: #475569; background: #F1F5F9; border-color: #E2E8F0; }
+    .account-status-active { color: #15803D; background: #F0FDF4; border-color: #BBF7D0; }
+    .account-status-disabled { color: #B42318; background: #FEF3F2; border-color: #FECACA; }
+    .account-status-unknown { color: #475569; background: #F1F5F9; border-color: #E2E8F0; }
     .account-list-table th.plan-block-col,
     .account-list-table td.plan-block-col {
-      padding-left: 4px;
-      padding-right: 4px;
-    }
-    .account-list-table td.feishu-col .mono-cell {
-      overflow: visible;
-      text-overflow: clip;
-      white-space: nowrap;
-      font-size: 12px;
-      color: var(--muted);
+      padding-left: 8px;
+      padding-right: 8px;
     }
     .account-list-table th.compact-col,
     .account-list-table td.compact-col {
-      padding-left: 4px;
-      padding-right: 4px;
+      padding-left: 8px;
+      padding-right: 8px;
     }
     .account-list-table .select-col {
       padding-left: 6px;
@@ -3210,6 +3220,256 @@
     /* ── animate-spin ── */
     @keyframes spin { to { transform: rotate(360deg); } }
     .animate-spin { animation: spin .8s linear infinite; display: inline-block; }
+
+    /* ── 用量监控 ── */
+    .usage-view { font-size: 16px; }
+    .usage-page-head, .usage-toolbar, .usage-stats {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .usage-page-head {
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .usage-toolbar {
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding: 16px;
+    }
+    .usage-search { flex: 1 1 280px; min-width: 0; }
+    .usage-select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      flex: 0 1 auto;
+      box-sizing: border-box;
+      min-height: 44px;
+      width: auto;
+      max-width: 100%;
+      min-width: 148px;
+      padding: 0 36px 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background-color: #fff;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px 16px;
+      color: var(--text);
+      font: inherit;
+      line-height: 1.25;
+      cursor: pointer;
+    }
+    .usage-select:hover { border-color: #94A3B8; }
+    .usage-select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, .14);
+    }
+    .usage-select::-ms-expand { display: none; }
+    .usage-stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      margin-bottom: 16px;
+    }
+    .usage-stat-card {
+      min-height: 104px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--usage-level-color, var(--border));
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      box-shadow: var(--shadow-soft);
+    }
+    .usage-stat-card.is-active { outline: 2px solid var(--primary); outline-offset: 1px; }
+    .usage-stat-label { display: block; font-size: 14px; font-weight: 700; }
+    .usage-stat-note {
+      display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.35;
+      min-height: 2.7em;
+    }
+    .usage-stat-count { display: block; margin-top: 10px; font: 700 26px/1 var(--font-ui-latin-first); }
+    .usage-table-card { overflow-x: auto; }
+    .usage-table { width: 100%; min-width: 1260px; border-collapse: collapse; table-layout: fixed; }
+    /* 操作列收窄；完整账期用量独立成列 */
+    .usage-table col.usage-col-account { width: 19%; }
+    .usage-table col.usage-col-plan { width: 6%; }
+    .usage-table col.usage-col-cycle { width: 13%; }
+    .usage-table col.usage-col-usage { width: 11%; }
+    .usage-table col.usage-col-final { width: 13%; }
+    .usage-table col.usage-col-final-usage { width: 11%; }
+    .usage-table col.usage-col-level { width: 10%; }
+    .usage-table col.usage-col-status { width: 7%; }
+    .usage-table col.usage-col-action { width: 11%; }
+    .usage-table th, .usage-table td {
+      padding: 12px 10px; border-bottom: 1px solid var(--line-soft);
+      text-align: left; vertical-align: middle; min-width: 0; overflow: hidden;
+    }
+    .usage-table td[data-label="当前账期"],
+    .usage-table td[data-label="最近完整账期"],
+    .usage-table td[data-label="当前用量"],
+    .usage-table td[data-label="完整账期用量"],
+    .usage-table td[data-label="数据状态"],
+    .usage-table td[data-label="操作"] { overflow: visible; }
+    .usage-table th {
+      color: #64748B; background: #F8FAFC; font-size: 12px; font-weight: 700;
+      letter-spacing: .02em; white-space: nowrap;
+    }
+    .usage-table tbody tr:hover { background: #F8FBFF; }
+    .usage-account { display: grid; gap: 2px; min-width: 0; }
+    .usage-email {
+      overflow-wrap: anywhere; word-break: break-word; color: #0F172A;
+      font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; line-height: 1.35;
+    }
+    .usage-person { color: #64748B; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .usage-plan {
+      display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px;
+      border-radius: 6px; background: #F1F5F9; color: #334155;
+      font-family: var(--font-mono); font-size: 12px; font-weight: 600; white-space: nowrap;
+    }
+    .usage-cycle {
+      display: flex; flex-direction: column; gap: 2px; min-width: 0; color: #334155;
+    }
+    .usage-cycle-range {
+      display: block; color: #334155;
+      font-family: var(--font-mono); font-size: 12px; font-weight: 600; line-height: 1.4;
+      white-space: nowrap;
+    }
+    .usage-cycle-empty { color: #94A3B8; font-family: inherit; font-size: 12px; white-space: normal; }
+    .usage-meter {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+    }
+    .usage-meter-track {
+      flex: 1 1 auto; min-width: 40px; max-width: 72px; height: 7px;
+      border-radius: 999px; background: #E2E8F0; overflow: hidden;
+    }
+    .usage-meter-fill {
+      display: block; height: 100%; border-radius: inherit;
+      background: #2563EB; transition: width .2s ease;
+    }
+    .usage-meter-fill.is-low { background: #D97706; }
+    .usage-meter-fill.is-empty { background: #94A3B8; }
+    @media (prefers-reduced-motion: reduce) {
+      .usage-meter-fill { transition: none; }
+    }
+    .usage-percent {
+      flex: 0 0 auto;
+      font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; white-space: nowrap; color: #0F172A;
+    }
+    .usage-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+    .usage-actions .btn { width: auto; white-space: nowrap; }
+    .usage-level {
+      display: inline-flex; align-items: center; max-width: 100%; min-height: 26px; padding: 2px 8px;
+      border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .usage-level-l3 { color: #B42318; background: #FEF3F2; }
+    .usage-level-l2 { color: #B54708; background: #FFF7ED; }
+    .usage-level-l1 { color: #854D0E; background: #FEFCE8; }
+    .usage-level-l0 { color: #15803D; background: #F0FDF4; }
+    .usage-level-unknown { color: #475569; background: #F1F5F9; }
+    .usage-level-meta { display: block; margin-top: 3px; color: #64748B; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+    .usage-status-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 26px; min-width: 52px; padding: 2px 8px;
+      border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap;
+      cursor: help; border: 1px solid transparent;
+    }
+    .usage-status-badge:focus-visible {
+      outline: 3px solid rgba(33, 139, 255, .45); outline-offset: 2px;
+    }
+    .usage-status-complete { color: #15803D; background: #F0FDF4; border-color: #BBF7D0; }
+    .usage-status-incomplete { color: #B54708; background: #FFF7ED; border-color: #FED7AA; }
+    .usage-status-unknown { color: #475569; background: #F1F5F9; border-color: #E2E8F0; }
+    .usage-state { padding: 52px 24px; text-align: center; color: var(--muted); }
+    .usage-state[role="alert"] { color: var(--danger); }
+    .usage-guide {
+      margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--border);
+      border-radius: 10px; background: #fff; box-shadow: var(--shadow-soft);
+    }
+    .usage-guide-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px;
+    }
+    .usage-guide-title { margin: 0; font-size: 15px; font-weight: 700; color: #0F172A; }
+    .usage-guide-grid {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+    }
+    .usage-guide-block {
+      min-width: 0; padding: 12px 14px; border: 1px solid var(--line-soft);
+      border-radius: 8px; background: #F8FAFC;
+    }
+    .usage-guide-block h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #0F172A; }
+    .usage-guide-block ul { margin: 0; padding-left: 18px; color: #475569; font-size: 13px; line-height: 1.55; }
+    .usage-guide-block li { margin: 0 0 4px; overflow-wrap: anywhere; }
+    .usage-guide-block p { margin: 0; color: #475569; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+    .usage-cycles-modal {
+      position: fixed; inset: 0; z-index: 220;
+    }
+    .usage-cycles-backdrop {
+      position: absolute; inset: 0; background: rgba(15, 23, 42, .45);
+    }
+    .usage-cycles-panel {
+      position: absolute; top: 0; right: 0; bottom: 0; z-index: 1;
+      width: min(560px, 100vw); max-width: 100%;
+      box-sizing: border-box;
+      background: #fff; box-shadow: -8px 0 24px rgba(15, 23, 42, .16);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .usage-cycles-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+      padding: 20px 20px 12px; border-bottom: 1px solid var(--line-soft); flex: 0 0 auto;
+      box-sizing: border-box; width: 100%;
+    }
+    .usage-cycles-head > button { flex: 0 0 auto; }
+    .usage-cycles-title { margin: 0; font-size: 18px; font-weight: 700; color: #0F172A; }
+    .usage-cycles-sub {
+      margin: 4px 0 0; color: var(--muted); font-size: 13px;
+      overflow-wrap: anywhere; word-break: break-word;
+    }
+    .usage-cycles-body {
+      flex: 1 1 auto; min-height: 0; overflow: auto;
+      padding: 16px 20px 28px; display: grid; gap: 16px;
+    }
+    .usage-cycles-card {
+      border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+      background: #F8FAFC; min-width: 0;
+    }
+    .usage-cycles-card h4 { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #0F172A; }
+    .usage-cycles-meta {
+      margin: 0 0 6px; color: #475569; font-size: 13px; line-height: 1.55;
+      overflow-wrap: anywhere; word-break: break-word;
+    }
+    .usage-cycles-meta:last-child { margin-bottom: 0; }
+    .usage-cycles-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .usage-cycles-table th, .usage-cycles-table td {
+      padding: 10px 8px; border-bottom: 1px solid var(--line-soft);
+      text-align: left; vertical-align: top; min-width: 0; overflow-wrap: anywhere;
+    }
+    .usage-cycles-table th { color: #64748B; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .usage-cycles-empty { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0; overflow-wrap: anywhere; }
+    .usage-view button:focus-visible, .usage-view input:focus-visible, .usage-view select:focus-visible {
+      outline: 3px solid rgba(33, 139, 255, .45); outline-offset: 2px;
+    }
+    @media (max-width: 900px) {
+      .usage-guide-grid { grid-template-columns: 1fr; }
+      .usage-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .usage-table, .usage-table tbody, .usage-table tr, .usage-table td { display: block; width: 100%; }
+      .usage-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+      .usage-table tbody tr { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+      .usage-table td { display: grid; grid-template-columns: minmax(108px, 34%) 1fr; gap: 12px; padding: 8px 16px; border: 0; }
+      .usage-table td::before { content: attr(data-label); color: #64748B; font-size: 14px; font-weight: 700; }
+    }
+    @media (max-width: 600px) {
+      .usage-page-head { align-items: flex-start; flex-direction: column; }
+      .usage-page-head .btn { width: 100%; }
+      .usage-toolbar { align-items: stretch; }
+      .usage-search, .usage-select { width: 100%; flex-basis: 100%; }
+      .usage-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .usage-stat-card:last-child { grid-column: span 2; }
+    }
   </style>
 </head>
 
@@ -3234,6 +3494,9 @@
           <span class="header-breadcrumb-current" x-text="breadcrumbLabel()"></span>
         </span>
       </nav>
+      <button type="button" class="btn btn-ghost btn-sm" @click="goUsage()" :aria-current="view === 'usage' ? 'page' : null">
+        用量监控
+      </button>
       <span class="badge" :class="serverOk ? 'badge-ok' : 'badge-error'">
         <span class="status-dot"></span>
         <span x-text="serverOk ? '服务正常' : '服务异常'"></span>
@@ -3487,12 +3750,10 @@
             <table class="account-list-table">
               <colgroup>
                 <col class="select-col-width">
-                <col class="email-col-width">
-                <col class="feishu-col-width">
+                <col class="account-col-width">
                 <col class="current-plan-col-width">
                 <col class="on-demand-col-width">
-                <col class="host-col-width">
-                <col class="port-col-width">
+                <col class="imap-col-width">
                 <col class="source-col-width">
                 <col class="status-col-width">
                 <col class="data-updated-col-width">
@@ -3501,8 +3762,7 @@
               <thead>
                 <tr>
                   <th class="select-col"></th>
-                  <th>邮箱</th>
-                  <th class="feishu-col">飞书邮箱</th>
+                  <th>账号</th>
                   <th class="compact-col plan-block-col">当前套餐</th>
                   <th class="on-demand-cell account-col-center plan-block-col">
                     <div class="on-demand-th-wrap"
@@ -3547,8 +3807,7 @@
                     </div>
                     </div>
                   </th>
-                  <th class="compact-col plan-block-col">IMAP Host</th>
-                  <th class="account-col-center compact-col">Port</th>
+                  <th class="compact-col plan-block-col">IMAP</th>
                   <th class="account-col-center compact-col">来源</th>
                   <th class="account-col-center compact-col">状态</th>
                   <th class="account-col-center compact-col">更新时间</th>
@@ -3562,8 +3821,15 @@
                       <input type="checkbox" :checked="selectedEmails.has(a.email)"
                         @change="toggleOne(a.email, $event)" />
                     </td>
-                    <td><span class="mono mono-cell mono-sm" x-text="a.email" :title="a.email"></span></td>
-                    <td class="feishu-col"><span class="mono mono-cell" x-text="a.feishu_email || '-'" :title="a.feishu_email || '-'"></span></td>
+                    <td>
+                      <div class="account-identity"
+                           :title="a.feishu_email ? `${a.email}\n飞书：${a.feishu_email}` : a.email">
+                        <span class="account-identity-email" x-text="a.email"></span>
+                        <span class="account-identity-feishu"
+                              :class="{ 'is-empty': !a.feishu_email }"
+                              x-text="a.feishu_email ? ('飞书 · ' + a.feishu_email) : '飞书邮箱未填'"></span>
+                      </div>
+                    </td>
                     <td class="compact-col plan-block-col" :title="currentPlanTooltip(a)">
                       <span class="plan-pill" :class="planPillClass(a)" x-text="currentPlanDisplay(a)"></span>
                     </td>
@@ -3589,21 +3855,20 @@
                         </template>
                       </div>
                     </td>
-                    <td class="compact-col plan-block-col"><span class="mono-cell text-muted-xs" x-text="a.imap_host || 'imap.feishu.cn'" :title="a.imap_host || 'imap.feishu.cn'"></span></td>
-                    <td class="account-col-center compact-col text-muted-xs" x-text="a.imap_port || 993"></td>
-                    <td class="account-col-center compact-col text-muted-xs">
-                      <span :style="`padding:2px 8px;border-radius:4px;font-size:11px;background:${a.source==='manual'?'#EFF6FF':a.source==='upload'?'#F0FDF4':'#F1F5F9'};color:${a.source==='manual'?'var(--primary)':a.source==='upload'?'var(--success)':'var(--muted)'}`"
-                        x-text="a.source || '-'"></span>
+                    <td class="compact-col plan-block-col">
+                      <span class="account-imap"
+                            :title="(a.imap_host || 'imap.feishu.cn') + ':' + (a.imap_port || 993)"
+                            x-text="(a.imap_host || 'imap.feishu.cn') + ':' + (a.imap_port || 993)"></span>
                     </td>
                     <td class="account-col-center compact-col">
-                      <template x-if="accountDbStatus[a.email]">
-                        <span :style="`font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:${accountDbStatus[a.email].status==='disabled'?'#FEE2E2':accountDbStatus[a.email].status==='active'?'#DCFCE7':'#F1F5F9'};color:${accountDbStatus[a.email].status==='disabled'?'var(--danger)':accountDbStatus[a.email].status==='active'?'var(--success)':'var(--muted)'}`"
-                          x-text="accountDbStatus[a.email].status==='disabled'?`锁定(${accountDbStatus[a.email].failures}次)`:accountDbStatus[a.email].status==='active'?'正常':'未知'">
-                        </span>
-                      </template>
-                      <template x-if="!accountDbStatus[a.email]">
-                        <span class="text-muted-xs">-</span>
-                      </template>
+                      <span class="account-meta-badge"
+                            :class="accountSourceBadgeClass(a)"
+                            x-text="accountSourceLabel(a)"></span>
+                    </td>
+                    <td class="account-col-center compact-col">
+                      <span class="account-meta-badge"
+                            :class="accountStatusBadgeClass(a)"
+                            x-text="accountStatusLabel(a)"></span>
                     </td>
                     <td class="account-col-center compact-col">
                       <span class="mono-cell text-muted-xs"
@@ -3690,6 +3955,310 @@
       </div>
       </div>
     </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       VIEW: 用量监控
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="usage-view cam-view-panel"
+       x-show="view === 'usage'"
+       x-cloak
+       x-transition:enter="cam-view-enter"
+       x-transition:enter-start="cam-view-enter-start"
+       x-transition:enter-end="cam-view-enter-end">
+    <div class="usage-page-head">
+      <div>
+        <h2 class="page-title">用量监控</h2>
+        <p class="page-subtitle">按 Cursor 滚动账期统计 · 浪费等级只看已结算完整账期</p>
+      </div>
+      <button type="button" class="btn btn-ghost" @click="loadUsageDashboard()" :disabled="usageLoading" :aria-busy="usageLoading">
+        <svg :class="{ 'animate-spin': usageLoading }" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        <span x-text="usageLoading ? '刷新中' : '刷新'"></span>
+      </button>
+    </div>
+
+    <section class="usage-guide" aria-label="用量监控规则说明">
+      <div class="usage-guide-head">
+        <h3 class="usage-guide-title">规则说明</h3>
+        <button type="button" class="btn btn-ghost btn-sm" @click="usageGuideOpen = !usageGuideOpen"
+                :aria-expanded="usageGuideOpen">
+          <span x-text="usageGuideOpen ? '收起' : '展开'"></span>
+        </button>
+      </div>
+      <div class="usage-guide-grid" x-show="usageGuideOpen" x-cloak>
+        <div class="usage-guide-block">
+          <h4>浪费等级怎么算</h4>
+          <ul>
+            <li>只统计<strong>已结算完整账期</strong>的最终用量，不看进行中的当前账期。</li>
+            <li>完整账期用量 <strong x-text="'< ' + usageLowThresholdText() + '%'"></strong> 计为偏低（阈值可配置）。</li>
+            <li><strong>L0</strong>：最近 1 个完整账期正常（≥ <span x-text="usageLowThresholdText() + '%'"></span>）</li>
+            <li><strong>L1</strong>：连续 1 个完整账期偏低</li>
+            <li><strong>L2</strong>：连续 2 个完整账期偏低</li>
+            <li><strong>L3</strong>：连续 ≥3 个完整账期偏低</li>
+            <li><strong>待确认</strong>：尚无完整账期，或账期数据不连续/缺失</li>
+          </ul>
+        </div>
+        <div class="usage-guide-block">
+          <h4>调度与刷新</h4>
+          <ul>
+            <li><strong>日常采集</strong>：约每 24 小时一轮，服务启动后先跑一轮，之后按间隔继续。</li>
+            <li><strong>账期结束前</strong>：每 15 分钟扫描，在结束前约 3 小时～30 分钟抓最终用量。</li>
+            <li>账期切换后，系统会把上一期结算为完整账期，等级才会变化。</li>
+            <li>页面「刷新」只重读数据库；行内「采集」会向 Cursor 拉取该账号当前用量。</li>
+          </ul>
+        </div>
+        <div class="usage-guide-block">
+          <h4>列表怎么读</h4>
+          <ul>
+            <li><strong>当前账期/用量</strong>：进行中的实时数据，仅供观察。</li>
+            <li><strong>最近完整账期 / 完整账期用量</strong>：上一期已结算区间与最终用量。</li>
+            <li><strong>历史账期</strong>：点开查看该账号全部已结算往期。</li>
+            <li>冷启动阶段多数为「待确认」属正常；各账号账期滚动后会陆续出现 L0–L3。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="usage-stats" aria-label="浪费等级统计">
+      <template x-for="card in usageLevelCards()" :key="card.level">
+        <button type="button" class="usage-stat-card"
+                :class="{ 'is-active': usageLevelFilter === card.level }"
+                :style="`--usage-level-color: ${card.color}`"
+                @click="usageLevelFilter = usageLevelFilter === card.level ? '' : card.level"
+                :aria-pressed="usageLevelFilter === card.level">
+          <span class="usage-stat-label" x-text="card.label"></span>
+          <span class="usage-stat-note" x-text="card.note"></span>
+          <span class="usage-stat-count" x-text="usageLevelCount(card.level)"></span>
+        </button>
+      </template>
+    </section>
+
+    <section class="card usage-toolbar" aria-label="用量监控筛选">
+      <div class="search-box usage-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="search" x-model="usageSearch" placeholder="搜索邮箱、申请人或部门"
+               class="search-input-plain" aria-label="搜索邮箱、申请人或部门" />
+      </div>
+      <label class="sr-only" for="usage-department">部门筛选</label>
+      <select id="usage-department" class="usage-select" x-model="usageDepartment">
+        <option value="">全部部门</option>
+        <template x-for="department in usageDepartments" :key="department">
+          <option :value="department" x-text="department"></option>
+        </template>
+      </select>
+      <label class="sr-only" for="usage-level">浪费等级筛选</label>
+      <select id="usage-level" class="usage-select" x-model="usageLevelFilter">
+        <option value="">全部等级</option>
+        <option value="L3">L3：连续≥3期偏低</option>
+        <option value="L2">L2：连续2期偏低</option>
+        <option value="L1">L1：最近1期偏低</option>
+        <option value="L0">L0：最近一期正常</option>
+        <option value="UNKNOWN">待确认：数据不足</option>
+      </select>
+    </section>
+
+    <div class="card usage-table-card">
+      <div class="usage-state" x-show="usageLoading" x-cloak aria-live="polite">正在加载用量监控数据…</div>
+      <div class="usage-state" x-show="!usageLoading && usageError" x-cloak role="alert" x-text="usageError"></div>
+      <div class="usage-state" x-show="!usageLoading && !usageError && usageRows.length === 0" x-cloak aria-live="polite">暂无用量监控数据</div>
+      <div class="usage-state" x-show="!usageLoading && !usageError && usageRows.length > 0 && usageFilteredRows.length === 0" x-cloak aria-live="polite">没有符合筛选条件的账号</div>
+      <table class="usage-table" x-show="!usageLoading && !usageError && usageFilteredRows.length > 0">
+        <colgroup>
+          <col class="usage-col-account" />
+          <col class="usage-col-plan" />
+          <col class="usage-col-cycle" />
+          <col class="usage-col-usage" />
+          <col class="usage-col-final" />
+          <col class="usage-col-final-usage" />
+          <col class="usage-col-level" />
+          <col class="usage-col-status" />
+          <col class="usage-col-action" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>账号与人员</th>
+            <th>套餐</th>
+            <th>当前账期</th>
+            <th>当前用量</th>
+            <th>最近完整账期</th>
+            <th>完整账期用量</th>
+            <th title="完整账期用量低于阈值则计为偏低；连续 1/2/3+ 个完整账期分别对应 L1/L2/L3。待确认表示尚无足够完整账期可用于评级。">浪费等级</th>
+            <th title="评级所需完整账期数据是否齐全">数据状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in usageFilteredRows" :key="row.email">
+            <tr>
+              <td data-label="账号与人员">
+                <div class="usage-account">
+                  <span class="usage-email" x-text="row.email || '—'"></span>
+                  <span class="usage-person" x-text="usagePersonLabel(row)"></span>
+                </div>
+              </td>
+              <td data-label="套餐">
+                <span class="usage-plan" x-text="row.current_plan_tier || row.plan_tier || '—'"></span>
+              </td>
+              <td data-label="当前账期">
+                <div class="usage-cycle" :title="usageCurrentCycleTitle(row)">
+                  <span class="usage-cycle-range" x-show="usageCurrentCycle(row) !== '账期信息待同步'"
+                        x-text="usageCurrentCycle(row)"></span>
+                  <span class="usage-cycle-empty" x-show="usageCurrentCycle(row) === '账期信息待同步'">账期信息待同步</span>
+                </div>
+              </td>
+              <td data-label="当前用量">
+                <div class="usage-meter" :title="usageCurrentUsage(row)">
+                  <div class="usage-meter-track" aria-hidden="true">
+                    <span class="usage-meter-fill"
+                          :class="usageMeterFillClass(row.current_used_pct ?? row.current_usage_pct ?? row.total_used_pct)"
+                          :style="`width:${usageMeterWidth(row.current_used_pct ?? row.current_usage_pct ?? row.total_used_pct)}`"></span>
+                  </div>
+                  <span class="usage-percent" x-text="usageCurrentUsage(row)"></span>
+                </div>
+              </td>
+              <td data-label="最近完整账期">
+                <div class="usage-cycle" :title="usageFinalCycleTitle(row)">
+                  <span class="usage-cycle-range" x-show="usageFinalCycle(row) !== '暂无完整账期'"
+                        x-text="usageFinalCycle(row)"></span>
+                  <span class="usage-cycle-empty" x-show="usageFinalCycle(row) === '暂无完整账期'">暂无完整账期</span>
+                </div>
+              </td>
+              <td data-label="完整账期用量">
+                <div class="usage-meter" x-show="usageFinalCycle(row) !== '暂无完整账期'" :title="usageFinalUsage(row)">
+                  <div class="usage-meter-track" aria-hidden="true">
+                    <span class="usage-meter-fill"
+                          :class="usageMeterFillClass(row.latest_final_used_pct)"
+                          :style="`width:${usageMeterWidth(row.latest_final_used_pct)}`"></span>
+                  </div>
+                  <span class="usage-percent" x-text="usageFinalUsage(row)"></span>
+                </div>
+                <span class="usage-cycle-empty" x-show="usageFinalCycle(row) === '暂无完整账期'">—</span>
+              </td>
+              <td data-label="浪费等级">
+                <span class="usage-level"
+                      :class="usageLevelClass(row.waste_level)"
+                      :title="usageLevelTooltip(row)"
+                      x-text="usageLevelBadge(row)"></span>
+                <span class="usage-level-meta" x-show="usageLevelDetail(row)" x-text="usageLevelDetail(row)"></span>
+              </td>
+              <td data-label="数据状态">
+                <span class="usage-status-badge"
+                      tabindex="0"
+                      role="status"
+                      :class="usageDataStatusClass(row)"
+                      :title="usageDataStatusTooltip(row)"
+                      :aria-label="usageDataStatusTooltip(row)"
+                      x-text="usageDataStatus(row)"></span>
+              </td>
+              <td data-label="操作">
+                <div class="usage-actions">
+                  <button type="button" class="btn btn-ghost btn-sm"
+                          @click="collectUsageAccount(row)"
+                          :disabled="!!usageCollecting[row.email]"
+                          :aria-busy="!!usageCollecting[row.email]">
+                    <span x-text="usageCollecting[row.email] ? '采集中' : '采集'"></span>
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-sm"
+                          @click="openUsageCyclesDrawer(row)"
+                          :disabled="usageCyclesLoading && usageCyclesEmail === row.email">
+                    历史账期
+                  </button>
+                </div>
+                <span class="usage-level-meta" style="color:var(--danger);"
+                      x-show="usageCollectErrors[row.email]"
+                      x-text="usageCollectErrors[row.email]"></span>
+                <span class="usage-level-meta" style="color:#15803D;"
+                      x-show="usageCollectSuccess[row.email] && !usageCollectErrors[row.email]"
+                      x-text="usageCollectSuccess[row.email]"></span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 用量监控：历史账期抽屉（独立遮罩，避免复用 modal-scrim 把侧栏挤出视口） -->
+  <div class="usage-cycles-modal"
+       x-show="showUsageCyclesDrawer"
+       x-cloak
+       x-transition.opacity>
+    <div class="usage-cycles-backdrop" @click="closeUsageCyclesDrawer()"></div>
+    <aside class="usage-cycles-panel" role="dialog" aria-modal="true" aria-labelledby="usage-cycles-title" @click.stop>
+      <div class="usage-cycles-head">
+        <div style="min-width:0;flex:1;">
+          <h3 id="usage-cycles-title" class="usage-cycles-title">历史账期</h3>
+          <p class="usage-cycles-sub" x-text="usageCyclesSubtitle()"></p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" @click="closeUsageCyclesDrawer()">关闭</button>
+      </div>
+      <div class="usage-cycles-body">
+        <div class="usage-state" x-show="usageCyclesLoading" x-cloak aria-live="polite">正在加载历史账期…</div>
+        <div class="usage-state" x-show="!usageCyclesLoading && usageCyclesError" x-cloak role="alert" x-text="usageCyclesError"></div>
+        <template x-if="!usageCyclesLoading && !usageCyclesError && usageCyclesData">
+          <div style="display:grid;gap:16px;min-width:0;">
+            <section class="usage-cycles-card">
+              <h4>本账号等级</h4>
+              <p class="usage-cycles-meta">
+                <span class="usage-level" :class="usageLevelClass(usageCyclesData.waste_level)" x-text="usageLevelBadge(usageCyclesData)"></span>
+              </p>
+              <p class="usage-cycles-meta" x-text="usageCyclesLevelSummary()"></p>
+              <p class="usage-cycles-meta" x-text="usageCyclesThresholdNote()"></p>
+            </section>
+            <section class="usage-cycles-card">
+              <h4>当前账期（进行中，不参与评级）</h4>
+              <template x-if="usageCyclesData.current">
+                <div>
+                  <p class="usage-cycles-meta" x-text="usageCyclesCurrentRange()"></p>
+                  <p class="usage-cycles-meta">用量 <strong x-text="usagePercent(usageCyclesData.current.used_pct)"></strong>
+                    · 套餐 <span x-text="usageCyclesData.current.plan_tier || '—'"></span></p>
+                </div>
+              </template>
+              <p class="usage-cycles-empty" x-show="!usageCyclesData.current">暂无当前账期快照</p>
+            </section>
+            <section class="usage-cycles-card">
+              <h4>完整账期历史</h4>
+              <p class="usage-cycles-empty" x-show="!(usageCyclesData.finals || []).length">
+                暂无已结算完整账期。账期结束后会由调度自动结算补齐；完整账期出现后，可在此查看往期使用率，浪费等级也会随之更新。
+              </p>
+              <div style="overflow-x:auto;" x-show="(usageCyclesData.finals || []).length">
+                <table class="usage-cycles-table">
+                  <thead>
+                    <tr><th>账期</th><th>用量</th><th>偏低</th><th>结算</th></tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(item, idx) in (usageCyclesData.finals || [])" :key="idx">
+                      <tr>
+                        <td>
+                          <span class="usage-cycle-range"
+                                x-text="usageCycleRangeText(item.billing_cycle_start, item.billing_cycle_end)"></span>
+                          <span class="usage-level-meta" x-text="item.plan_tier || ''"></span>
+                        </td>
+                        <td>
+                          <div class="usage-meter">
+                            <div class="usage-meter-track" aria-hidden="true">
+                              <span class="usage-meter-fill"
+                                    :class="usageMeterFillClass(item.used_pct)"
+                                    :style="`width:${usageMeterWidth(item.used_pct)}`"></span>
+                            </div>
+                            <span class="usage-percent" x-text="usagePercent(item.used_pct)"></span>
+                          </div>
+                        </td>
+                        <td x-text="item.is_low ? '是' : '否'"></td>
+                        <td>
+                          <span x-text="usageFinalSourceLabel(item.final_source)"></span>
+                          <span class="usage-level-meta" x-text="usageFormatDate(item.finalized_at) || '—'"></span>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </template>
+      </div>
+    </aside>
+  </div>
 
 
   <!-- ══════════════════════════════════════════════════════════════
@@ -4770,7 +5339,26 @@ function app() {
     // ── 页面状态 ──
     serverOk: false,
     _ready: false,
-    view: 'list',   // 'list' | 'upload' | 'run' | 'sync'
+    view: 'list',   // 'list' | 'upload' | 'run' | 'sync' | 'usage'
+
+    // ── 用量监控（切换页面时保留筛选与最近一次数据） ──
+    usageRows: [],
+    usageLoading: false,
+    usageError: '',
+    usageSearch: '',
+    usageDepartment: '',
+    usageLevelFilter: '',
+    usageGuideOpen: true,
+    usageLowThresholdPct: 30,
+    usageCollecting: {},
+    usageCollectErrors: {},
+    usageCollectSuccess: {},
+    showUsageCyclesDrawer: false,
+    usageCyclesLoading: false,
+    usageCyclesError: '',
+    usageCyclesEmail: '',
+    usageCyclesRow: null,
+    usageCyclesData: null,
 
     // ── 账号库（来自 DB） ──
     dbAccounts: [],
@@ -4904,6 +5492,19 @@ function app() {
       if (!q) return this.dbAccounts;
       return this.dbAccounts.filter(a => (a.email || '').toLowerCase().includes(q));
     },
+    get usageDepartments() {
+      return [...new Set(this.usageRows.map(row => String(row.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    },
+    get usageFilteredRows() {
+      const q = this.usageSearch.trim().toLowerCase();
+      return this.usageRows.filter((row) => {
+        const level = String(row.waste_level || 'UNKNOWN').toUpperCase();
+        const searchable = [row.email, row.applicant, row.department].join(' ').toLowerCase();
+        return (!q || searchable.includes(q))
+          && (!this.usageDepartment || row.department === this.usageDepartment)
+          && (!this.usageLevelFilter || level === this.usageLevelFilter);
+      });
+    },
     get syncIsRunning() {
       if (this.syncServerRunning) return true;
       const liveStatus = String(this.syncLiveRun?.status || '').toLowerCase();
@@ -4928,6 +5529,7 @@ function app() {
       if (this.view === 'upload') return '上传账号';
       if (this.view === 'sync') return '账单调度';
       if (this.view === 'run') return '拉取进度';
+      if (this.view === 'usage') return '用量监控';
       return '';
     },
 
@@ -4959,6 +5561,13 @@ function app() {
       this._scrollMainToTop();
       this.loadAccounts();
       this.loadSyncDashboard();
+    },
+    goUsage() {
+      this._stopSyncRunDetailPolling();
+      this._stopSyncInlineRunDetailPolling();
+      this.view = 'usage';
+      this._scrollMainToTop();
+      if (!this.usageRows.length && !this.usageLoading) this.loadUsageDashboard();
     },
 
     // ── 初始化 ──
@@ -5095,6 +5704,323 @@ function app() {
       }
     },
 
+    async loadUsageDashboard() {
+      this.usageLoading = true;
+      this.usageError = '';
+      try {
+        const res = await fetch('/api/usage-monitor/dashboard');
+        if (!res.ok) throw new Error(`请求失败（${res.status}）`);
+        const data = await res.json();
+        const rows = Array.isArray(data) ? data : (data.rows || data.accounts || []);
+        if (!Array.isArray(rows)) throw new Error('返回数据格式不正确');
+        // 不重排后端结果，保留服务端既有的风险优先级排序。
+        this.usageRows = rows;
+        const threshold = Number(data?.low_threshold_pct);
+        if (Number.isFinite(threshold)) this.usageLowThresholdPct = threshold;
+      } catch (error) {
+        this.usageError = `无法加载用量监控数据：${error?.message || '请稍后重试'}`;
+      } finally {
+        this.usageLoading = false;
+      }
+    },
+
+    usageLowThresholdText() {
+      const fromCycles = Number(this.usageCyclesData?.low_threshold_pct);
+      if (Number.isFinite(fromCycles)) return String(fromCycles);
+      const fromPage = Number(this.usageLowThresholdPct);
+      return Number.isFinite(fromPage) ? String(fromPage) : '30';
+    },
+
+    async collectUsageAccount(row) {
+      const email = String(row?.email || '').trim();
+      if (!email || this.usageCollecting[email]) return;
+      this.usageCollecting = { ...this.usageCollecting, [email]: true };
+      const nextErrors = { ...this.usageCollectErrors };
+      delete nextErrors[email];
+      this.usageCollectErrors = nextErrors;
+      const nextSuccess = { ...this.usageCollectSuccess };
+      delete nextSuccess[email];
+      this.usageCollectSuccess = nextSuccess;
+      try {
+        const res = await fetch(
+          `/api/usage-monitor/accounts/${encodeURIComponent(email)}/collect`,
+          { method: 'POST' },
+        );
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* ignore */ }
+        if (!res.ok) {
+          const detail = body?.detail ? String(body.detail) : `请求失败（${res.status}）`;
+          throw new Error(detail);
+        }
+        const updated = body?.row;
+        if (updated && typeof updated === 'object') {
+          const idx = this.usageRows.findIndex(
+            (item) => String(item?.email || '').toLowerCase() === email.toLowerCase(),
+          );
+          if (idx >= 0) {
+            const rows = this.usageRows.slice();
+            rows[idx] = { ...rows[idx], ...updated };
+            this.usageRows = rows;
+          }
+          const pct = this.usagePercent(updated.current_used_pct);
+          this.usageCollectSuccess = {
+            ...this.usageCollectSuccess,
+            [email]: `采集成功 · 当前用量 ${pct}`,
+          };
+        } else {
+          this.usageCollectSuccess = {
+            ...this.usageCollectSuccess,
+            [email]: '采集成功，请点顶部刷新查看',
+          };
+        }
+      } catch (error) {
+        this.usageCollectErrors = {
+          ...this.usageCollectErrors,
+          [email]: error?.message || '采集失败，请稍后重试',
+        };
+      } finally {
+        const next = { ...this.usageCollecting };
+        delete next[email];
+        this.usageCollecting = next;
+      }
+    },
+
+    async openUsageCyclesDrawer(row) {
+      const email = String(row?.email || '').trim();
+      if (!email) return;
+      this.showUsageCyclesDrawer = true;
+      this.usageCyclesEmail = email;
+      this.usageCyclesRow = row;
+      this.usageCyclesData = null;
+      this.usageCyclesError = '';
+      this.usageCyclesLoading = true;
+      try {
+        const res = await fetch(`/api/usage-monitor/accounts/${encodeURIComponent(email)}/cycles`);
+        if (!res.ok) {
+          let detail = `请求失败（${res.status}）`;
+          try {
+            const body = await res.json();
+            if (body?.detail) detail = String(body.detail);
+          } catch (_) { /* ignore */ }
+          throw new Error(detail);
+        }
+        this.usageCyclesData = await res.json();
+      } catch (error) {
+        this.usageCyclesError = `无法加载历史账期：${error?.message || '请稍后重试'}`;
+      } finally {
+        this.usageCyclesLoading = false;
+      }
+    },
+
+    closeUsageCyclesDrawer() {
+      this.showUsageCyclesDrawer = false;
+      this.usageCyclesLoading = false;
+      this.usageCyclesError = '';
+      this.usageCyclesEmail = '';
+      this.usageCyclesRow = null;
+      this.usageCyclesData = null;
+    },
+
+    usageCyclesSubtitle() {
+      const row = this.usageCyclesData || this.usageCyclesRow || {};
+      const email = row.email || this.usageCyclesEmail || '—';
+      const person = [row.applicant, row.department].filter(Boolean).join(' · ');
+      return person ? `${email} · ${person}` : email;
+    },
+
+    usageCyclesThresholdNote() {
+      const text = this.usageLowThresholdText();
+      return `评级规则：完整账期用量 < ${text}% 计为偏低；连续 1/2/3+ 期对应 L1/L2/L3。当前进行中账期不参与评级。往期列表来自库内已结算快照，由每日采集与账期结束前采集自动写入。`;
+    },
+
+    usageCyclesLevelSummary() {
+      const data = this.usageCyclesData;
+      if (!data) return '';
+      const streak = Number(data.low_usage_streak || 0);
+      const detail = this.usageLevelDetail(data);
+      const reason = String(data.reason || '').trim();
+      if (detail) return streak > 0 ? `连续偏低 ${streak} 期 · ${detail}` : detail;
+      return reason || '数据不足，暂无法评级';
+    },
+
+    usageCyclesCurrentRange() {
+      const current = this.usageCyclesData?.current;
+      if (!current) return '—';
+      return this.usageCycleRangeText(
+        current.billing_cycle_start,
+        current.billing_cycle_end,
+      ) || '账期信息待同步';
+    },
+
+    usageFinalSourceLabel(source) {
+      const key = String(source || '').toLowerCase();
+      return {
+        pre_reset: '重置前采集',
+        periodic_fallback: '周期回退结算',
+      }[key] || (source || '—');
+    },
+
+    usageLevelCards() {
+      return [
+        { level: 'L3', label: 'L3', note: '连续≥3个完整账期用量偏低', color: '#DC2626' },
+        { level: 'L2', label: 'L2', note: '连续2个完整账期用量偏低', color: '#F97316' },
+        { level: 'L1', label: 'L1', note: '最近1个完整账期用量偏低', color: '#CA8A04' },
+        { level: 'L0', label: 'L0', note: '最近完整账期用量正常', color: '#16A34A' },
+        { level: 'UNKNOWN', label: '待确认', note: '缺快照或账期数据不足', color: '#64748B' },
+      ];
+    },
+    usageLevelCount(level) {
+      return this.usageRows.filter(row => String(row.waste_level || 'UNKNOWN').toUpperCase() === level).length;
+    },
+    usageLevelLabel(level) {
+      const normalized = String(level || 'UNKNOWN').toUpperCase();
+      return {
+        L3: 'L3：长期偏低',
+        L2: 'L2：持续偏低',
+        L1: 'L1：单月偏低',
+        L0: 'L0：当前正常',
+        UNKNOWN: '待确认：数据不足',
+      }[normalized] || '待确认：数据不足';
+    },
+    usageLevelBadge(row) {
+      const normalized = String(row?.waste_level || 'UNKNOWN').toUpperCase();
+      return {
+        L3: 'L3 长期偏低',
+        L2: 'L2 持续偏低',
+        L1: 'L1 单月偏低',
+        L0: 'L0 正常',
+        UNKNOWN: '待确认',
+      }[normalized] || '待确认';
+    },
+    usageLevelDetail(row) {
+      const normalized = String(row?.waste_level || 'UNKNOWN').toUpperCase();
+      const streak = Number(row?.low_usage_streak || 0);
+      const finalPct = this.usagePercent(row?.latest_final_used_pct);
+      // 待确认原因改由「数据状态」悬停展示，避免行内重复占高。
+      if (normalized === 'UNKNOWN') return '';
+      if (normalized === 'L0') {
+        return finalPct === '—' ? '最近完整账期正常' : `最近 ${finalPct}`;
+      }
+      return streak > 0
+        ? `连续 ${streak} 期偏低` + (finalPct === '—' ? '' : ` · ${finalPct}`)
+        : '';
+    },
+    usageLevelTooltip(row) {
+      const parts = [
+        this.usageLevelLabel(row?.waste_level),
+        this.usageLevelDetail(row),
+        row?.reason || '',
+        '规则：完整账期用量低于阈值计为偏低；连续 1/2/3+ 个完整账期对应 L1/L2/L3',
+      ];
+      return parts.filter(Boolean).join(' | ');
+    },
+    usageLevelClass(level) {
+      return `usage-level-${String(level || 'UNKNOWN').toLowerCase()}`;
+    },
+    usagePersonLabel(row) {
+      return [row.applicant, row.department].filter(Boolean).join(' · ') || '人员信息未填写';
+    },
+    usageFormatDate(value) {
+      if (value === null || value === undefined || value === '') return '';
+      const raw = String(value).trim();
+      const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return raw;
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    },
+    usageCycleParts(start, end) {
+      const startText = this.usageFormatDate(start);
+      const endText = this.usageFormatDate(end);
+      if (!startText || !endText) return null;
+      return { start: startText, end: endText };
+    },
+    usageCycleRangeText(start, end) {
+      const parts = this.usageCycleParts(start, end);
+      return parts ? `${parts.start} / ${parts.end}` : '';
+    },
+    usageCurrentCycleParts(row) {
+      return this.usageCycleParts(
+        row.current_cycle_start || row.billing_cycle_start,
+        row.current_cycle_end || row.billing_cycle_end,
+      );
+    },
+    usageFinalCycleParts(row) {
+      return this.usageCycleParts(row.latest_cycle_start, row.latest_cycle_end);
+    },
+    usageCurrentCycleTitle(row) {
+      return this.usageCurrentCycle(row);
+    },
+    usageFinalCycleTitle(row) {
+      return this.usageFinalCycle(row);
+    },
+    usageCurrentCycle(row) {
+      return this.usageCycleRangeText(
+        row.current_cycle_start || row.billing_cycle_start,
+        row.current_cycle_end || row.billing_cycle_end,
+      ) || '账期信息待同步';
+    },
+    usageFinalCycle(row) {
+      return this.usageCycleRangeText(row.latest_cycle_start, row.latest_cycle_end) || '暂无完整账期';
+    },
+    usagePctNumber(value) {
+      if (value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    usageMeterWidth(value) {
+      const numeric = this.usagePctNumber(value);
+      if (numeric === null) return '0%';
+      return `${Math.max(0, Math.min(100, numeric))}%`;
+    },
+    usageMeterFillClass(value) {
+      const numeric = this.usagePctNumber(value);
+      if (numeric === null) return 'is-empty';
+      const threshold = Number(this.usageLowThresholdPct);
+      if (Number.isFinite(threshold) && numeric < threshold) return 'is-low';
+      return '';
+    },
+    usagePercent(value) {
+      const numeric = this.usagePctNumber(value);
+      return numeric === null ? '—' : `${numeric.toFixed(1)}%`;
+    },
+    usageCurrentUsage(row) {
+      return this.usagePercent(row.current_used_pct ?? row.current_usage_pct ?? row.total_used_pct);
+    },
+    usageFinalUsage(row) {
+      return this.usagePercent(row.latest_final_used_pct);
+    },
+    usageDataStatus(row) {
+      const value = String(row?.data_quality_status || row?.data_status || 'unknown').toLowerCase();
+      return {
+        complete: '完整',
+        ok: '完整',
+        incomplete: '不完整',
+        partial: '不完整',
+        stale: '可能陈旧',
+        unknown: '待确认',
+      }[value] || value;
+    },
+    usageDataStatusClass(row) {
+      const value = String(row?.data_quality_status || row?.data_status || 'unknown').toLowerCase();
+      if (value === 'complete' || value === 'ok') return 'usage-status-complete';
+      if (value === 'incomplete' || value === 'partial' || value === 'stale') return 'usage-status-incomplete';
+      return 'usage-status-unknown';
+    },
+    usageDataStatusTooltip(row) {
+      const status = this.usageDataStatus(row);
+      const reason = String(row?.reason || '').trim();
+      if (reason) return `${status}：${reason}`;
+      const value = String(row?.data_quality_status || row?.data_status || 'unknown').toLowerCase();
+      if (value === 'complete' || value === 'ok') {
+        return '完整：已有足够连续完整账期，可用于浪费等级评级';
+      }
+      if (value === 'stale') return '可能陈旧：数据偏旧，建议关注后续采集';
+      return `${status}：尚无足够完整账期，暂无法稳定评级`;
+    },
     async fetchSpendingRefreshStatus() {
       try {
         const res = await fetch('/api/accounts/spending-refresh-status');
@@ -5193,6 +6119,32 @@ function app() {
       if (status === 'not_enabled') return 'not-enabled';
       if (status === 'error') return 'error';
       return 'unknown';
+    },
+    accountSourceLabel(a) {
+      const source = String(a?.source || '').trim().toLowerCase();
+      if (source === 'manual') return '手动';
+      if (source === 'upload') return '上传';
+      return source || '—';
+    },
+    accountSourceBadgeClass(a) {
+      const source = String(a?.source || '').trim().toLowerCase();
+      if (source === 'manual') return 'account-source-manual';
+      if (source === 'upload') return 'account-source-upload';
+      return 'account-source-other';
+    },
+    accountStatusLabel(a) {
+      const st = this.accountDbStatus[a?.email];
+      if (!st) return '—';
+      if (st.status === 'disabled') return `锁定(${st.failures || 0}次)`;
+      if (st.status === 'active') return '正常';
+      return '未知';
+    },
+    accountStatusBadgeClass(a) {
+      const st = this.accountDbStatus[a?.email];
+      if (!st) return 'account-status-unknown';
+      if (st.status === 'disabled') return 'account-status-disabled';
+      if (st.status === 'active') return 'account-status-active';
+      return 'account-status-unknown';
     },
     currentPlanTooltip(a) {
       const od = this.onDemandLabel(a);
