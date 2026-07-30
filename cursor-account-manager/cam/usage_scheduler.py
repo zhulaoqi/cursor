@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from .config import SETTINGS
 from .logger import get
@@ -15,6 +17,67 @@ from .usage_snapshot_refresh import run_usage_periodic, run_usage_pre_reset_due
 log = get("usage_scheduler")
 _singleton_lock = threading.Lock()
 _singleton: UsageSchedulerCoordinator | None = None
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def parse_usage_periodic_daily_at(value: str) -> tuple[int, int]:
+    """解析 USAGE_PERIODIC_DAILY_AT（HH:MM）。"""
+    text = (value or "").strip()
+    match = _HHMM_RE.fullmatch(text)
+    if match is None:
+        raise ValueError("USAGE_PERIODIC_DAILY_AT 必须是 HH:MM（00:00-23:59）")
+    return int(match.group(1)), int(match.group(2))
+
+
+def _biz_zone(tz: ZoneInfo | str | None = None) -> ZoneInfo:
+    if isinstance(tz, ZoneInfo):
+        return tz
+    name = (tz or getattr(SETTINGS, "bi_sync_biz_tz", None) or "Asia/Shanghai").strip()
+    return ZoneInfo(name or "Asia/Shanghai")
+
+
+def _daily_at_parts(daily_at: str | None = None) -> tuple[int, int]:
+    raw = daily_at if daily_at is not None else getattr(
+        SETTINGS, "usage_periodic_daily_at", "06:00"
+    )
+    return parse_usage_periodic_daily_at(str(raw))
+
+
+def align_usage_periodic_at(
+    now: datetime,
+    *,
+    daily_at: str | None = None,
+    tz: ZoneInfo | str | None = None,
+) -> datetime:
+    """对齐到「当天」固定日常采集时刻（UTC）；用于首次调度。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now 必须是有时区 datetime")
+    zone = _biz_zone(tz)
+    hour, minute = _daily_at_parts(daily_at)
+    local = now.astimezone(zone)
+    return local.replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    ).astimezone(timezone.utc)
+
+
+def next_usage_periodic_at(
+    now: datetime,
+    *,
+    daily_at: str | None = None,
+    tz: ZoneInfo | str | None = None,
+) -> datetime:
+    """返回严格晚于 now 的下一个固定日常采集时刻（UTC）。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now 必须是有时区 datetime")
+    zone = _biz_zone(tz)
+    hour, minute = _daily_at_parts(daily_at)
+    local = now.astimezone(zone)
+    candidate = local.replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
+    if local >= candidate:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(timezone.utc)
 
 
 class UsageSchedulerCoordinator:
@@ -69,6 +132,15 @@ class UsageSchedulerCoordinator:
             return
         current = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
         with self._lock:
+            if self._next_periodic_at is None:
+                # 首次对齐到当天固定点：未到则等待；已过则立刻补跑一轮。
+                self._next_periodic_at = align_usage_periodic_at(current)
+                log.info(
+                    "用量日常采集已对齐固定时刻 next_at=%s daily_at=%s tz=%s",
+                    self._next_periodic_at.isoformat(),
+                    getattr(SETTINGS, "usage_periodic_daily_at", "06:00"),
+                    getattr(SETTINGS, "bi_sync_biz_tz", "Asia/Shanghai"),
+                )
             if self._is_due(self._pre_reset_future, self._next_pre_reset_at, current):
                 self._submit_pre_reset(current)
             if self._is_due(self._periodic_future, self._next_periodic_at, current):
@@ -83,8 +155,10 @@ class UsageSchedulerCoordinator:
         return (future is None or future.done()) and (due_at is None or now >= due_at)
 
     def _submit_periodic(self, now: datetime) -> None:
-        self._next_periodic_at = now + timedelta(
-            hours=SETTINGS.usage_periodic_interval_hours
+        self._next_periodic_at = next_usage_periodic_at(now)
+        log.info(
+            "提交用量日常采集 next_at=%s",
+            self._next_periodic_at.isoformat(),
         )
         self._periodic_future = self._submit(
             self._periodic_pool, "periodic", run_usage_periodic, now

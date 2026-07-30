@@ -7,6 +7,7 @@ from unittest.mock import patch
 USAGE_ENV_KEYS = (
     "USAGE_SNAPSHOT_ENABLE",
     "USAGE_PERIODIC_INTERVAL_HOURS",
+    "USAGE_PERIODIC_DAILY_AT",
     "USAGE_SNAPSHOT_CONCURRENCY",
     "USAGE_BOOTSTRAP_STALE_HOURS",
     "USAGE_PERIODIC_RETRY_MINUTES",
@@ -80,6 +81,7 @@ class UsageConfigTests(unittest.TestCase):
         expected = {
             "usage_snapshot_enable": True,
             "usage_periodic_interval_hours": 24,
+            "usage_periodic_daily_at": "06:00",
             "usage_snapshot_concurrency": 10,
             "usage_bootstrap_stale_hours": 36,
             "usage_periodic_retry_minutes": 30,
@@ -108,6 +110,7 @@ class UsageConfigTests(unittest.TestCase):
         settings = load_with_env(
             USAGE_SNAPSHOT_ENABLE="false",
             USAGE_PERIODIC_INTERVAL_HOURS="12",
+            USAGE_PERIODIC_DAILY_AT="19:00",
             USAGE_SNAPSHOT_CONCURRENCY="7",
             USAGE_BOOTSTRAP_STALE_HOURS="18",
             USAGE_PERIODIC_RETRY_MINUTES="20",
@@ -131,6 +134,7 @@ class UsageConfigTests(unittest.TestCase):
 
         self.assertFalse(settings.usage_snapshot_enable)
         self.assertEqual(settings.usage_periodic_interval_hours, 12)
+        self.assertEqual(settings.usage_periodic_daily_at, "19:00")
         self.assertEqual(settings.usage_snapshot_concurrency, 7)
         self.assertEqual(settings.usage_bootstrap_stale_hours, 18)
         self.assertEqual(settings.usage_periodic_retry_minutes, 20)
@@ -263,6 +267,11 @@ class UsageConfigTests(unittest.TestCase):
                 "周期采集间隔必须为正数",
                 {"USAGE_PERIODIC_INTERVAL_HOURS": "0"},
                 "USAGE_PERIODIC_INTERVAL_HOURS",
+            ),
+            (
+                "日常采集时刻格式非法",
+                {"USAGE_PERIODIC_DAILY_AT": "25:99"},
+                "USAGE_PERIODIC_DAILY_AT",
             ),
             (
                 "重试间隔必须为正数",

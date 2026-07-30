@@ -3296,7 +3296,7 @@
     .usage-table { width: 100%; min-width: 1260px; border-collapse: collapse; table-layout: fixed; }
     /* 操作列收窄；完整账期用量独立成列 */
     .usage-table col.usage-col-account { width: 19%; }
-    .usage-table col.usage-col-plan { width: 6%; }
+    .usage-table col.usage-col-plan { width: 9%; }
     .usage-table col.usage-col-cycle { width: 13%; }
     .usage-table col.usage-col-usage { width: 11%; }
     .usage-table col.usage-col-final { width: 13%; }
@@ -3407,16 +3407,33 @@
     .usage-guide-block p { margin: 0; color: #475569; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
     .usage-cycles-modal {
       position: fixed; inset: 0; z-index: 220;
+      visibility: hidden; pointer-events: none;
+      transition: visibility 0s linear .26s;
+    }
+    .usage-cycles-modal.is-open {
+      visibility: visible; pointer-events: auto;
+      transition: visibility 0s;
     }
     .usage-cycles-backdrop {
       position: absolute; inset: 0; background: rgba(15, 23, 42, .45);
+      opacity: 0; transition: opacity .22s ease;
     }
+    .usage-cycles-modal.is-open .usage-cycles-backdrop { opacity: 1; }
     .usage-cycles-panel {
       position: absolute; top: 0; right: 0; bottom: 0; z-index: 1;
       width: min(560px, 100vw); max-width: 100%;
       box-sizing: border-box;
       background: #fff; box-shadow: -8px 0 24px rgba(15, 23, 42, .16);
       display: flex; flex-direction: column; overflow: hidden;
+      transform: translateX(100%);
+      transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: transform;
+    }
+    .usage-cycles-modal.is-open .usage-cycles-panel { transform: translateX(0); }
+    @media (prefers-reduced-motion: reduce) {
+      .usage-cycles-modal { transition: none; }
+      .usage-cycles-backdrop,
+      .usage-cycles-panel { transition: none; }
     }
     .usage-cycles-head {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
@@ -3443,13 +3460,32 @@
       overflow-wrap: anywhere; word-break: break-word;
     }
     .usage-cycles-meta:last-child { margin-bottom: 0; }
-    .usage-cycles-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .usage-cycles-table-wrap { width: 100%; min-width: 0; overflow-x: auto; }
+    .usage-cycles-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .usage-cycles-table col.uc-col-cycle { width: 34%; }
+    .usage-cycles-table col.uc-col-usage { width: 28%; }
+    .usage-cycles-table col.uc-col-low { width: 12%; }
+    .usage-cycles-table col.uc-col-final { width: 26%; }
     .usage-cycles-table th, .usage-cycles-table td {
       padding: 10px 8px; border-bottom: 1px solid var(--line-soft);
-      text-align: left; vertical-align: top; min-width: 0; overflow-wrap: anywhere;
+      text-align: left; vertical-align: top; min-width: 0; overflow: hidden;
     }
     .usage-cycles-table th { color: #64748B; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .usage-cycles-cycle {
+      display: grid; gap: 2px; min-width: 0;
+    }
+    .usage-cycles-cycle-range {
+      display: grid; gap: 1px; min-width: 0;
+      color: #334155; font-family: var(--font-mono); font-size: 12px; font-weight: 600; line-height: 1.35;
+    }
+    .usage-cycles-table .usage-meter {
+      max-width: 100%;
+    }
+    .usage-cycles-table .usage-meter-track {
+      min-width: 28px; max-width: 56px;
+    }
     .usage-cycles-empty { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0; overflow-wrap: anywhere; }
+    body.usage-cycles-open { overflow: hidden; }
     .usage-view button:focus-visible, .usage-view input:focus-visible, .usage-view select:focus-visible {
       outline: 3px solid rgba(33, 139, 255, .45); outline-offset: 2px;
     }
@@ -4000,7 +4036,7 @@
         <div class="usage-guide-block">
           <h4>调度与刷新</h4>
           <ul>
-            <li><strong>日常采集</strong>：约每 24 小时一轮，服务启动后先跑一轮，之后按间隔继续。</li>
+            <li><strong>日常采集</strong>：每天固定时刻一轮（默认北京时间 06:00）；启动时未到点则等待，已过点则补跑一次后预约次日。</li>
             <li><strong>账期结束前</strong>：每 15 分钟扫描，在结束前约 3 小时～30 分钟抓最终用量。</li>
             <li>账期切换后，系统会把上一期结算为完整账期，等级才会变化。</li>
             <li>页面「刷新」只重读数据库；行内「采集」会向 Cursor 拉取该账号当前用量。</li>
@@ -4035,14 +4071,21 @@
     <section class="card usage-toolbar" aria-label="用量监控筛选">
       <div class="search-box usage-search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="search" x-model="usageSearch" placeholder="搜索邮箱、申请人或部门"
-               class="search-input-plain" aria-label="搜索邮箱、申请人或部门" />
+        <input type="search" x-model="usageSearch" placeholder="搜索邮箱、申请人、部门或套餐"
+               class="search-input-plain" aria-label="搜索邮箱、申请人、部门或套餐" />
       </div>
       <label class="sr-only" for="usage-department">部门筛选</label>
       <select id="usage-department" class="usage-select" x-model="usageDepartment">
         <option value="">全部部门</option>
         <template x-for="department in usageDepartments" :key="department">
           <option :value="department" x-text="department"></option>
+        </template>
+      </select>
+      <label class="sr-only" for="usage-plan">套餐筛选</label>
+      <select id="usage-plan" class="usage-select" x-model="usagePlanFilter">
+        <option value="">全部套餐</option>
+        <template x-for="plan in usagePlanTiers" :key="plan">
+          <option :value="plan" x-text="plan"></option>
         </template>
       </select>
       <label class="sr-only" for="usage-level">浪费等级筛选</label>
@@ -4096,7 +4139,7 @@
                 </div>
               </td>
               <td data-label="套餐">
-                <span class="usage-plan" x-text="row.current_plan_tier || row.plan_tier || '—'"></span>
+                <span class="usage-plan" x-text="usagePlanLabel(row)" :title="usagePlanLabel(row)"></span>
               </td>
               <td data-label="当前账期">
                 <div class="usage-cycle" :title="usageCurrentCycleTitle(row)">
@@ -4179,9 +4222,9 @@
 
   <!-- 用量监控：历史账期抽屉（独立遮罩，避免复用 modal-scrim 把侧栏挤出视口） -->
   <div class="usage-cycles-modal"
-       x-show="showUsageCyclesDrawer"
-       x-cloak
-       x-transition.opacity>
+       :class="{ 'is-open': showUsageCyclesDrawer }"
+       :aria-hidden="showUsageCyclesDrawer ? 'false' : 'true'"
+       @keydown.escape.window="showUsageCyclesDrawer && closeUsageCyclesDrawer()">
     <div class="usage-cycles-backdrop" @click="closeUsageCyclesDrawer()"></div>
     <aside class="usage-cycles-panel" role="dialog" aria-modal="true" aria-labelledby="usage-cycles-title" @click.stop>
       <div class="usage-cycles-head">
@@ -4220,8 +4263,14 @@
               <p class="usage-cycles-empty" x-show="!(usageCyclesData.finals || []).length">
                 暂无已结算完整账期。账期结束后会由调度自动结算补齐；完整账期出现后，可在此查看往期使用率，浪费等级也会随之更新。
               </p>
-              <div style="overflow-x:auto;" x-show="(usageCyclesData.finals || []).length">
+              <div class="usage-cycles-table-wrap" x-show="(usageCyclesData.finals || []).length">
                 <table class="usage-cycles-table">
+                  <colgroup>
+                    <col class="uc-col-cycle" />
+                    <col class="uc-col-usage" />
+                    <col class="uc-col-low" />
+                    <col class="uc-col-final" />
+                  </colgroup>
                   <thead>
                     <tr><th>账期</th><th>用量</th><th>偏低</th><th>结算</th></tr>
                   </thead>
@@ -4229,9 +4278,13 @@
                     <template x-for="(item, idx) in (usageCyclesData.finals || [])" :key="idx">
                       <tr>
                         <td>
-                          <span class="usage-cycle-range"
-                                x-text="usageCycleRangeText(item.billing_cycle_start, item.billing_cycle_end)"></span>
-                          <span class="usage-level-meta" x-text="item.plan_tier || ''"></span>
+                          <div class="usage-cycles-cycle">
+                            <div class="usage-cycles-cycle-range">
+                              <span x-text="usageFormatDate(item.billing_cycle_start) || '—'"></span>
+                              <span x-text="usageFormatDate(item.billing_cycle_end) || '—'"></span>
+                            </div>
+                            <span class="usage-level-meta" x-text="item.plan_tier || ''"></span>
+                          </div>
                         </td>
                         <td>
                           <div class="usage-meter">
@@ -5347,6 +5400,7 @@ function app() {
     usageError: '',
     usageSearch: '',
     usageDepartment: '',
+    usagePlanFilter: '',
     usageLevelFilter: '',
     usageGuideOpen: true,
     usageLowThresholdPct: 30,
@@ -5495,13 +5549,22 @@ function app() {
     get usageDepartments() {
       return [...new Set(this.usageRows.map(row => String(row.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
     },
+    get usagePlanTiers() {
+      return [...new Set(
+        this.usageRows.map((row) => String(row.current_plan_tier || row.plan_tier || '').trim()).filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, 'en'));
+    },
     get usageFilteredRows() {
       const q = this.usageSearch.trim().toLowerCase();
       return this.usageRows.filter((row) => {
         const level = String(row.waste_level || 'UNKNOWN').toUpperCase();
-        const searchable = [row.email, row.applicant, row.department].join(' ').toLowerCase();
+        const plan = String(row.current_plan_tier || row.plan_tier || '').trim();
+        const searchable = [
+          row.email, row.applicant, row.department, plan, row.plan_amount, this.usagePlanLabel(row),
+        ].join(' ').toLowerCase();
         return (!q || searchable.includes(q))
           && (!this.usageDepartment || row.department === this.usageDepartment)
+          && (!this.usagePlanFilter || plan === this.usagePlanFilter)
           && (!this.usageLevelFilter || level === this.usageLevelFilter);
       });
     },
@@ -5789,6 +5852,7 @@ function app() {
       const email = String(row?.email || '').trim();
       if (!email) return;
       this.showUsageCyclesDrawer = true;
+      document.body?.classList.add('usage-cycles-open');
       this.usageCyclesEmail = email;
       this.usageCyclesRow = row;
       this.usageCyclesData = null;
@@ -5813,12 +5877,9 @@ function app() {
     },
 
     closeUsageCyclesDrawer() {
+      // 只关抽屉；内容保留到下次打开再重置，避免滑出过程内容闪空。
       this.showUsageCyclesDrawer = false;
-      this.usageCyclesLoading = false;
-      this.usageCyclesError = '';
-      this.usageCyclesEmail = '';
-      this.usageCyclesRow = null;
-      this.usageCyclesData = null;
+      document.body?.classList.remove('usage-cycles-open');
     },
 
     usageCyclesSubtitle() {
@@ -5992,6 +6053,13 @@ function app() {
     },
     usageFinalUsage(row) {
       return this.usagePercent(row.latest_final_used_pct);
+    },
+    usagePlanLabel(row) {
+      const tier = String(row?.current_plan_tier || row?.plan_tier || '').trim() || '—';
+      const amount = String(row?.plan_amount ?? '').trim();
+      if (!amount || tier === '—') return tier;
+      const normalized = amount.startsWith('$') ? amount : `$${amount}`;
+      return `${tier} · ${normalized}`;
     },
     usageDataStatus(row) {
       const value = String(row?.data_quality_status || row?.data_status || 'unknown').toLowerCase();

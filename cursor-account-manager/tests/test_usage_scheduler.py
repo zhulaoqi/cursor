@@ -8,12 +8,36 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from cam import scheduler
-from cam.usage_scheduler import UsageSchedulerCoordinator
+from cam.usage_scheduler import (
+    UsageSchedulerCoordinator,
+    next_usage_periodic_at,
+)
 
 
 UTC = timezone.utc
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+class UsagePeriodicDailyAtTests(unittest.TestCase):
+    def test_next_periodic_before_daily_at_is_today(self) -> None:
+        # 北京时间 2026-07-29 05:00 → 今天 06:00
+        now = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)
+        due = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+        self.assertEqual(due.astimezone(SHANGHAI), datetime(2026, 7, 29, 6, 0, tzinfo=SHANGHAI))
+
+    def test_next_periodic_after_daily_at_is_tomorrow(self) -> None:
+        # 北京时间 2026-07-29 10:00 → 明天 06:00
+        now = datetime(2026, 7, 29, 2, 0, tzinfo=UTC)
+        due = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+        self.assertEqual(due.astimezone(SHANGHAI), datetime(2026, 7, 30, 6, 0, tzinfo=SHANGHAI))
+
+    def test_next_periodic_exactly_at_daily_at_is_tomorrow(self) -> None:
+        now = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)  # 北京 06:00
+        due = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+        self.assertEqual(due.astimezone(SHANGHAI), datetime(2026, 7, 30, 6, 0, tzinfo=SHANGHAI))
 
 
 class UsageSchedulerTests(unittest.TestCase):
@@ -21,8 +45,58 @@ class UsageSchedulerTests(unittest.TestCase):
         self.settings = SimpleNamespace(
             usage_snapshot_enable=True,
             usage_periodic_interval_hours=24,
+            usage_periodic_daily_at="06:00",
+            bi_sync_biz_tz="Asia/Shanghai",
             usage_pre_reset_scan_interval_min=15,
         )
+
+    def test_startup_before_daily_at_does_not_run_periodic_immediately(self) -> None:
+        """启动时未到每日固定时刻，不应立刻跑日常采集。"""
+        periodic = MagicMock()
+        pre_reset = MagicMock()
+        # 北京 05:00
+        now = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)
+
+        with (
+            patch("cam.usage_scheduler.SETTINGS", self.settings),
+            patch("cam.usage_scheduler.run_usage_periodic", periodic),
+            patch("cam.usage_scheduler.run_usage_pre_reset_due", pre_reset),
+        ):
+            coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
+            coordinator.tick(now)
+            time.sleep(0.05)
+            periodic.assert_not_called()
+            pre_reset.assert_called_once()
+            self.assertEqual(
+                coordinator._next_periodic_at.astimezone(SHANGHAI),
+                datetime(2026, 7, 29, 6, 0, tzinfo=SHANGHAI),
+            )
+            coordinator.stop(timeout_sec=1)
+
+    def test_periodic_runs_at_daily_at_then_schedules_tomorrow(self) -> None:
+        periodic_started = threading.Event()
+
+        def periodic(**_kwargs) -> None:
+            periodic_started.set()
+
+        with (
+            patch("cam.usage_scheduler.SETTINGS", self.settings),
+            patch("cam.usage_scheduler.run_usage_periodic", periodic),
+            patch("cam.usage_scheduler.run_usage_pre_reset_due"),
+        ):
+            coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
+            before = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)  # 北京 05:00
+            coordinator.tick(before)
+            self.assertFalse(periodic_started.is_set())
+
+            at_due = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)  # 北京 06:00
+            coordinator.tick(at_due)
+            self.assertTrue(periodic_started.wait(0.5))
+            self.assertEqual(
+                coordinator._next_periodic_at.astimezone(SHANGHAI),
+                datetime(2026, 7, 30, 6, 0, tzinfo=SHANGHAI),
+            )
+            coordinator.stop(timeout_sec=1)
 
     def test_periodic_and_pre_reset_use_independent_executors(self) -> None:
         periodic_started = threading.Event()
@@ -43,7 +117,8 @@ class UsageSchedulerTests(unittest.TestCase):
             patch("cam.usage_scheduler.run_usage_pre_reset_due", pre_reset),
         ):
             coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
-            coordinator.tick(datetime(2026, 7, 29, tzinfo=UTC))
+            # 直接到每日时刻，确保两个执行器都能并发启动
+            coordinator.tick(datetime(2026, 7, 28, 22, 0, tzinfo=UTC))
             self.assertTrue(periodic_started.wait(0.5))
             self.assertTrue(pre_reset_started.wait(0.5))
             release.set()

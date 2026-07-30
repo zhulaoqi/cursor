@@ -68,6 +68,9 @@ class UsageDashboardApiTests(unittest.TestCase):
         ), patch(
             "cam.web_server.SyncLogStore",
             return_value=_EmptyOutcomeLog(),
+        ), patch(
+            "cam.web_server._local_plan_amount_map",
+            return_value={},
         ):
             return TestClient(app).get(path)
 
@@ -119,6 +122,29 @@ class UsageDashboardApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["email"] for row in response.json()["rows"]], ["dev@example.com"])
+
+    def test_dashboard_filters_by_plan_tier(self) -> None:
+        """plan_tier 精确过滤套餐档位。"""
+        rows = [
+            _snapshot(
+                "ultra@example.com",
+                collected_at=datetime(2026, 2, 5, tzinfo=UTC),
+                plan_tier="ultra",
+            ),
+            _snapshot(
+                "pro@example.com",
+                collected_at=datetime(2026, 2, 5, tzinfo=UTC),
+                plan_tier="pro",
+            ),
+        ]
+
+        response = self._get(
+            rows,
+            "/api/usage-monitor/dashboard?plan_tier=ultra",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["email"] for row in response.json()["rows"]], ["ultra@example.com"])
 
     def test_dashboard_keeps_account_without_snapshot_as_unknown(self) -> None:
         """LEFT JOIN 空快照账号仍返回 UNKNOWN，并保留人员字段。"""
@@ -183,6 +209,30 @@ class UsageDashboardApiTests(unittest.TestCase):
             response.json()["rows"][0]["reason"],
             "采集跳过：auth_circuit_open",
         )
+
+    def test_dashboard_includes_local_plan_amount_on_rows(self) -> None:
+        """套餐列金额来自本地账号库 plan_amount，随看板行返回。"""
+        rows = [
+            _snapshot("paid@example.com", collected_at=datetime(2026, 2, 5, tzinfo=UTC)),
+        ]
+        class _EmptyOutcomeLog:
+            def map_latest_usage_collect_outcomes(self, emails):
+                return {}
+
+        with patch(
+            "cam.web_server.UsageSnapshotStore",
+            return_value=_DashboardStore(rows),
+        ), patch(
+            "cam.web_server.SyncLogStore",
+            return_value=_EmptyOutcomeLog(),
+        ), patch(
+            "cam.web_server._local_plan_amount_map",
+            return_value={"paid@example.com": "200"},
+        ):
+            response = TestClient(app).get("/api/usage-monitor/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["rows"][0]["plan_amount"], "200")
 
     def test_dashboard_aggregates_current_and_latest_final_fields(self) -> None:
         """最新采集快照充当当前值，最新最终快照补充结算字段。"""

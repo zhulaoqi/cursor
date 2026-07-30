@@ -174,12 +174,32 @@ def _reason_without_usage_snapshot(
     return "暂无用量快照（尚未采集成功）"
 
 
+def _local_plan_amount_map() -> dict[str, str]:
+    """从本地账号库读取套餐金额（消费页刷新写入），供用量看板展示。"""
+    try:
+        rows = get_default_store().list_accounts()
+    except Exception:
+        log.warning("读取本地账号套餐金额失败，看板将不展示金额", exc_info=False)
+        return {}
+    amounts: dict[str, str] = {}
+    for row in rows:
+        email = str(row.get("email") or "").strip().lower()
+        amount = str(row.get("plan_amount") or "").strip()
+        if email and amount:
+            amounts[email] = amount
+    return amounts
+
+
 def _build_usage_dashboard_rows(
     snapshot_rows: list[dict],
     *,
     sync_log: SyncLogStore | None = None,
+    plan_amounts: dict[str, str] | None = None,
 ) -> list[dict]:
     """按邮箱聚合快照，生成用量看板行和浪费等级。"""
+    amount_by_email = (
+        plan_amounts if plan_amounts is not None else _local_plan_amount_map()
+    )
     accounts: dict[str, dict[str, object]] = {}
     for snapshot in snapshot_rows:
         email = str(snapshot.get("email") or "").strip().lower()
@@ -222,6 +242,7 @@ def _build_usage_dashboard_rows(
                     "department": account["department"],
                     "plan_tier": "unknown",
                     "plan_status": "unknown",
+                    "plan_amount": amount_by_email.get(email) or "",
                     "billing_cycle_start": None,
                     "billing_cycle_end": None,
                     "current_used_pct": None,
@@ -296,13 +317,15 @@ def _build_usage_dashboard_rows(
             if final_pairs
             else None
         )
+        email = str(account["email"])
         rows.append(
             {
-                "email": account["email"],
+                "email": email,
                 "applicant": account["applicant"],
                 "department": account["department"],
                 "plan_tier": current.get("plan_tier") or "unknown",
                 "plan_status": current.get("plan_status") or "unknown",
+                "plan_amount": amount_by_email.get(email) or "",
                 "billing_cycle_start": current.get("billing_cycle_start"),
                 "billing_cycle_end": current.get("billing_cycle_end"),
                 "current_used_pct": _dashboard_decimal(current["total_used_pct"]),
@@ -342,11 +365,13 @@ def _filter_and_sort_usage_dashboard_rows(
     query: str,
     department: str,
     waste_level: str,
+    plan_tier: str = "",
 ) -> list[dict]:
     """应用看板过滤条件并按浪费等级、用量和邮箱确定性排序。"""
     normalized_query = query.strip().lower()
     normalized_department = department.strip()
     normalized_level = waste_level.strip().lower()
+    normalized_plan = plan_tier.strip().lower()
     level_order = {"l3": 0, "l2": 1, "l1": 2, "l0": 3, "unknown": 4}
     filtered = [
         row
@@ -356,12 +381,22 @@ def _filter_and_sort_usage_dashboard_rows(
             or normalized_query
             in " ".join(
                 str(row.get(field) or "").lower()
-                for field in ("email", "applicant", "department")
+                for field in (
+                    "email",
+                    "applicant",
+                    "department",
+                    "plan_tier",
+                    "plan_amount",
+                )
             )
         )
         and (
             not normalized_department
             or row["department"] == normalized_department
+        )
+        and (
+            not normalized_plan
+            or str(row.get("plan_tier") or "").strip().lower() == normalized_plan
         )
         and (
             not normalized_level
@@ -498,6 +533,7 @@ async def usage_monitor_dashboard(
     q: str = "",
     department: str = "",
     waste_level: str = "",
+    plan_tier: str = "",
 ):
     """返回用量监控看板的汇总和按账号聚合后的数据行。"""
     try:
@@ -507,6 +543,7 @@ async def usage_monitor_dashboard(
             query=q,
             department=department,
             waste_level=waste_level,
+            plan_tier=plan_tier,
         )
     except Exception as exc:
         # 数据库异常可能携带 DSN 或认证信息，日志和响应均不输出原始错误。

@@ -56,6 +56,10 @@ class UsageDashboardUiTests(unittest.TestCase):
         self.assertIn("showUsageCyclesDrawer", self.html)
         self.assertIn("usage-cycles-backdrop", self.html)
         self.assertIn("暂无已结算完整账期", self.html)
+        self.assertIn("usage-cycles-modal.is-open", self.html)
+        self.assertIn("usage-cycles-cycle-range", self.html)
+        self.assertIn("uc-col-cycle", self.html)
+        self.assertIn("usage-cycles-open", self.html)
 
     def test_usage_guide_explains_levels_and_schedule(self):
         """页面展示等级计算、调度刷新与列表阅读说明。"""
@@ -73,6 +77,14 @@ class UsageDashboardUiTests(unittest.TestCase):
         self.assertIn("appearance: none", self.html)
         self.assertIn("background-position: right 12px center", self.html)
 
+    def test_usage_toolbar_has_plan_tier_filter(self):
+        """工具栏提供套餐下拉筛选，并支持按套餐关键字搜索。"""
+        self.assertIn('id="usage-plan"', self.html)
+        self.assertIn("usagePlanFilter", self.html)
+        self.assertIn("usagePlanTiers", self.html)
+        self.assertIn("全部套餐", self.html)
+        self.assertIn("搜索邮箱、申请人、部门或套餐", self.html)
+
     def test_usage_row_collect_button_and_api(self):
         """操作列提供行内强制采集入口，并支持多账号并行采集状态。"""
         self.assertIn("collectUsageAccount", self.html)
@@ -80,6 +92,12 @@ class UsageDashboardUiTests(unittest.TestCase):
         self.assertIn("usageCollecting", self.html)
         self.assertIn("采集中", self.html)
         self.assertIn("行内「采集」会向 Cursor 拉取该账号当前用量", self.html)
+
+    def test_usage_plan_column_shows_amount_when_available(self):
+        """套餐列优先展示档位 + 金额（来自账号库 plan_amount）。"""
+        self.assertIn("usagePlanLabel", self.html)
+        self.assertIn("plan_amount", self.html)
+        self.assertIn("${tier} · ${normalized}", self.html)
 
 
 if __name__ == "__main__":
