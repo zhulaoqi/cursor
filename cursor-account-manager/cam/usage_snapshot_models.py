@@ -132,21 +132,33 @@ def _validate_plan_tier(value: object) -> None:
         raise ValueError("plan_tier 不能为空")
 
 
-def _normalize_percentage(value: object) -> Decimal:
+def _normalize_percentage(value: object, field_name: str = "total_used_pct") -> Decimal:
     """将允许的百分比输入转为 Decimal 并校验。"""
     if isinstance(value, bool) or isinstance(value, float):
-        raise ValueError("total_used_pct 不接受 bool 或 float")
+        raise ValueError(f"{field_name} 不接受 bool 或 float")
     if not isinstance(value, (Decimal, str, int)):
-        raise ValueError("total_used_pct 必须是 Decimal、十进制字符串或 int")
+        raise ValueError(f"{field_name} 必须是 Decimal、十进制字符串或 int")
     try:
         normalized = Decimal(value)
     except (DecimalException, ValueError) as exc:
-        raise ValueError("total_used_pct 不是有效十进制数") from exc
+        raise ValueError(f"{field_name} 不是有效十进制数") from exc
     if not normalized.is_finite():
-        raise ValueError("total_used_pct 必须是有限 Decimal")
+        raise ValueError(f"{field_name} 必须是有限 Decimal")
     if not Decimal("0") <= normalized <= Decimal("100"):
-        raise ValueError("total_used_pct 必须在 0 到 100 之间")
+        raise ValueError(f"{field_name} 必须在 0 到 100 之间")
     return normalized
+
+
+def _normalize_optional_percentage(
+    value: object,
+    field_name: str,
+) -> Decimal | None:
+    """可选百分比：None/空串保持为空，否则按 0~100 校验。"""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _normalize_percentage(value, field_name)
 
 
 def _validate_cycle(
@@ -179,6 +191,8 @@ class UsageSnapshot:
     billing_cycle_start: datetime
     billing_cycle_end: datetime
     total_used_pct: Decimal
+    auto_used_pct: Decimal | None
+    api_used_pct: Decimal | None
     snapshot_type: SnapshotType
     snapshot_slot: datetime
     collected_at: datetime
@@ -202,6 +216,8 @@ class UsageSnapshot:
         source_endpoint: str,
         parser_version: str,
         raw_payload: dict[str, Any],
+        auto_used_pct: Decimal | str | int | None = None,
+        api_used_pct: Decimal | str | int | None = None,
     ) -> None:
         object.__setattr__(self, "email", email)
         object.__setattr__(self, "plan_tier", plan_tier)
@@ -215,6 +231,8 @@ class UsageSnapshot:
         )
         object.__setattr__(self, "billing_cycle_end", billing_cycle_end)
         object.__setattr__(self, "total_used_pct", total_used_pct)
+        object.__setattr__(self, "auto_used_pct", auto_used_pct)
+        object.__setattr__(self, "api_used_pct", api_used_pct)
         object.__setattr__(self, "snapshot_type", snapshot_type)
         object.__setattr__(self, "snapshot_slot", snapshot_slot)
         object.__setattr__(self, "collected_at", collected_at)
@@ -236,6 +254,16 @@ class UsageSnapshot:
             self,
             "total_used_pct",
             _normalize_percentage(self.total_used_pct),
+        )
+        object.__setattr__(
+            self,
+            "auto_used_pct",
+            _normalize_optional_percentage(self.auto_used_pct, "auto_used_pct"),
+        )
+        object.__setattr__(
+            self,
+            "api_used_pct",
+            _normalize_optional_percentage(self.api_used_pct, "api_used_pct"),
         )
         if not isinstance(self.snapshot_type, SnapshotType):
             raise ValueError("snapshot_type 必须是 SnapshotType")

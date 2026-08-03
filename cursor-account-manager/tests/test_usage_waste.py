@@ -116,3 +116,46 @@ class WasteClassificationTests(unittest.TestCase):
             finals=(cycle(0, known=False), final_second),
         )
         self.assertEqual(result.level, WasteLevel.UNKNOWN)
+
+    def test_boundary_corrected_phantom_final_does_not_inflate_streak(self):
+        """账期起点漂移产生的幻影完整账期不得把 L1 抬成 L2。"""
+        real = FinalCycle(
+            EMAIL,
+            "pro",
+            datetime(2026, 6, 30, tzinfo=UTC),
+            datetime(2026, 7, 30, tzinfo=UTC),
+            Decimal("0"),
+            FinalSource.PRE_RESET,
+        )
+        phantom = FinalCycle(
+            EMAIL,
+            "pro",
+            datetime(2026, 7, 30, tzinfo=UTC),
+            datetime(2026, 8, 30, tzinfo=UTC),
+            Decimal("0"),
+            FinalSource.PERIODIC_FALLBACK,
+        )
+        current = KnownCycle(
+            EMAIL,
+            "pro",
+            datetime(2026, 7, 31, tzinfo=UTC),
+            datetime(2026, 8, 31, tzinfo=UTC),
+        )
+        known = (
+            KnownCycle(
+                EMAIL,
+                "pro",
+                real.billing_cycle_start,
+                real.billing_cycle_end,
+            ),
+            KnownCycle(
+                EMAIL,
+                "pro",
+                phantom.billing_cycle_start,
+                phantom.billing_cycle_end,
+            ),
+            current,
+        )
+        result = assess(known=known, finals=(real, phantom))
+        self.assertEqual((result.level, result.low_usage_streak), (WasteLevel.L1, 1))
+        self.assertEqual(result.data_quality_status, "complete")

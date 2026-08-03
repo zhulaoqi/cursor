@@ -19,11 +19,15 @@ def _snapshot(
     *,
     collected_at: datetime,
     used_pct: str = "10.00",
+    auto_pct: str | None = None,
+    api_pct: str | None = None,
     final: bool = False,
     final_source: str | None = None,
     plan_tier: str = "pro",
     applicant: str = "张三",
     department: str = "研发",
+    cycle_start: datetime | None = None,
+    cycle_end: datetime | None = None,
 ) -> dict:
     """构造数据库 LEFT JOIN 查询返回的一条账号/快照行。"""
     return {
@@ -32,9 +36,11 @@ def _snapshot(
         "department": department,
         "plan_tier": plan_tier,
         "plan_status": "active",
-        "billing_cycle_start": datetime(2026, 1, 1, tzinfo=UTC),
-        "billing_cycle_end": datetime(2026, 2, 1, tzinfo=UTC),
+        "billing_cycle_start": cycle_start or datetime(2026, 1, 1, tzinfo=UTC),
+        "billing_cycle_end": cycle_end or datetime(2026, 2, 1, tzinfo=UTC),
         "total_used_pct": used_pct,
+        "auto_used_pct": auto_pct,
+        "api_used_pct": api_pct,
         "collected_at": collected_at,
         "is_cycle_final": final,
         "final_source": final_source,
@@ -241,11 +247,15 @@ class UsageDashboardApiTests(unittest.TestCase):
                 "user@example.com",
                 collected_at=datetime(2026, 2, 5, tzinfo=UTC),
                 used_pct="40.00",
+                auto_pct="25.50",
+                api_pct="10.25",
             ),
             _snapshot(
                 "user@example.com",
                 collected_at=datetime(2026, 2, 1, tzinfo=UTC),
                 used_pct="20.00",
+                auto_pct="12.00",
+                api_pct="5.00",
                 final=True,
                 final_source="periodic_fallback",
             ),
@@ -256,12 +266,56 @@ class UsageDashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         row = response.json()["rows"][0]
         self.assertEqual(row["current_used_pct"], 40.0)
+        self.assertEqual(row["current_auto_used_pct"], 25.5)
+        self.assertEqual(row["current_api_used_pct"], 10.25)
         self.assertEqual(row["latest_final_used_pct"], 20.0)
+        self.assertEqual(row["latest_final_auto_used_pct"], 12.0)
+        self.assertEqual(row["latest_final_api_used_pct"], 5.0)
         self.assertEqual(row["latest_final_source"], "periodic_fallback")
         self.assertEqual(row["latest_cycle_start"], "2026-01-01T00:00:00+00:00")
         self.assertEqual(row["latest_cycle_end"], "2026-02-01T00:00:00+00:00")
         self.assertEqual(row["plan_tier"], "pro")
         self.assertEqual(row["collected_at"], "2026-02-05T00:00:00+00:00")
+
+    def test_dashboard_ignores_boundary_corrected_phantom_final(self) -> None:
+        """账期起点漂移产生的幻影完整账期不计入等级，也不展示为最近完整账期。"""
+        rows = [
+            _snapshot(
+                "user@example.com",
+                collected_at=datetime(2026, 7, 31, 3, tzinfo=UTC),
+                used_pct="0.00",
+                cycle_start=datetime(2026, 7, 31, tzinfo=UTC),
+                cycle_end=datetime(2026, 8, 31, tzinfo=UTC),
+            ),
+            _snapshot(
+                "user@example.com",
+                collected_at=datetime(2026, 7, 31, 1, tzinfo=UTC),
+                used_pct="0.00",
+                final=True,
+                final_source="periodic_fallback",
+                cycle_start=datetime(2026, 7, 30, tzinfo=UTC),
+                cycle_end=datetime(2026, 8, 30, tzinfo=UTC),
+            ),
+            _snapshot(
+                "user@example.com",
+                collected_at=datetime(2026, 7, 30, tzinfo=UTC),
+                used_pct="0.00",
+                final=True,
+                final_source="pre_reset",
+                cycle_start=datetime(2026, 6, 30, tzinfo=UTC),
+                cycle_end=datetime(2026, 7, 30, tzinfo=UTC),
+            ),
+        ]
+
+        response = self._get(rows)
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["waste_level"], "l1")
+        self.assertEqual(row["low_usage_streak"], 1)
+        self.assertEqual(row["latest_cycle_start"], "2026-06-30T00:00:00+00:00")
+        self.assertEqual(row["latest_cycle_end"], "2026-07-30T00:00:00+00:00")
+        self.assertEqual(row["latest_final_source"], "pre_reset")
 
     def test_dashboard_returns_recoverable_503_without_database_secrets(self) -> None:
         """数据源故障只暴露可恢复中文提示，不回传连接字符串或密码。"""
@@ -334,6 +388,8 @@ class UsageAccountCyclesApiTests(unittest.TestCase):
                 "billing_cycle_start": datetime(2026, 7, 1, tzinfo=UTC),
                 "billing_cycle_end": datetime(2026, 8, 1, tzinfo=UTC),
                 "total_used_pct": "12.50",
+                "auto_used_pct": "9.00",
+                "api_used_pct": "2.50",
                 "collected_at": datetime(2026, 7, 15, tzinfo=UTC),
                 "is_cycle_final": 0,
             },
@@ -343,6 +399,8 @@ class UsageAccountCyclesApiTests(unittest.TestCase):
                     "billing_cycle_start": datetime(2026, 6, 1, tzinfo=UTC),
                     "billing_cycle_end": datetime(2026, 7, 1, tzinfo=UTC),
                     "total_used_pct": "8.00",
+                    "auto_used_pct": "6.00",
+                    "api_used_pct": "1.50",
                     "final_source": "pre_reset",
                     "finalized_at": datetime(2026, 7, 1, 1, tzinfo=UTC),
                 }
@@ -356,9 +414,13 @@ class UsageAccountCyclesApiTests(unittest.TestCase):
         self.assertEqual(payload["email"], "user@example.com")
         self.assertEqual(payload["applicant"], "张三")
         self.assertEqual(float(payload["current"]["used_pct"]), 12.5)
+        self.assertEqual(float(payload["current"]["auto_used_pct"]), 9.0)
+        self.assertEqual(float(payload["current"]["api_used_pct"]), 2.5)
         self.assertFalse(payload["current"]["is_final"])
         self.assertEqual(len(payload["finals"]), 1)
         self.assertTrue(payload["finals"][0]["is_low"])
+        self.assertEqual(float(payload["finals"][0]["auto_used_pct"]), 6.0)
+        self.assertEqual(float(payload["finals"][0]["api_used_pct"]), 1.5)
         self.assertEqual(payload["finals"][0]["final_source"], "pre_reset")
         self.assertEqual(payload["waste_level"], "l1")
         self.assertEqual(payload["low_usage_streak"], 1)

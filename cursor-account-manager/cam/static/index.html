@@ -3352,6 +3352,8 @@
     }
     .usage-meter-fill.is-low { background: #D97706; }
     .usage-meter-fill.is-empty { background: #94A3B8; }
+    .usage-meter-fill.is-auto { background: #0D9488; }
+    .usage-meter-fill.is-api { background: #7C3AED; }
     @media (prefers-reduced-motion: reduce) {
       .usage-meter-fill { transition: none; }
     }
@@ -3359,6 +3361,25 @@
       flex: 0 0 auto;
       font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; white-space: nowrap; color: #0F172A;
     }
+    .usage-bars {
+      display: grid; gap: 3px; min-width: 118px; max-width: 168px;
+    }
+    .usage-bars-row {
+      display: grid; grid-template-columns: 28px minmax(36px, 1fr) 40px;
+      align-items: center; gap: 5px; min-width: 0;
+    }
+    .usage-bars-label {
+      font-size: 10.5px; font-weight: 700; color: #64748B; letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .usage-bars .usage-meter-track {
+      max-width: none; min-width: 36px; height: 5px;
+    }
+    .usage-bars .usage-percent {
+      font-size: 11px; font-weight: 650; text-align: right; color: #334155;
+    }
+    .usage-bars-row.is-total .usage-bars-label,
+    .usage-bars-row.is-total .usage-percent { color: #0F172A; font-weight: 700; }
     .usage-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
     .usage-actions .btn { width: auto; white-space: nowrap; }
     .usage-level {
@@ -4149,13 +4170,18 @@
                 </div>
               </td>
               <td data-label="当前用量">
-                <div class="usage-meter" :title="usageCurrentUsage(row)">
-                  <div class="usage-meter-track" aria-hidden="true">
-                    <span class="usage-meter-fill"
-                          :class="usageMeterFillClass(row.current_used_pct ?? row.current_usage_pct ?? row.total_used_pct)"
-                          :style="`width:${usageMeterWidth(row.current_used_pct ?? row.current_usage_pct ?? row.total_used_pct)}`"></span>
-                  </div>
-                  <span class="usage-percent" x-text="usageCurrentUsage(row)"></span>
+                <div class="usage-bars" :title="usageSplitUsageTitle(row, 'current')">
+                  <template x-for="item in usageSplitBars(row, 'current')" :key="item.key">
+                    <div class="usage-bars-row" :class="item.rowClass">
+                      <span class="usage-bars-label" x-text="item.label"></span>
+                      <div class="usage-meter-track" aria-hidden="true">
+                        <span class="usage-meter-fill"
+                              :class="item.fillClass"
+                              :style="`width:${usageMeterWidth(item.value)}`"></span>
+                      </div>
+                      <span class="usage-percent" x-text="usagePercent(item.value)"></span>
+                    </div>
+                  </template>
                 </div>
               </td>
               <td data-label="最近完整账期">
@@ -4166,13 +4192,19 @@
                 </div>
               </td>
               <td data-label="完整账期用量">
-                <div class="usage-meter" x-show="usageFinalCycle(row) !== '暂无完整账期'" :title="usageFinalUsage(row)">
-                  <div class="usage-meter-track" aria-hidden="true">
-                    <span class="usage-meter-fill"
-                          :class="usageMeterFillClass(row.latest_final_used_pct)"
-                          :style="`width:${usageMeterWidth(row.latest_final_used_pct)}`"></span>
-                  </div>
-                  <span class="usage-percent" x-text="usageFinalUsage(row)"></span>
+                <div class="usage-bars" x-show="usageFinalCycle(row) !== '暂无完整账期'"
+                     :title="usageSplitUsageTitle(row, 'final')">
+                  <template x-for="item in usageSplitBars(row, 'final')" :key="item.key">
+                    <div class="usage-bars-row" :class="item.rowClass">
+                      <span class="usage-bars-label" x-text="item.label"></span>
+                      <div class="usage-meter-track" aria-hidden="true">
+                        <span class="usage-meter-fill"
+                              :class="item.fillClass"
+                              :style="`width:${usageMeterWidth(item.value)}`"></span>
+                      </div>
+                      <span class="usage-percent" x-text="usagePercent(item.value)"></span>
+                    </div>
+                  </template>
                 </div>
                 <span class="usage-cycle-empty" x-show="usageFinalCycle(row) === '暂无完整账期'">—</span>
               </td>
@@ -4252,8 +4284,23 @@
               <template x-if="usageCyclesData.current">
                 <div>
                   <p class="usage-cycles-meta" x-text="usageCyclesCurrentRange()"></p>
-                  <p class="usage-cycles-meta">用量 <strong x-text="usagePercent(usageCyclesData.current.used_pct)"></strong>
-                    · 套餐 <span x-text="usageCyclesData.current.plan_tier || '—'"></span></p>
+                  <p class="usage-cycles-meta">
+                    套餐 <span x-text="usageCyclesData.current.plan_tier || '—'"></span>
+                  </p>
+                  <div class="usage-bars" style="max-width:200px;margin-top:6px;"
+                       :title="usageSplitUsageTitle(usageCyclesData.current, 'cycle')">
+                    <template x-for="item in usageSplitBars(usageCyclesData.current, 'cycle')" :key="item.key">
+                      <div class="usage-bars-row" :class="item.rowClass">
+                        <span class="usage-bars-label" x-text="item.label"></span>
+                        <div class="usage-meter-track" aria-hidden="true">
+                          <span class="usage-meter-fill"
+                                :class="item.fillClass"
+                                :style="`width:${usageMeterWidth(item.value)}`"></span>
+                        </div>
+                        <span class="usage-percent" x-text="usagePercent(item.value)"></span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </template>
               <p class="usage-cycles-empty" x-show="!usageCyclesData.current">暂无当前账期快照</p>
@@ -4287,13 +4334,18 @@
                           </div>
                         </td>
                         <td>
-                          <div class="usage-meter">
-                            <div class="usage-meter-track" aria-hidden="true">
-                              <span class="usage-meter-fill"
-                                    :class="usageMeterFillClass(item.used_pct)"
-                                    :style="`width:${usageMeterWidth(item.used_pct)}`"></span>
-                            </div>
-                            <span class="usage-percent" x-text="usagePercent(item.used_pct)"></span>
+                          <div class="usage-bars" :title="usageSplitUsageTitle(item, 'cycle')">
+                            <template x-for="bar in usageSplitBars(item, 'cycle')" :key="bar.key">
+                              <div class="usage-bars-row" :class="bar.rowClass">
+                                <span class="usage-bars-label" x-text="bar.label"></span>
+                                <div class="usage-meter-track" aria-hidden="true">
+                                  <span class="usage-meter-fill"
+                                        :class="bar.fillClass"
+                                        :style="`width:${usageMeterWidth(bar.value)}`"></span>
+                                </div>
+                                <span class="usage-percent" x-text="usagePercent(bar.value)"></span>
+                              </div>
+                            </template>
                           </div>
                         </td>
                         <td x-text="item.is_low ? '是' : '否'"></td>
@@ -6053,6 +6105,69 @@ function app() {
     },
     usageFinalUsage(row) {
       return this.usagePercent(row.latest_final_used_pct);
+    },
+    usageSplitValues(source, kind) {
+      if (!source) {
+        return { total: null, auto: null, api: null };
+      }
+      if (kind === 'final') {
+        return {
+          total: source.latest_final_used_pct,
+          auto: source.latest_final_auto_used_pct,
+          api: source.latest_final_api_used_pct,
+        };
+      }
+      if (kind === 'cycle') {
+        return {
+          total: source.used_pct ?? source.total_used_pct,
+          auto: source.auto_used_pct,
+          api: source.api_used_pct,
+        };
+      }
+      return {
+        total: source.current_used_pct ?? source.current_usage_pct ?? source.total_used_pct,
+        auto: source.current_auto_used_pct ?? source.auto_used_pct,
+        api: source.current_api_used_pct ?? source.api_used_pct,
+      };
+    },
+    usageSplitBars(source, kind = 'current') {
+      const values = this.usageSplitValues(source, kind);
+      const hasSplit = this.usagePctNumber(values.auto) !== null
+        || this.usagePctNumber(values.api) !== null;
+      const bars = [{
+        key: 'total',
+        label: '总',
+        value: values.total,
+        rowClass: 'is-total',
+        fillClass: this.usageMeterFillClass(values.total),
+      }];
+      if (!hasSplit) return bars;
+      bars.push(
+        {
+          key: 'auto',
+          label: 'Auto',
+          value: values.auto,
+          rowClass: '',
+          fillClass: this.usagePctNumber(values.auto) === null
+            ? 'is-empty'
+            : 'is-auto',
+        },
+        {
+          key: 'api',
+          label: 'API',
+          value: values.api,
+          rowClass: '',
+          fillClass: this.usagePctNumber(values.api) === null
+            ? 'is-empty'
+            : 'is-api',
+        },
+      );
+      return bars;
+    },
+    usageSplitUsageTitle(source, kind = 'current') {
+      return this.usageSplitBars(source, kind)
+        .map((item) => `${item.label} ${this.usagePercent(item.value)}`)
+        .join(' · ');
     },
     usagePlanLabel(row) {
       const tier = String(row?.current_plan_tier || row?.plan_tier || '').trim() || '—';

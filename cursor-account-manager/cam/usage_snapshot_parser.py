@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from .usage_snapshot_models import SnapshotType, UsageSnapshot
 
 
-PARSER_VERSION = "usage-v1"
+PARSER_VERSION = "usage-v2"
 
 _SENSITIVE_KEYS = {
     "access_token",
@@ -53,17 +53,26 @@ def _parse_millisecond_timestamp(value: object, field_name: str) -> datetime:
     return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
 
 
-def _parse_percent(value: object) -> Decimal:
+def _parse_percent(value: object, field_name: str = "totalPercentUsed") -> Decimal:
     """解析 0 到 100 的百分比，不猜测 0 到 1 的量纲。"""
     if isinstance(value, bool):
-        raise ValueError("totalPercentUsed 必须是 0 到 100 的百分比")
+        raise ValueError(f"{field_name} 必须是 0 到 100 的百分比")
     try:
         percent = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError("totalPercentUsed 必须是 0 到 100 的百分比") from exc
+        raise ValueError(f"{field_name} 必须是 0 到 100 的百分比") from exc
     if not percent.is_finite() or not Decimal("0") <= percent <= Decimal("100"):
-        raise ValueError("totalPercentUsed 必须是 0 到 100 的百分比")
+        raise ValueError(f"{field_name} 必须是 0 到 100 的百分比")
     return percent
+
+
+def _parse_optional_percent(value: object, field_name: str) -> Decimal | None:
+    """可选百分比：缺失时返回 None，不猜测默认值。"""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _parse_percent(value, field_name)
 
 
 def sanitize_payload(value: Any) -> Any:
@@ -121,6 +130,14 @@ def parse_usage_snapshot(
         "billingCycleEnd",
     )
     percent = _parse_percent(plan_usage.get("totalPercentUsed"))
+    auto_percent = _parse_optional_percent(
+        plan_usage.get("autoPercentUsed"),
+        "autoPercentUsed",
+    )
+    api_percent = _parse_optional_percent(
+        plan_usage.get("apiPercentUsed"),
+        "apiPercentUsed",
+    )
 
     raw_plan_name = _first_text(
         plan_payload,
@@ -154,6 +171,8 @@ def parse_usage_snapshot(
         billing_cycle_start=cycle_start,
         billing_cycle_end=cycle_end,
         total_used_pct=percent,
+        auto_used_pct=auto_percent,
+        api_used_pct=api_percent,
         snapshot_type=snapshot_type,
         snapshot_slot=snapshot_slot,
         collected_at=collected_at,

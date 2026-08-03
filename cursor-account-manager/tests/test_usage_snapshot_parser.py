@@ -18,7 +18,11 @@ class UsageSnapshotParserTests(unittest.TestCase):
             usage_payload={
                 "billingCycleStart": 1751328000000,
                 "billingCycleEnd": 1754006400000,
-                "planUsage": {"totalPercentUsed": 12.5},
+                "planUsage": {
+                    "totalPercentUsed": 12.5,
+                    "autoPercentUsed": 8.25,
+                    "apiPercentUsed": 3.5,
+                },
             },
             plan_payload={"planName": "Pro+"},
             stripe_payload={"subscriptionStatus": "active"},
@@ -30,10 +34,33 @@ class UsageSnapshotParserTests(unittest.TestCase):
         self.assertEqual(snapshot.plan_tier, "pro_plus")
         self.assertEqual(snapshot.plan_status, "active")
         self.assertEqual(snapshot.total_used_pct, Decimal("12.5"))
+        self.assertEqual(snapshot.auto_used_pct, Decimal("8.25"))
+        self.assertEqual(snapshot.api_used_pct, Decimal("3.5"))
+        self.assertEqual(snapshot.parser_version, "usage-v2")
         self.assertEqual(
             snapshot.billing_cycle_start,
             datetime(2025, 7, 1, tzinfo=timezone.utc),
         )
+
+    def test_parse_usage_snapshot_allows_missing_auto_api_percent(self):
+        from cam.usage_snapshot_parser import parse_usage_snapshot
+
+        snapshot = parse_usage_snapshot(
+            email="user@example.com",
+            usage_payload={
+                "billingCycleStart": 1751328000000,
+                "billingCycleEnd": 1754006400000,
+                "planUsage": {"totalPercentUsed": 12},
+            },
+            plan_payload={"planName": "Pro"},
+            stripe_payload={},
+            snapshot_type=SnapshotType.PERIODIC,
+            snapshot_slot=datetime(2025, 7, 1, tzinfo=timezone.utc),
+            collected_at=datetime(2025, 7, 2, tzinfo=timezone.utc),
+        )
+
+        self.assertIsNone(snapshot.auto_used_pct)
+        self.assertIsNone(snapshot.api_used_pct)
 
     def test_plan_amount_without_explicit_name_remains_unknown(self):
         from cam.usage_snapshot_parser import normalize_plan_tier

@@ -31,6 +31,63 @@ def _assessment(
     )
 
 
+def is_billing_cycle_boundary_correction(
+    *,
+    old_start: datetime,
+    old_end: datetime,
+    new_start: datetime,
+    continuity_tolerance: timedelta,
+) -> bool:
+    """判断新账期起点是否只是 Cursor 对旧窗口的边界微调。
+
+    典型场景：旧窗 07-30/08-30，次日 API 改报 07-31/08-31。
+    起点漂移落在连续性容差内，且新起点仍落在旧窗结束前，应视为修正而非整月切换。
+    """
+    if new_start <= old_start:
+        return False
+    if new_start - old_start > continuity_tolerance:
+        return False
+    return new_start < old_end
+
+
+def is_cycle_superseded_by_boundary_correction(
+    *,
+    cycle_start: datetime,
+    cycle_end: datetime,
+    other_cycle_starts: Sequence[datetime],
+    continuity_tolerance: timedelta,
+) -> bool:
+    """若存在更新且重叠的账期起点，则该账期被边界修正覆盖。"""
+    for other_start in other_cycle_starts:
+        if is_billing_cycle_boundary_correction(
+            old_start=cycle_start,
+            old_end=cycle_end,
+            new_start=other_start,
+            continuity_tolerance=continuity_tolerance,
+        ):
+            return True
+    return False
+
+
+def filter_authoritative_cycles(
+    cycles: Sequence[KnownCycle | FinalCycle],
+    *,
+    all_cycle_starts: Sequence[datetime],
+    continuity_tolerance: timedelta,
+) -> list:
+    """剔除被账期边界修正覆盖的幻影账期。"""
+    return [
+        item
+        for item in cycles
+        if not is_cycle_superseded_by_boundary_correction(
+            cycle_start=item.billing_cycle_start,
+            cycle_end=item.billing_cycle_end,
+            other_cycle_starts=all_cycle_starts,
+            continuity_tolerance=continuity_tolerance,
+        )
+    ]
+
+
 def classify_waste(
     *,
     current_plan_tier: str,
@@ -40,17 +97,35 @@ def classify_waste(
     continuity_tolerance: timedelta,
 ) -> WasteAssessment:
     """按当前套餐的连续账期段计算低用量等级。"""
-    cycles = tuple(known_cycles)
+    raw_cycles = tuple(known_cycles)
+    raw_finals = tuple(final_cycles)
+    if not raw_cycles and not raw_finals:
+        raise ValueError("至少需要一个已知账期或最终账期以确定账号")
+    email = (raw_cycles or raw_finals)[0].email
+    all_starts = tuple(
+        {
+            item.billing_cycle_start
+            for item in (*raw_cycles, *raw_finals)
+        }
+    )
+    cycles = tuple(
+        filter_authoritative_cycles(
+            raw_cycles,
+            all_cycle_starts=all_starts,
+            continuity_tolerance=continuity_tolerance,
+        )
+    )
     finals = tuple(
         sorted(
-            final_cycles,
+            filter_authoritative_cycles(
+                raw_finals,
+                all_cycle_starts=all_starts,
+                continuity_tolerance=continuity_tolerance,
+            ),
             key=lambda item: item.billing_cycle_end,
             reverse=True,
         )
     )
-    if not cycles and not finals:
-        raise ValueError("至少需要一个已知账期或最终账期以确定账号")
-    email = (cycles or finals)[0].email
 
     if current_plan_tier == "unknown":
         return _assessment(

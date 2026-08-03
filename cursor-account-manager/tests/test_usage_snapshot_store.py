@@ -146,7 +146,12 @@ class StatefulSnapshotDB:
                 rows,
                 key=lambda row: (row["billing_cycle_start"], row["id"]),
             )
-            return [{"billing_cycle_start": latest["billing_cycle_start"]}]
+            return [
+                {
+                    "billing_cycle_start": latest["billing_cycle_start"],
+                    "billing_cycle_end": latest["billing_cycle_end"],
+                }
+            ]
 
         if (
             normalized.startswith(
@@ -202,6 +207,8 @@ class StatefulSnapshotDB:
                 "plan_source",
                 "billing_cycle_end",
                 "total_used_pct",
+                "auto_used_pct",
+                "api_used_pct",
                 "snapshot_slot",
                 "collected_at",
                 "source_endpoint",
@@ -282,6 +289,8 @@ def make_snapshot(
     snapshot_slot=None,
     collected_at=None,
     total_used_pct=Decimal("12.34"),
+    auto_used_pct=None,
+    api_used_pct=None,
     raw_payload=None,
 ):
     """构造有效快照。"""
@@ -308,6 +317,8 @@ def make_snapshot(
         billing_cycle_start=cycle_start,
         billing_cycle_end=cycle_end or datetime(2026, 8, 1, tzinfo=UTC),
         total_used_pct=total_used_pct,
+        auto_used_pct=auto_used_pct,
+        api_used_pct=api_used_pct,
         snapshot_type=snapshot_type,
         snapshot_slot=snapshot_slot,
         collected_at=collected_at
@@ -330,6 +341,8 @@ def schema_columns(collation="utf8mb4_unicode_ci"):
         ("billing_cycle_start", "datetime(3)", "NO", None, None, None, ""),
         ("billing_cycle_end", "datetime(3)", "NO", None, None, None, ""),
         ("total_used_pct", "decimal(5,2)", "NO", None, None, None, ""),
+        ("auto_used_pct", "decimal(5,2)", "YES", None, None, None, ""),
+        ("api_used_pct", "decimal(5,2)", "YES", None, None, None, ""),
         ("snapshot_type", "varchar(16)", "NO", None, "utf8mb4", collation, ""),
         ("snapshot_slot", "datetime(3)", "NO", None, None, None, ""),
         ("collected_at", "datetime(3)", "NO", None, None, None, ""),
@@ -406,6 +419,22 @@ def schema_checks():
         {
             "CONSTRAINT_NAME": "chk_usage_pct",
             "CHECK_CLAUSE": "total_used_pct >= 0 AND total_used_pct <= 100",
+            "ENFORCED": "YES",
+        },
+        {
+            "CONSTRAINT_NAME": "chk_usage_auto_pct",
+            "CHECK_CLAUSE": (
+                "auto_used_pct IS NULL OR "
+                "(auto_used_pct >= 0 AND auto_used_pct <= 100)"
+            ),
+            "ENFORCED": "YES",
+        },
+        {
+            "CONSTRAINT_NAME": "chk_usage_api_pct",
+            "CHECK_CLAUSE": (
+                "api_used_pct IS NULL OR "
+                "(api_used_pct >= 0 AND api_used_pct <= 100)"
+            ),
             "ENFORCED": "YES",
         },
         {
@@ -603,6 +632,8 @@ class UsageSnapshotStoreSchemaTests(unittest.TestCase):
                         "CHARACTER_SET_NAME": "utf8mb4",
                     }
                 ]
+            if "information_schema.table_constraints" in normalized:
+                return []
             return []
 
         pool = FakePool(handler)
@@ -626,13 +657,17 @@ class UsageSnapshotStoreSchemaTests(unittest.TestCase):
         for check_name in (
             "chk_usage_snapshot_type",
             "chk_usage_pct",
+            "chk_usage_auto_pct",
+            "chk_usage_api_pct",
             "chk_usage_cycle",
             "chk_usage_final_state",
         ):
             self.assertIn(check_name, ddl)
+        self.assertIn("auto_used_pct", ddl)
+        self.assertIn("api_used_pct", ddl)
         self.assertIn("COMMENT='Cursor 账号订阅档位与账期用量时序快照'", ddl)
         self.assertEqual(len(pool.connections), 1)
-        self.assertEqual(pool.connections[0].commits, 1)
+        self.assertEqual(pool.connections[0].commits, 2)
         self.assertEqual(pool.connections[0].rollbacks, 0)
         self.assertTrue(pool.connections[0].cursor_obj.closed)
         self.assertTrue(pool.connections[0].closed)
@@ -1112,6 +1147,8 @@ class UsageSnapshotStoreWriteTests(unittest.TestCase):
     def test_zero_percent_decimal_and_chinese_json_are_preserved(self):
         snapshot = make_snapshot(
             total_used_pct=Decimal("0"),
+            auto_used_pct=Decimal("0"),
+            api_used_pct=None,
             raw_payload={"说明": "中文", "嵌套": {"值": 0}},
         )
         result, calls, _ = self.run_write(snapshot)
@@ -1120,6 +1157,8 @@ class UsageSnapshotStoreWriteTests(unittest.TestCase):
             item for item in calls if "INSERT INTO cursor_usage_snapshot" in item[0]
         )
         self.assertEqual(params["total_used_pct"], Decimal("0"))
+        self.assertEqual(params["auto_used_pct"], Decimal("0"))
+        self.assertIsNone(params["api_used_pct"])
         self.assertEqual(
             params["raw_payload"],
             '{"说明":"中文","嵌套":{"值":0}}',
@@ -1449,6 +1488,34 @@ class UsageSnapshotStoreReconcileTests(unittest.TestCase):
             sum(row["is_cycle_final"] for row in database.rows),
             1,
         )
+
+    def test_one_day_cycle_start_drift_does_not_finalize_overlapping_cycle(self):
+        """Cursor 把账期起点微调 1 天且窗口仍重叠时，不得误结算上一窗口。"""
+        store, database, _ = self.make_store()
+        old_start = datetime(2026, 7, 30, tzinfo=UTC)
+        old_end = datetime(2026, 8, 30, tzinfo=UTC)
+        database.add_snapshot(
+            make_snapshot(
+                cycle_start=old_start,
+                cycle_end=old_end,
+                snapshot_slot=old_start + timedelta(hours=1),
+                collected_at=old_start + timedelta(hours=2),
+            )
+        )
+        new_start = datetime(2026, 7, 31, tzinfo=UTC)
+        new_end = datetime(2026, 8, 31, tzinfo=UTC)
+        result = store.reconcile_and_write(
+            make_snapshot(
+                cycle_start=new_start,
+                cycle_end=new_end,
+                snapshot_slot=new_start + timedelta(hours=1),
+                collected_at=new_start + timedelta(hours=3),
+            )
+        )
+        self.assertEqual(result.write_result, WriteResult.INSERTED)
+        self.assertIsNone(result.finalize_result)
+        self.assertFalse(any(row["is_cycle_final"] for row in database.rows))
+        self.assertEqual(len(database.rows), 2)
 
     def test_finalization_prefers_latest_pre_reset(self):
         store, database, _ = self.make_store()

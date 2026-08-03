@@ -63,7 +63,7 @@ from .usage_scheduler import start_usage_scheduler_once, stop_usage_scheduler
 from .usage_snapshot_models import CollectionStatus, FinalCycle, FinalSource, KnownCycle
 from .usage_snapshot_refresh import run_usage_manual_collect
 from .usage_snapshot_store import UsageSnapshotStore
-from .usage_waste import classify_waste
+from .usage_waste import classify_waste, filter_authoritative_cycles
 
 log = get("web")
 
@@ -160,6 +160,15 @@ def _dashboard_decimal(value: object) -> Decimal:
         raise ValueError("看板快照用量字段格式错误") from exc
 
 
+def _dashboard_optional_decimal(value: object) -> Decimal | None:
+    """可选用量字段：空值保持 None，不猜默认。"""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _dashboard_decimal(value)
+
+
 def _reason_without_usage_snapshot(
     outcome: UsageCollectOutcome | None,
 ) -> str:
@@ -246,9 +255,13 @@ def _build_usage_dashboard_rows(
                     "billing_cycle_start": None,
                     "billing_cycle_end": None,
                     "current_used_pct": None,
+                    "current_auto_used_pct": None,
+                    "current_api_used_pct": None,
                     "latest_cycle_start": None,
                     "latest_cycle_end": None,
                     "latest_final_used_pct": None,
+                    "latest_final_auto_used_pct": None,
+                    "latest_final_api_used_pct": None,
                     "latest_final_source": None,
                     "waste_level": "unknown",
                     "low_usage_streak": 0,
@@ -298,23 +311,45 @@ def _build_usage_dashboard_rows(
                     final_by_cycle[cycle_key] = (snapshot, final)
 
         final_pairs = list(final_by_cycle.values())
+        known_cycles = list(known_by_cycle.values())
         final_cycles = [item[1] for item in final_pairs]
+        all_starts = [
+            item.billing_cycle_start for item in (*known_cycles, *final_cycles)
+        ]
+        authoritative_finals = filter_authoritative_cycles(
+            final_cycles,
+            all_cycle_starts=all_starts,
+            continuity_tolerance=continuity_tolerance,
+        )
+        authoritative_final_keys = {
+            (item.billing_cycle_start, item.billing_cycle_end)
+            for item in authoritative_finals
+        }
+        authoritative_pairs = [
+            pair
+            for pair in final_pairs
+            if (
+                pair[1].billing_cycle_start,
+                pair[1].billing_cycle_end,
+            )
+            in authoritative_final_keys
+        ]
         assessment = classify_waste(
             current_plan_tier=str(current.get("plan_tier") or "unknown"),
-            known_cycles=list(known_by_cycle.values()),
+            known_cycles=known_cycles,
             final_cycles=final_cycles,
             low_threshold_pct=SETTINGS.usage_low_threshold_pct,
             continuity_tolerance=continuity_tolerance,
         )
         latest_final = (
             max(
-                final_pairs,
+                authoritative_pairs,
                 key=lambda item: (
                     item[1].billing_cycle_end,
                     snapshot_sort_key(item[0]),
                 ),
             )[0]
-            if final_pairs
+            if authoritative_pairs
             else None
         )
         email = str(account["email"])
@@ -329,6 +364,12 @@ def _build_usage_dashboard_rows(
                 "billing_cycle_start": current.get("billing_cycle_start"),
                 "billing_cycle_end": current.get("billing_cycle_end"),
                 "current_used_pct": _dashboard_decimal(current["total_used_pct"]),
+                "current_auto_used_pct": _dashboard_optional_decimal(
+                    current.get("auto_used_pct")
+                ),
+                "current_api_used_pct": _dashboard_optional_decimal(
+                    current.get("api_used_pct")
+                ),
                 "latest_cycle_start": (
                     latest_final.get("billing_cycle_start")
                     if latest_final is not None
@@ -341,6 +382,16 @@ def _build_usage_dashboard_rows(
                 ),
                 "latest_final_used_pct": (
                     _dashboard_decimal(latest_final["total_used_pct"])
+                    if latest_final is not None
+                    else None
+                ),
+                "latest_final_auto_used_pct": (
+                    _dashboard_optional_decimal(latest_final.get("auto_used_pct"))
+                    if latest_final is not None
+                    else None
+                ),
+                "latest_final_api_used_pct": (
+                    _dashboard_optional_decimal(latest_final.get("api_used_pct"))
                     if latest_final is not None
                     else None
                 ),
@@ -437,12 +488,14 @@ def _build_usage_account_cycles(store: UsageSnapshotStore, email: str) -> dict:
 
     known_cycles: list[KnownCycle] = []
     final_cycles: list[FinalCycle] = []
-    finals: list[dict] = []
+    finals_built: list[tuple[FinalCycle, dict]] = []
     for row in finals_raw:
         cycle_start = _dashboard_datetime(row["billing_cycle_start"])
         cycle_end = _dashboard_datetime(row["billing_cycle_end"])
         plan_tier = str(row.get("plan_tier") or "unknown")
         used_pct = _dashboard_decimal(row["total_used_pct"])
+        auto_pct = _dashboard_optional_decimal(row.get("auto_used_pct"))
+        api_pct = _dashboard_optional_decimal(row.get("api_used_pct"))
         known_cycles.append(
             KnownCycle(
                 email=email,
@@ -451,26 +504,30 @@ def _build_usage_account_cycles(store: UsageSnapshotStore, email: str) -> dict:
                 billing_cycle_end=cycle_end,
             )
         )
-        final_cycles.append(
-            FinalCycle(
-                email=email,
-                plan_tier=plan_tier,
-                billing_cycle_start=cycle_start,
-                billing_cycle_end=cycle_end,
-                total_used_pct=used_pct,
-                final_source=FinalSource(str(row.get("final_source"))),
-            )
+        final = FinalCycle(
+            email=email,
+            plan_tier=plan_tier,
+            billing_cycle_start=cycle_start,
+            billing_cycle_end=cycle_end,
+            total_used_pct=used_pct,
+            final_source=FinalSource(str(row.get("final_source"))),
         )
-        finals.append(
-            {
-                "billing_cycle_start": row.get("billing_cycle_start"),
-                "billing_cycle_end": row.get("billing_cycle_end"),
-                "used_pct": used_pct,
-                "final_source": row.get("final_source"),
-                "finalized_at": row.get("finalized_at"),
-                "plan_tier": plan_tier,
-                "is_low": used_pct < threshold,
-            }
+        final_cycles.append(final)
+        finals_built.append(
+            (
+                final,
+                {
+                    "billing_cycle_start": row.get("billing_cycle_start"),
+                    "billing_cycle_end": row.get("billing_cycle_end"),
+                    "used_pct": used_pct,
+                    "auto_used_pct": auto_pct,
+                    "api_used_pct": api_pct,
+                    "final_source": row.get("final_source"),
+                    "finalized_at": row.get("finalized_at"),
+                    "plan_tier": plan_tier,
+                    "is_low": used_pct < threshold,
+                },
+            )
         )
 
     if latest is not None:
@@ -486,6 +543,8 @@ def _build_usage_account_cycles(store: UsageSnapshotStore, email: str) -> dict:
             "billing_cycle_start": latest.get("billing_cycle_start"),
             "billing_cycle_end": latest.get("billing_cycle_end"),
             "used_pct": _dashboard_decimal(latest["total_used_pct"]),
+            "auto_used_pct": _dashboard_optional_decimal(latest.get("auto_used_pct")),
+            "api_used_pct": _dashboard_optional_decimal(latest.get("api_used_pct")),
             "collected_at": latest.get("collected_at"),
             "plan_tier": latest.get("plan_tier") or "unknown",
             "is_final": bool(latest.get("is_cycle_final")),
@@ -494,6 +553,22 @@ def _build_usage_account_cycles(store: UsageSnapshotStore, email: str) -> dict:
     else:
         current = None
         current_plan_tier = "unknown"
+
+    all_starts = [item.billing_cycle_start for item in (*known_cycles, *final_cycles)]
+    authoritative_finals = filter_authoritative_cycles(
+        final_cycles,
+        all_cycle_starts=all_starts,
+        continuity_tolerance=continuity_tolerance,
+    )
+    authoritative_keys = {
+        (item.billing_cycle_start, item.billing_cycle_end)
+        for item in authoritative_finals
+    }
+    finals = [
+        payload
+        for final, payload in finals_built
+        if (final.billing_cycle_start, final.billing_cycle_end) in authoritative_keys
+    ]
 
     if known_cycles or final_cycles:
         assessment = classify_waste(

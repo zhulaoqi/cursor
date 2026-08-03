@@ -28,7 +28,7 @@ class UsageDashboardUiTests(unittest.TestCase):
     def test_usage_levels_and_accessible_controls_are_present(self):
         for label in ("L3", "L2", "L1", "L0", "待确认"):
             self.assertIn(label, self.html)
-        self.assertIn('aria-label="搜索邮箱、申请人或部门"', self.html)
+        self.assertIn('aria-label="搜索邮箱、申请人、部门或套餐"', self.html)
         self.assertIn('aria-live="polite"', self.html)
 
     def test_usage_table_avoids_fixed_overflow_and_formats_cycles(self):
@@ -38,6 +38,8 @@ class UsageDashboardUiTests(unittest.TestCase):
         self.assertIn("usageCycleRangeText", self.html)
         self.assertIn("${parts.start} / ${parts.end}", self.html)
         self.assertIn("usage-meter", self.html)
+        self.assertIn("usage-bars", self.html)
+        self.assertIn("usageSplitBars", self.html)
         self.assertIn("usageMeterWidth", self.html)
         self.assertIn("完整账期用量", self.html)
         self.assertIn("usage-col-final-usage", self.html)

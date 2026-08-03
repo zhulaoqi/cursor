@@ -16,6 +16,7 @@ from dbutils.pooled_db import PooledDB
 
 from .config import SETTINGS
 from .usage_snapshot_models import FinalSource, SnapshotType, UsageSnapshot
+from .usage_waste import is_billing_cycle_boundary_correction
 
 
 class SchemaMismatchError(RuntimeError):
@@ -70,6 +71,8 @@ _RETRYABLE_MYSQL_ERROR_CODES = {1062, 1205, 1213}
 _CHECK_NAMES = {
     "chk_usage_snapshot_type",
     "chk_usage_pct",
+    "chk_usage_auto_pct",
+    "chk_usage_api_pct",
     "chk_usage_cycle",
     "chk_usage_final_state",
 }
@@ -79,6 +82,14 @@ _EXPECTED_CHECK_CLAUSES = {
     ),
     "chk_usage_pct": (
         "total_used_pct >= 0 AND total_used_pct <= 100"
+    ),
+    "chk_usage_auto_pct": (
+        "auto_used_pct IS NULL OR "
+        "(auto_used_pct >= 0 AND auto_used_pct <= 100)"
+    ),
+    "chk_usage_api_pct": (
+        "api_used_pct IS NULL OR "
+        "(api_used_pct >= 0 AND api_used_pct <= 100)"
     ),
     "chk_usage_cycle": "billing_cycle_end > billing_cycle_start",
     "chk_usage_final_state": (
@@ -100,6 +111,8 @@ _EXPECTED_COLUMNS = {
     "billing_cycle_start": ("datetime(3)", "NO", None, None, None, ""),
     "billing_cycle_end": ("datetime(3)", "NO", None, None, None, ""),
     "total_used_pct": ("decimal(5,2)", "NO", None, None, None, ""),
+    "auto_used_pct": ("decimal(5,2)", "YES", None, None, None, ""),
+    "api_used_pct": ("decimal(5,2)", "YES", None, None, None, ""),
     "snapshot_type": ("varchar(16)", "NO", None, "utf8mb4", "table", ""),
     "snapshot_slot": ("datetime(3)", "NO", None, None, None, ""),
     "collected_at": ("datetime(3)", "NO", None, None, None, ""),
@@ -163,6 +176,8 @@ SELECT
     snapshots.billing_cycle_start AS billing_cycle_start,
     snapshots.billing_cycle_end AS billing_cycle_end,
     snapshots.total_used_pct AS total_used_pct,
+    snapshots.auto_used_pct AS auto_used_pct,
+    snapshots.api_used_pct AS api_used_pct,
     snapshots.snapshot_type AS snapshot_type,
     snapshots.snapshot_slot AS snapshot_slot,
     snapshots.collected_at AS collected_at,
@@ -202,13 +217,15 @@ _SQL_INSERT = """
 INSERT INTO cursor_usage_snapshot (
     email, plan_tier, plan_tier_raw, plan_status, plan_source,
     billing_cycle_start, billing_cycle_end, total_used_pct,
+    auto_used_pct, api_used_pct,
     snapshot_type, snapshot_slot, collected_at,
     is_cycle_final, final_source, finalized_at,
     source_endpoint, parser_version, raw_payload
 ) VALUES (
     %(email)s, %(plan_tier)s, %(plan_tier_raw)s, %(plan_status)s,
     %(plan_source)s, %(billing_cycle_start)s, %(billing_cycle_end)s,
-    %(total_used_pct)s, %(snapshot_type)s, %(snapshot_slot)s,
+    %(total_used_pct)s, %(auto_used_pct)s, %(api_used_pct)s,
+    %(snapshot_type)s, %(snapshot_slot)s,
     %(collected_at)s, %(is_cycle_final)s, %(final_source)s,
     %(finalized_at)s, %(source_endpoint)s, %(parser_version)s,
     %(raw_payload)s
@@ -223,6 +240,8 @@ SET plan_tier = %(plan_tier)s,
     plan_source = %(plan_source)s,
     billing_cycle_end = %(billing_cycle_end)s,
     total_used_pct = %(total_used_pct)s,
+    auto_used_pct = %(auto_used_pct)s,
+    api_used_pct = %(api_used_pct)s,
     snapshot_slot = %(snapshot_slot)s,
     collected_at = %(collected_at)s,
     source_endpoint = %(source_endpoint)s,
@@ -232,7 +251,7 @@ WHERE id = %(id)s
 """
 
 _SQL_SELECT_LATEST_CYCLE_FOR_UPDATE = """
-SELECT billing_cycle_start
+SELECT billing_cycle_start, billing_cycle_end
 FROM cursor_usage_snapshot
 WHERE email = %(email)s
 ORDER BY billing_cycle_start DESC, id DESC
@@ -293,7 +312,9 @@ CREATE TABLE IF NOT EXISTS cursor_usage_snapshot (
                            COMMENT 'api/stripe/spending_page/unknown',
     billing_cycle_start  DATETIME(3) NOT NULL COMMENT 'UTC，无时区 DATETIME',
     billing_cycle_end    DATETIME(3) NOT NULL COMMENT 'UTC，无时区 DATETIME',
-    total_used_pct       DECIMAL(5,2) NOT NULL COMMENT '0.00~100.00',
+    total_used_pct       DECIMAL(5,2) NOT NULL COMMENT '综合使用率 0.00~100.00',
+    auto_used_pct        DECIMAL(5,2) NULL COMMENT 'Auto 使用率 0.00~100.00',
+    api_used_pct         DECIMAL(5,2) NULL COMMENT 'API 使用率 0.00~100.00',
     snapshot_type        VARCHAR(16) NOT NULL COMMENT 'periodic/pre_reset',
     snapshot_slot        DATETIME(3) NOT NULL
                            COMMENT '幂等时间槽；periodic 为频率槽，pre_reset 为 cycle_start',
@@ -319,6 +340,16 @@ CREATE TABLE IF NOT EXISTS cursor_usage_snapshot (
         CHECK (snapshot_type IN ('periodic', 'pre_reset')),
     CONSTRAINT chk_usage_pct
         CHECK (total_used_pct >= 0 AND total_used_pct <= 100),
+    CONSTRAINT chk_usage_auto_pct
+        CHECK (
+            auto_used_pct IS NULL
+            OR (auto_used_pct >= 0 AND auto_used_pct <= 100)
+        ),
+    CONSTRAINT chk_usage_api_pct
+        CHECK (
+            api_used_pct IS NULL
+            OR (api_used_pct >= 0 AND api_used_pct <= 100)
+        ),
     CONSTRAINT chk_usage_cycle
         CHECK (billing_cycle_end > billing_cycle_start),
     CONSTRAINT chk_usage_final_state
@@ -548,6 +579,8 @@ WHERE COLLATION_NAME = %s
                 )
                 cursor.execute(_ddl(str(email_meta["collation"])))
                 connection.commit()
+                self._migrate_split_usage_pct_columns(cursor)
+                connection.commit()
                 self._validate_schema_with_cursor(cursor)
                 snapshot_email = self._email_metadata(cursor, _TABLE_NAME)
                 if snapshot_email != email_meta:
@@ -569,6 +602,64 @@ WHERE COLLATION_NAME = %s
                 self._validate_schema_with_cursor(cursor)
             finally:
                 cursor.close()
+
+    def _migrate_split_usage_pct_columns(self, cursor) -> None:
+        """为已有快照表补齐 Auto/API 用量列与 CHECK（可重复执行）。"""
+        existing_columns = self._column_names(cursor, _TABLE_NAME)
+        if "auto_used_pct" not in existing_columns:
+            cursor.execute(
+                f"""
+ALTER TABLE {_TABLE_NAME}
+ADD COLUMN auto_used_pct DECIMAL(5,2) NULL
+    COMMENT 'Auto 使用率 0.00~100.00'
+    AFTER total_used_pct
+"""
+            )
+        if "api_used_pct" not in existing_columns:
+            cursor.execute(
+                f"""
+ALTER TABLE {_TABLE_NAME}
+ADD COLUMN api_used_pct DECIMAL(5,2) NULL
+    COMMENT 'API 使用率 0.00~100.00'
+    AFTER auto_used_pct
+"""
+            )
+        cursor.execute(
+            """
+SELECT CONSTRAINT_NAME
+FROM information_schema.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = %s
+  AND TABLE_NAME = %s
+  AND CONSTRAINT_TYPE = 'CHECK'
+""",
+            (self.database, _TABLE_NAME),
+        )
+        existing_checks = {
+            str(_row_value(row, "CONSTRAINT_NAME"))
+            for row in cursor.fetchall()
+        }
+        if "chk_usage_auto_pct" not in existing_checks:
+            cursor.execute(
+                f"""
+ALTER TABLE {_TABLE_NAME}
+ADD CONSTRAINT chk_usage_auto_pct
+CHECK (
+    auto_used_pct IS NULL
+    OR (auto_used_pct >= 0 AND auto_used_pct <= 100)
+)
+"""
+            )
+        if "chk_usage_api_pct" not in existing_checks:
+            cursor.execute(
+                f"""
+ALTER TABLE {_TABLE_NAME}
+ADD CONSTRAINT chk_usage_api_pct
+CHECK (
+    api_used_pct IS NULL
+    OR (api_used_pct >= 0 AND api_used_pct <= 100)
+)
+"""
+            )
 
     def _validate_schema_with_cursor(self, cursor) -> None:
         """使用现有游标逐项验证快照表结构。"""
@@ -1044,17 +1135,35 @@ WHERE email = %(email)s
                     latest,
                     "billing_cycle_start",
                 )
+                latest_end = _row_value(
+                    latest,
+                    "billing_cycle_end",
+                )
                 if incoming_start < latest_start:
                     raise StaleCycleWriteError(
                         "拒绝写入早于最新已知账期的快照"
                     )
                 if incoming_start > latest_start:
-                    finalize_result = self._finalize_cycle_with_cursor(
-                        cursor,
-                        email=snapshot.email,
-                        cycle_start=latest_start,
-                        require_existing=True,
+                    # Cursor 偶发把账期起点微调 1 天且窗口仍重叠：
+                    # 这是边界修正，不是整月切换，不得误结算短命窗口。
+                    boundary_correction = (
+                        latest_end is not None
+                        and is_billing_cycle_boundary_correction(
+                            old_start=latest_start,
+                            old_end=latest_end,
+                            new_start=incoming_start,
+                            continuity_tolerance=timedelta(
+                                hours=SETTINGS.usage_cycle_continuity_tolerance_hours
+                            ),
+                        )
                     )
+                    if not boundary_correction:
+                        finalize_result = self._finalize_cycle_with_cursor(
+                            cursor,
+                            email=snapshot.email,
+                            cycle_start=latest_start,
+                            require_existing=True,
+                        )
             write_result = self._upsert_snapshot_with_cursor(
                 cursor,
                 snapshot,
@@ -1290,6 +1399,8 @@ WHERE email = %(email)s
                 snapshot.billing_cycle_end
             ),
             "total_used_pct": snapshot.total_used_pct,
+            "auto_used_pct": snapshot.auto_used_pct,
+            "api_used_pct": snapshot.api_used_pct,
             "snapshot_type": snapshot.snapshot_type.value,
             "snapshot_slot": _naive_utc_millis(snapshot.snapshot_slot),
             "collected_at": _naive_utc_millis(snapshot.collected_at),
