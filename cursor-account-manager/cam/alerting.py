@@ -66,6 +66,9 @@ def _field_label(key: str) -> str:
         "stage": "失败阶段",
         "account_success": "成功账号",
         "account_failed": "失败账号",
+        "account_skipped": "跳过账号",
+        "lock_busy": "锁忙碌",
+        "circuit_blocked": "熔断拦截",
         "on_demand_open": "按需已开",
         "on_demand_historical": "曾有按需",
         "ods_rows": "ODS 行数",
@@ -84,6 +87,7 @@ def _format_card_value(key: str, value: str) -> str:
             "retry": "失败重试",
             "replay": "自定义补偿",
             "daily": "每日同步",
+            "usage_periodic": "用量日常采集",
         }.get(value, value)
     if key == "status":
         return {
@@ -113,6 +117,9 @@ def _build_feishu_card(title: str, content: str, *, level: str) -> dict:
     metric_keys = (
         "account_success",
         "account_failed",
+        "account_skipped",
+        "circuit_blocked",
+        "lock_busy",
         "on_demand_open",
         "on_demand_historical",
         "ods_rows",

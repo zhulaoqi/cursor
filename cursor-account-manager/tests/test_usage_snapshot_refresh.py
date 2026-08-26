@@ -137,12 +137,15 @@ class ClosedBreaker:
         self.outcomes = []
 
     def snapshot(self):
-        return type("Snapshot", (), {"state": "closed"})()
+        return type("Snapshot", (), {"state": "closed", "retry_at": None})()
 
     def record(self, outcome, email, now=None) -> None:
         self.outcomes.append((outcome, email))
 
     def allow_refresh_or_login(self) -> bool:
+        return True
+
+    def allows_new_submission(self, now=None) -> bool:
         return True
 
 
@@ -151,7 +154,50 @@ class OpeningBreaker(ClosedBreaker):
 
     def snapshot(self):
         state = "open" if self.outcomes else "closed"
-        return type("Snapshot", (), {"state": state})()
+        return type("Snapshot", (), {"state": state, "retry_at": None})()
+
+    def allows_new_submission(self, now=None) -> bool:
+        return self.snapshot().state != "open"
+
+
+class AlwaysOpenBreaker(ClosedBreaker):
+    """始终开启且仍在冷却，模拟日常采集被静默跳过的故障。"""
+
+    def snapshot(self):
+        return type(
+            "Snapshot",
+            (),
+            {
+                "state": "open",
+                "retry_at": NOW + timedelta(hours=1),
+            },
+        )()
+
+    def allows_new_submission(self, now=None) -> bool:
+        return False
+
+
+class CooldownExpiredOpenBreaker(ClosedBreaker):
+    """开启但冷却已过：批次应继续提交以便探针恢复。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._half_open = False
+
+    def snapshot(self):
+        state = "half_open" if self._half_open else "open"
+        return type(
+            "Snapshot",
+            (),
+            {"state": state, "retry_at": NOW - timedelta(seconds=1)},
+        )()
+
+    def allows_new_submission(self, now=None) -> bool:
+        return True
+
+    def allow_refresh_or_login(self) -> bool:
+        self._half_open = True
+        return True
 
 
 @contextmanager
@@ -338,7 +384,57 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
         )
 
         self.assertEqual(summary.failed, 1)
+        self.assertEqual(summary.circuit_blocked, 1)
         self.assertEqual(collector.calls, ["a@example.com"])
+
+    def test_熔断冷却中开跑不得静默全零(self):
+        """回归：熔断 open 时日常采集曾直接返回全 0 并误报成功。"""
+        first, second = monitored("a@example.com"), monitored("b@example.com")
+        collector = FakeCollector({})
+        summary = run_usage_periodic(
+            now=NOW,
+            resolver=FakeResolver((first, second)),
+            store=FakeStore(),
+            collector=collector,
+            sync_log=FakeSyncLog(),
+            breaker=AlwaysOpenBreaker(),
+            concurrency=2,
+        )
+
+        self.assertEqual(summary.success, 0)
+        self.assertEqual(summary.failed, 0)
+        self.assertEqual(summary.circuit_blocked, 2)
+        self.assertEqual(collector.calls, [])
+
+    def test_熔断冷却结束后日常采集应提交探针账号(self):
+        """冷却到期后不得因 snapshot.state=open 永久卡死提交。"""
+        account = monitored("a@example.com")
+        slot = periodic_slot(NOW, 24, SHANGHAI)
+        collector = FakeCollector(
+            {
+                account.account.email: CollectionResult(
+                    email=account.account.email,
+                    status=CollectionStatus.SUCCESS,
+                    snapshot=snapshot(
+                        account.account.email, SnapshotType.PERIODIC, slot
+                    ),
+                    auth_outcome=AuthOutcome.SUCCESS,
+                )
+            }
+        )
+        summary = run_usage_periodic(
+            now=NOW,
+            resolver=FakeResolver((account,)),
+            store=FakeStore(),
+            collector=collector,
+            sync_log=FakeSyncLog(),
+            breaker=CooldownExpiredOpenBreaker(),
+            concurrency=1,
+        )
+
+        self.assertEqual(summary.success, 1)
+        self.assertEqual(summary.circuit_blocked, 0)
+        self.assertEqual(collector.calls, [account.account.email])
 
     def test_同槽超过重试限额跳过(self):
         account = monitored("a@example.com")

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .alerting import send_alert
 from .config import SETTINGS
 from .logger import get
 from .usage_snapshot_refresh import run_usage_periodic, run_usage_pre_reset_due
@@ -18,6 +19,76 @@ log = get("usage_scheduler")
 _singleton_lock = threading.Lock()
 _singleton: UsageSchedulerCoordinator | None = None
 _HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _usage_periodic_alert_status(
+    *,
+    success: int,
+    failed: int,
+    lock_busy: int,
+    circuit_blocked: int = 0,
+) -> str:
+    """根据日常采集汇总判定通知状态。"""
+    if lock_busy and success == 0 and failed == 0:
+        return "failed"
+    if circuit_blocked and success == 0 and failed == 0:
+        return "failed"
+    if failed > 0 or circuit_blocked > 0:
+        return "partial_failed"
+    return "success"
+
+
+def _send_usage_periodic_alert(
+    *,
+    scheduled_at: datetime,
+    success: int,
+    failed: int,
+    skipped: int,
+    lock_busy: int,
+    circuit_blocked: int = 0,
+) -> None:
+    """日常采集结束后复用既有飞书告警通道发送结果。"""
+    if not getattr(SETTINGS, "usage_periodic_alert_enable", True):
+        return
+    if not SETTINGS.alert_bot_enable:
+        return
+    status = _usage_periodic_alert_status(
+        success=success,
+        failed=failed,
+        lock_busy=lock_busy,
+        circuit_blocked=circuit_blocked,
+    )
+    zone = _biz_zone()
+    date_key = scheduled_at.astimezone(zone).strftime("%Y-%m-%d")
+    if status == "success":
+        title = "用量日常采集完成"
+        level = "success"
+    elif status == "partial_failed":
+        title = "用量日常采集部分失败"
+        level = "warning"
+    else:
+        title = "用量日常采集失败"
+        level = "error"
+    reason = ""
+    if lock_busy and success == 0 and failed == 0:
+        reason = "未拿到全局锁，将稍后重试"
+    elif circuit_blocked and success == 0 and failed == 0:
+        reason = "认证熔断开启，本轮未采集账号"
+    send_alert(
+        title,
+        (
+            f"trigger_type=usage_periodic\n"
+            f"date={date_key}\n"
+            f"status={status}\n"
+            f"account_success={success}\n"
+            f"account_failed={failed}\n"
+            f"account_skipped={skipped}\n"
+            f"circuit_blocked={circuit_blocked}\n"
+            f"lock_busy={lock_busy}"
+            + (f"\nreason={reason}" if reason else "")
+        ),
+        level=level,
+    )
 
 
 def parse_usage_periodic_daily_at(value: str) -> tuple[int, int]:
@@ -131,6 +202,9 @@ class UsageSchedulerCoordinator:
         if self._stop.is_set():
             return
         current = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        # 提交放在锁外，避免任务回调（也需写 next_at）与 tick 死锁。
+        submit_pre_reset = False
+        submit_periodic = False
         with self._lock:
             if self._next_periodic_at is None:
                 # 首次对齐到当天固定点：未到则等待；已过则立刻补跑一轮。
@@ -142,9 +216,18 @@ class UsageSchedulerCoordinator:
                     getattr(SETTINGS, "bi_sync_biz_tz", "Asia/Shanghai"),
                 )
             if self._is_due(self._pre_reset_future, self._next_pre_reset_at, current):
-                self._submit_pre_reset(current)
+                # 先占位，防止同轮重复提交；真正执行在锁外。
+                self._next_pre_reset_at = current + timedelta(
+                    minutes=SETTINGS.usage_pre_reset_scan_interval_min
+                )
+                submit_pre_reset = True
             if self._is_due(self._periodic_future, self._next_periodic_at, current):
-                self._submit_periodic(current)
+                self._next_periodic_at = next_usage_periodic_at(current)
+                submit_periodic = True
+        if submit_pre_reset:
+            self._submit_pre_reset(current)
+        if submit_periodic:
+            self._submit_periodic(current)
 
     @staticmethod
     def _is_due(
@@ -155,21 +238,87 @@ class UsageSchedulerCoordinator:
         return (future is None or future.done()) and (due_at is None or now >= due_at)
 
     def _submit_periodic(self, now: datetime) -> None:
-        self._next_periodic_at = next_usage_periodic_at(now)
         log.info(
-            "提交用量日常采集 next_at=%s",
-            self._next_periodic_at.isoformat(),
+            "提交用量日常采集 scheduled_next_at=%s",
+            (self._next_periodic_at or now).isoformat(),
         )
-        self._periodic_future = self._submit(
-            self._periodic_pool, "periodic", run_usage_periodic, now
+        future = self._submit(
+            self._periodic_pool,
+            "periodic",
+            run_usage_periodic,
+            now,
+            on_result=lambda summary: self._on_periodic_result(summary, scheduled_at=now),
         )
+        with self._lock:
+            self._periodic_future = future
 
     def _submit_pre_reset(self, now: datetime) -> None:
-        self._next_pre_reset_at = now + timedelta(
-            minutes=SETTINGS.usage_pre_reset_scan_interval_min
+        future = self._submit(
+            self._pre_reset_pool,
+            "pre-reset",
+            run_usage_pre_reset_due,
+            now,
+            on_result=self._on_pre_reset_result,
         )
-        self._pre_reset_future = self._submit(
-            self._pre_reset_pool, "pre-reset", run_usage_pre_reset_due, now
+        with self._lock:
+            self._pre_reset_future = future
+
+    def _on_periodic_result(
+        self,
+        summary: object,
+        *,
+        scheduled_at: datetime,
+    ) -> None:
+        success = int(getattr(summary, "success", 0) or 0)
+        failed = int(getattr(summary, "failed", 0) or 0)
+        skipped = int(getattr(summary, "skipped", 0) or 0)
+        lock_busy = int(getattr(summary, "lock_busy", 0) or 0)
+        circuit_blocked = int(getattr(summary, "circuit_blocked", 0) or 0)
+        log.info(
+            "用量日常采集完成 success=%s failed=%s skipped=%s "
+            "circuit_blocked=%s lock_busy=%s",
+            success,
+            failed,
+            skipped,
+            circuit_blocked,
+            lock_busy,
+        )
+        try:
+            _send_usage_periodic_alert(
+                scheduled_at=scheduled_at,
+                success=success,
+                failed=failed,
+                skipped=skipped,
+                lock_busy=lock_busy,
+                circuit_blocked=circuit_blocked,
+            )
+        except Exception:
+            log.exception("用量日常采集结果通知发送失败")
+        if success == 0 and failed == 0 and (lock_busy or circuit_blocked):
+            retry_at = scheduled_at.astimezone(timezone.utc) + timedelta(minutes=15)
+            with self._lock:
+                self._next_periodic_at = retry_at
+            reason = "未拿到全局锁" if lock_busy else "认证熔断未恢复"
+            log.warning(
+                "用量日常采集%s，将于 %s 重试",
+                reason,
+                retry_at.isoformat(),
+            )
+
+    def _on_pre_reset_result(self, summary: object) -> None:
+        success = int(getattr(summary, "success", 0) or 0)
+        failed = int(getattr(summary, "failed", 0) or 0)
+        skipped = int(getattr(summary, "skipped", 0) or 0)
+        lock_busy = int(getattr(summary, "lock_busy", 0) or 0)
+        dry_run = len(getattr(summary, "dry_run_items", ()) or ())
+        log.info(
+            "用量 pre-reset 扫描完成 success=%s failed=%s skipped=%s "
+            "lock_busy=%s dry_run=%s",
+            success,
+            failed,
+            skipped,
+            lock_busy,
+            dry_run,
         )
 
     @staticmethod
@@ -178,14 +327,46 @@ class UsageSchedulerCoordinator:
         task_name: str,
         worker: Callable[..., object],
         now: datetime,
+        *,
+        on_result: Callable[[object], None] | None = None,
     ) -> Future[object]:
         future = pool.submit(worker, now=now)
 
         def report_result(done: Future[object]) -> None:
             try:
-                done.result()
-            except Exception:
+                summary = done.result()
+            except Exception as exc:
                 log.exception("用量 %s 任务异常", task_name)
+                if task_name == "periodic":
+                    try:
+                        if (
+                            getattr(SETTINGS, "usage_periodic_alert_enable", True)
+                            and SETTINGS.alert_bot_enable
+                        ):
+                            zone = _biz_zone()
+                            date_key = now.astimezone(zone).strftime("%Y-%m-%d")
+                            send_alert(
+                                "用量日常采集失败",
+                                (
+                                    f"trigger_type=usage_periodic\n"
+                                    f"date={date_key}\n"
+                                    f"status=failed\n"
+                                    f"account_success=0\n"
+                                    f"account_failed=0\n"
+                                    f"account_skipped=0\n"
+                                    f"lock_busy=0\n"
+                                    f"error={type(exc).__name__}: {exc}"
+                                ),
+                                level="error",
+                            )
+                    except Exception:
+                        log.exception("用量日常采集异常结果通知发送失败")
+                return
+            if on_result is not None:
+                try:
+                    on_result(summary)
+                except Exception:
+                    log.exception("用量 %s 结果回调异常", task_name)
 
         future.add_done_callback(report_result)
         return future

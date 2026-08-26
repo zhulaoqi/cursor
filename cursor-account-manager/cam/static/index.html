@@ -3319,6 +3319,15 @@
       letter-spacing: .02em; white-space: nowrap;
     }
     .usage-table tbody tr:hover { background: #F8FBFF; }
+    .usage-table tbody tr.usage-row-dual-zero {
+      background: #FEF2F2;
+      border-left: 4px solid #DC2626;
+      box-shadow: inset 4px 0 0 #DC2626;
+    }
+    .usage-table tbody tr.usage-row-dual-zero:hover { background: #FEE2E2; }
+    .usage-table tbody tr.usage-row-dual-zero > td:first-child {
+      box-shadow: inset 4px 0 0 #DC2626;
+    }
     .usage-account { display: grid; gap: 2px; min-width: 0; }
     .usage-email {
       overflow-wrap: anywhere; word-break: break-word; color: #0F172A;
@@ -4069,6 +4078,7 @@
             <li><strong>当前账期/用量</strong>：进行中的实时数据，仅供观察。</li>
             <li><strong>最近完整账期 / 完整账期用量</strong>：上一期已结算区间与最终用量。</li>
             <li><strong>历史账期</strong>：点开查看该账号全部已结算往期。</li>
+            <li><strong>双期零用量</strong>：非 free 套餐，且当前账期与最近完整账期总用量都为 0% 时，整行浅红高亮。</li>
             <li>冷启动阶段多数为「待确认」属正常；各账号账期滚动后会陆续出现 L0–L3。</li>
           </ul>
         </div>
@@ -4152,7 +4162,8 @@
         </thead>
         <tbody>
           <template x-for="row in usageFilteredRows" :key="row.email">
-            <tr>
+            <tr :class="{ 'usage-row-dual-zero': usageIsDualZeroPaid(row) }"
+                :title="usageIsDualZeroPaid(row) ? '非 free 套餐：当前账期与最近完整账期总用量均为 0%' : null">
               <td data-label="账号与人员">
                 <div class="usage-account">
                   <span class="usage-email" x-text="row.email || '—'"></span>
@@ -6175,6 +6186,15 @@ function app() {
       if (!amount || tier === '—') return tier;
       const normalized = amount.startsWith('$') ? amount : `$${amount}`;
       return `${tier} · ${normalized}`;
+    },
+    usageIsDualZeroPaid(row) {
+      const tier = String(row?.current_plan_tier || row?.plan_tier || '').trim().toLowerCase();
+      if (!tier || tier === 'free' || tier === 'unknown' || tier === '—') return false;
+      const current = this.usagePctNumber(
+        row?.current_used_pct ?? row?.current_usage_pct ?? row?.total_used_pct
+      );
+      const finalPct = this.usagePctNumber(row?.latest_final_used_pct);
+      return current === 0 && finalPct === 0;
     },
     usageDataStatus(row) {
       const value = String(row?.data_quality_status || row?.data_status || 'unknown').toLowerCase();

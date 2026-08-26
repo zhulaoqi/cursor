@@ -123,6 +123,22 @@ class UsageAuthBreakerTests(unittest.TestCase):
         self.assertEqual(breaker.snapshot().state, "half_open")
         self.assertFalse(breaker.allow_refresh_or_login())
 
+    def test_allows_new_submission_false_while_open_cooldown_true_after(self):
+        """批次提交门闩：冷却中拒绝；冷却后允许以便探针恢复。"""
+        clock = MutableClock()
+        breaker = make_breaker(
+            min_samples=1,
+            failure_ratio=1,
+            cooldown=timedelta(seconds=10),
+            clock=clock,
+        )
+        self.assertTrue(breaker.allows_new_submission())
+        breaker.record(AuthOutcome.AUTH_FAILURE, "a@example.com")
+        self.assertFalse(breaker.allows_new_submission())
+        clock.value += timedelta(seconds=10)
+        self.assertTrue(breaker.allows_new_submission())
+        self.assertEqual(breaker.snapshot().state, "open")
+
     def test_half_open_allows_exactly_one_probe_concurrently(self):
         clock = MutableClock()
         breaker = make_breaker(

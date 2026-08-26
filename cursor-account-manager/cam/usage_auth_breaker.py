@@ -131,6 +131,25 @@ class UsageAuthBreaker:
         """缓存 token 不受认证熔断限制。"""
         return True
 
+    def allows_new_submission(self, now: datetime | None = None) -> bool:
+        """批次编排是否还可提交新账号。
+
+        open 且仍在冷却期时拒绝，避免雪崩；冷却到期后必须放行，
+        否则 worker 永远进不了 allow_refresh_or_login，探针无法恢复。
+        """
+        with self._lock:
+            observed_at = self._now() if now is None else _validate_utc(now, "now")
+            self._prune(observed_at)
+            if self._state == _STATE_CLOSED:
+                return True
+            if self._state == _STATE_HALF_OPEN:
+                return True
+            if self._state == _STATE_OPEN:
+                if self._retry_at is None:
+                    return False
+                return observed_at >= self._retry_at
+            return False
+
     def allow_refresh_or_login(self) -> bool:
         """决定是否允许刷新 token 或进行浏览器登录。"""
         with self._lock:

@@ -48,6 +48,8 @@ class UsageSchedulerTests(unittest.TestCase):
             usage_periodic_daily_at="06:00",
             bi_sync_biz_tz="Asia/Shanghai",
             usage_pre_reset_scan_interval_min=15,
+            usage_periodic_alert_enable=True,
+            alert_bot_enable=False,
         )
 
     def test_startup_before_daily_at_does_not_run_periodic_immediately(self) -> None:
@@ -75,14 +77,28 @@ class UsageSchedulerTests(unittest.TestCase):
 
     def test_periodic_runs_at_daily_at_then_schedules_tomorrow(self) -> None:
         periodic_started = threading.Event()
+        alerted = threading.Event()
+        alert_calls: list[tuple] = []
 
         def periodic(**_kwargs) -> None:
             periodic_started.set()
+            return SimpleNamespace(success=1, failed=0, skipped=0, lock_busy=0)
 
+        def alert(title, content, *, level="info"):
+            alert_calls.append((title, content, level))
+            alerted.set()
+
+        alert_settings = SimpleNamespace(
+            **{
+                **self.settings.__dict__,
+                "alert_bot_enable": True,
+            }
+        )
         with (
-            patch("cam.usage_scheduler.SETTINGS", self.settings),
+            patch("cam.usage_scheduler.SETTINGS", alert_settings),
             patch("cam.usage_scheduler.run_usage_periodic", periodic),
             patch("cam.usage_scheduler.run_usage_pre_reset_due"),
+            patch("cam.usage_scheduler.send_alert", alert),
         ):
             coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
             before = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)  # 北京 05:00
@@ -92,10 +108,100 @@ class UsageSchedulerTests(unittest.TestCase):
             at_due = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)  # 北京 06:00
             coordinator.tick(at_due)
             self.assertTrue(periodic_started.wait(0.5))
+            self.assertTrue(alerted.wait(0.5))
+            deadline = time.monotonic() + 0.5
+            while (
+                coordinator._next_periodic_at.astimezone(SHANGHAI)
+                != datetime(2026, 7, 30, 6, 0, tzinfo=SHANGHAI)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
             self.assertEqual(
                 coordinator._next_periodic_at.astimezone(SHANGHAI),
                 datetime(2026, 7, 30, 6, 0, tzinfo=SHANGHAI),
             )
+            self.assertEqual(len(alert_calls), 1)
+            title, content, level = alert_calls[0]
+            self.assertEqual(title, "用量日常采集完成")
+            self.assertEqual(level, "success")
+            self.assertIn("trigger_type=usage_periodic", content)
+            self.assertIn("account_success=1", content)
+            coordinator.stop(timeout_sec=1)
+
+    def test_periodic_lock_busy_reschedules_soon_not_tomorrow(self) -> None:
+        """全局锁忙碌时不应把下一次日常采集直接推到明天。"""
+        done = threading.Event()
+
+        def periodic(**_kwargs):
+            done.set()
+            return SimpleNamespace(success=0, failed=0, skipped=0, lock_busy=1)
+
+        with (
+            patch("cam.usage_scheduler.SETTINGS", self.settings),
+            patch("cam.usage_scheduler.run_usage_periodic", periodic),
+            patch("cam.usage_scheduler.run_usage_pre_reset_due"),
+        ):
+            coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
+            now = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)  # 北京 06:00
+            before_submit_next = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+            coordinator.tick(now)
+            self.assertTrue(done.wait(0.5))
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                nxt = coordinator._next_periodic_at
+                if nxt is not None and nxt < before_submit_next:
+                    break
+                time.sleep(0.01)
+            self.assertIsNotNone(coordinator._next_periodic_at)
+            self.assertLess(
+                coordinator._next_periodic_at,
+                before_submit_next,
+            )
+            coordinator.stop(timeout_sec=1)
+
+    def test_periodic_circuit_blocked_reschedules_and_alerts_failed(self) -> None:
+        """熔断拦截全员时不得报成功，并应短时重试。"""
+        done = threading.Event()
+        alerted = threading.Event()
+        alert_calls: list[tuple] = []
+
+        def periodic(**_kwargs):
+            done.set()
+            return SimpleNamespace(
+                success=0, failed=0, skipped=0, lock_busy=0, circuit_blocked=340
+            )
+
+        def alert(title, content, *, level="info"):
+            alert_calls.append((title, content, level))
+            alerted.set()
+
+        alert_settings = SimpleNamespace(
+            **{**self.settings.__dict__, "alert_bot_enable": True}
+        )
+        with (
+            patch("cam.usage_scheduler.SETTINGS", alert_settings),
+            patch("cam.usage_scheduler.run_usage_periodic", periodic),
+            patch("cam.usage_scheduler.run_usage_pre_reset_due"),
+            patch("cam.usage_scheduler.send_alert", alert),
+        ):
+            coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
+            now = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)
+            before_submit_next = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+            coordinator.tick(now)
+            self.assertTrue(done.wait(0.5))
+            self.assertTrue(alerted.wait(0.5))
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                nxt = coordinator._next_periodic_at
+                if nxt is not None and nxt < before_submit_next:
+                    break
+                time.sleep(0.01)
+            self.assertLess(coordinator._next_periodic_at, before_submit_next)
+            title, content, level = alert_calls[0]
+            self.assertEqual(title, "用量日常采集失败")
+            self.assertEqual(level, "error")
+            self.assertIn("circuit_blocked=340", content)
+            self.assertIn("认证熔断开启", content)
             coordinator.stop(timeout_sec=1)
 
     def test_periodic_and_pre_reset_use_independent_executors(self) -> None:

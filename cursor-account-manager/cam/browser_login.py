@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 from typing import Optional
+from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 # patchright = undetected Playwright（修复 Runtime.enable Leak 等 CDP 层泄漏）
@@ -588,13 +589,148 @@ def _goto_login_page(page: Page) -> None:
 _SEL_EMAIL      = 'input[name="email"]'
 _SEL_MAGIC_BTN  = 'button[value="magic-code"]'
 _SEL_CODE_INPUT = 'input[data-index="0"]'
+_CHANGE_EMAIL_SELECTORS = (
+    'text=更改电子邮件',
+    'text=Change email',
+    'a:has-text("更改电子邮件")',
+    'a:has-text("Change email")',
+    'button:has-text("更改电子邮件")',
+    'button:has-text("Change email")',
+)
+
+
+def _norm_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _read_email_field_state(page: Page) -> dict:
+    """读取邮箱框是否存在、当前值、是否可编辑。"""
+    try:
+        state = page.evaluate(
+            """() => {
+                const el = document.querySelector('input[name="email"]');
+                if (!el) return {exists: false, value: '', editable: false};
+                const readonlyAttr = el.getAttribute('readonly');
+                const editable = !(
+                    el.readOnly
+                    || el.disabled
+                    || (readonlyAttr !== null && readonlyAttr !== undefined)
+                    || el.tabIndex < 0
+                );
+                return {
+                    exists: true,
+                    value: el.value || '',
+                    editable: Boolean(editable),
+                };
+            }"""
+        )
+        if isinstance(state, dict):
+            return {
+                "exists": bool(state.get("exists")),
+                "value": str(state.get("value") or ""),
+                "editable": bool(state.get("editable")),
+            }
+    except Exception:
+        pass
+    return {"exists": False, "value": "", "editable": False}
+
+
+def _email_matches_page(page: Page, email_addr: str) -> bool:
+    """密码页 URL 或只读邮箱是否已是目标账号。"""
+    want = _norm_email(email_addr)
+    if not want:
+        return False
+    state = _read_email_field_state(page)
+    if _norm_email(state.get("value") or "") == want:
+        return True
+    try:
+        query = parse_qs(urlparse(_current_url(page)).query)
+        for key in ("email", "login_hint"):
+            for raw in query.get(key) or ():
+                if _norm_email(unquote(str(raw))) == want:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_code_step(page: Page) -> bool:
+    try:
+        return page.locator(_SEL_CODE_INPUT).count() > 0
+    except Exception:
+        return False
+
+
+def _is_password_step(page: Page) -> bool:
+    """是否已在密码页（可点邮箱验证码，邮箱通常只读）。"""
+    try:
+        if page.locator(_SEL_MAGIC_BTN).count() > 0:
+            return True
+    except Exception:
+        pass
+    if "/password" in _current_url(page):
+        return True
+    state = _read_email_field_state(page)
+    return bool(state["exists"] and state["value"] and not state["editable"])
+
+
+def _click_change_email(page: Page) -> bool:
+    """点「更改电子邮件」，回到可编辑邮箱页。"""
+    for sel in _CHANGE_EMAIL_SELECTORS:
+        try:
+            loc = page.locator(sel)
+            if loc.count() <= 0:
+                continue
+            loc.first.click(timeout=5000)
+            log.info("已点击更改电子邮件")
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _wait_editable_email(page: Page, timeout_ms: int = 15000) -> bool:
+    """等待可编辑邮箱框出现。"""
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        state = _read_email_field_state(page)
+        if state["exists"] and state["editable"]:
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _submit_email_with_retry(page: Page, email_addr: str, max_retries: int = 3) -> None:
-    """填邮箱 → 提交 → 等"magic-code 按钮"或"验证码输入框"出现（用元素而非 URL）。"""
+    """填邮箱 → 提交 → 等 magic-code / 验证码框；已在密码页且邮箱匹配则跳过 fill。"""
     for retry in range(max_retries):
         try:
+            if _is_code_step(page):
+                log.info("已在验证码页，跳过填邮箱")
+                return
+
+            if _is_password_step(page):
+                if _email_matches_page(page, email_addr):
+                    log.info("已在密码页且邮箱匹配，跳过填邮箱，继续验证码流程")
+                    return
+                log.info(
+                    "密码页邮箱与目标不一致，尝试更改电子邮件 shown_url=%s",
+                    _current_url(page)[:120],
+                )
+                if not _click_change_email(page):
+                    raise BrowserLoginError("密码页邮箱不匹配且未找到更改电子邮件入口")
+                _human_pause(1.0, 2.0)
+                if not _wait_editable_email(page):
+                    raise BrowserLoginError("更改电子邮件后未出现可编辑邮箱框")
+
             page.wait_for_selector(_SEL_EMAIL, timeout=15000)
+            state = _read_email_field_state(page)
+            if state["exists"] and not state["editable"]:
+                # 仍可能刚跳到密码页
+                if _email_matches_page(page, email_addr):
+                    log.info("邮箱框只读且已匹配目标，跳过填邮箱")
+                    return
+                raise BrowserLoginError("邮箱框只读且与目标账号不匹配")
+
             log.info(f"[{retry+1}/{max_retries}] 填邮箱: {email_addr}")
             page.fill(_SEL_EMAIL, "")
             _type_like_human(page, _SEL_EMAIL, email_addr)

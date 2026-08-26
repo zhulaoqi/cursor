@@ -180,6 +180,7 @@ class UsageRunSummary:
     failed: int = 0
     skipped: int = 0
     lock_busy: int = 0
+    circuit_blocked: int = 0
     dry_run_items: tuple[dict, ...] = field(default_factory=tuple)
 
 
@@ -314,6 +315,14 @@ def _record_account_log(
     )
 
 
+def _breaker_blocks_submission(breaker: UsageAuthBreaker) -> bool:
+    """判断熔断器是否仍阻止提交新账号。"""
+    allows = getattr(breaker, "allows_new_submission", None)
+    if callable(allows):
+        return not bool(allows())
+    return breaker.snapshot().state == "open"
+
+
 def _run_bounded(
     accounts: tuple[MonitoredAccount, ...],
     *,
@@ -321,19 +330,29 @@ def _run_bounded(
     breaker: UsageAuthBreaker,
     worker: Callable[[MonitoredAccount], str],
 ) -> UsageRunSummary:
-    """有界增量提交账号任务；熔断开启后不再提交新任务。"""
-    counts = {"success": 0, "failed": 0, "skipped": 0, "lock_busy": 0}
+    """有界增量提交账号任务；冷却中的熔断会停止提交，冷却后允许探针恢复。"""
+    counts = {
+        "success": 0,
+        "failed": 0,
+        "skipped": 0,
+        "lock_busy": 0,
+        "circuit_blocked": 0,
+    }
     iterator = iter(accounts)
     futures: set[Future[str]] = set()
+    submitted = 0
 
     def submit_next(executor: ThreadPoolExecutor) -> bool:
-        if breaker.snapshot().state == "open":
+        nonlocal submitted
+        if _breaker_blocks_submission(breaker):
             return False
         try:
-            futures.add(executor.submit(worker, next(iterator)))
-            return True
+            account = next(iterator)
         except StopIteration:
             return False
+        futures.add(executor.submit(worker, account))
+        submitted += 1
+        return True
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
         while len(futures) < max(1, concurrency) and submit_next(executor):
@@ -345,6 +364,9 @@ def _run_bounded(
                 counts[status] = counts.get(status, 0) + 1
             while len(futures) < max(1, concurrency) and submit_next(executor):
                 pass
+    remaining = len(accounts) - submitted
+    if remaining > 0:
+        counts["circuit_blocked"] = remaining
     return UsageRunSummary(**counts)
 
 
@@ -448,9 +470,13 @@ def run_usage_periodic(
             accounts, concurrency=concurrency or SETTINGS.usage_snapshot_concurrency,
             breaker=breaker, worker=worker,
         )
+    if summary.failed or summary.circuit_blocked:
+        run_status = "partial_failed" if summary.success else "failed"
+    else:
+        run_status = "success"
     _call_if_present(
         sync_log, "finish_run",
-        run_id=run_id, status="success" if not summary.failed else "partial_failed",
+        run_id=run_id, status=run_status,
         account_success=summary.success, account_failed=summary.failed,
         event_total=summary.success + summary.failed, ods_rows=summary.success,
     )

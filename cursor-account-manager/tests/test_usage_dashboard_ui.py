@@ -101,6 +101,12 @@ class UsageDashboardUiTests(unittest.TestCase):
         self.assertIn("plan_amount", self.html)
         self.assertIn("${tier} · ${normalized}", self.html)
 
+    def test_usage_dual_zero_paid_row_highlight(self):
+        """非 free 且当前/上一完整账期总用量均为 0 时整行高亮（无额外标签）。"""
+        self.assertIn("usageIsDualZeroPaid", self.html)
+        self.assertIn("usage-row-dual-zero", self.html)
+        self.assertNotIn("usage-dual-zero-badge", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
