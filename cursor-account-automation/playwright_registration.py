@@ -596,8 +596,12 @@ def fill_verification_code(page: Page, code: str) -> None:
 
 
 def is_logged_in(page: Page) -> bool:
+    from desktop_signin import is_unfinished_handoff_url
+
     url = page.url or ""
-    if any(kw in url for kw in ["dashboard", "settings", "/~", "billing"]):
+    if is_unfinished_handoff_url(url):
+        return False
+    if any(kw in url for kw in ["dashboard", "settings", "/~", "billing", "/agents"]):
         return True
     try:
         body = page.locator("body").inner_text(timeout=2000)
@@ -627,10 +631,51 @@ def is_on_verification_page(page: Page) -> bool:
         return False
 
 
-def wait_for_login_complete(page: Page, timeout: int = 30) -> bool:
-    for _ in range(timeout):
-        if is_logged_in(page):
-            print(f"[登录] 登录成功，URL: {page.url[:80]}")
-            return True
-        time.sleep(1)
+def _page_body_text(page: Page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=1500) or ""
+    except Exception:
+        return ""
+
+
+def _click_first_text(page: Page, texts: tuple[str, ...]) -> bool:
+    for text in texts:
+        for sel in (f'button:has-text("{text}")', f"text={text}"):
+            try:
+                loc = page.locator(sel)
+                if loc.count() <= 0:
+                    continue
+                loc.first.click(timeout=5000)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def complete_desktop_signin_steps(page: Page, timeout: int = 60) -> bool:
+    """验证码后点完 Continue to sign in → Return to Cursor。"""
+    from desktop_signin import (
+        CONTINUE_BUTTON_TEXTS,
+        RETURN_BUTTON_TEXTS,
+        complete_desktop_signin_steps as _run,
+    )
+
+    return _run(
+        get_url=lambda: page.url or "",
+        get_body=lambda: _page_body_text(page),
+        click_continue=lambda: _click_first_text(page, CONTINUE_BUTTON_TEXTS),
+        click_return=lambda: _click_first_text(page, RETURN_BUTTON_TEXTS),
+        pause=lambda: time.sleep(1),
+        timeout=timeout,
+    )
+
+
+def wait_for_login_complete(page: Page, timeout: int = 60) -> bool:
+    """验证码后先完成桌面确认，再认主站已登录。"""
+    if complete_desktop_signin_steps(page, timeout=timeout):
+        print("[登录] 登录成功（桌面确认完成）")
+        return True
+    if is_logged_in(page):
+        print(f"[登录] 登录成功，URL: {(page.url or '')[:80]}")
+        return True
     return False

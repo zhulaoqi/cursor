@@ -79,16 +79,32 @@ def get_cursor_session_token(tab, max_attempts: int = 3) -> tuple:
     print(f"[Token] 导航到 loginDeepControl ...")
     tab.get(url)
 
-    # 等待页面加载
+    # 等待页面加载（旧确认页或新的 Continue / Return）
     for attempt in range(max_attempts):
         try:
             if tab.ele("You're currently logged in as:", timeout=5):
                 break
         except Exception:
             pass
+        try:
+            body = (tab.ele("tag:body", timeout=2).text or "") if tab.ele("tag:body", timeout=2) else ""
+            if "Continue to sign in" in body or "Return to Cursor" in body or "All set" in body:
+                break
+        except Exception:
+            pass
         time.sleep(2)
 
     time.sleep(2)
+
+    for text in ("Continue to sign in", "Return to Cursor", "Yes, Log In", "Yes"):
+        try:
+            btn = tab.ele(f"text:{text}", timeout=2)
+            if btn:
+                btn.click()
+                print(f"[Token] 已点击 {text}")
+                time.sleep(1)
+        except Exception:
+            continue
 
     # 点击确认按钮
     try:

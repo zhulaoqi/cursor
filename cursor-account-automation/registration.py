@@ -900,13 +900,53 @@ def login_with_email_code(tab, email: str) -> None:
         print("[登录] 未找到邮箱验证码按钮")
 
 
-def wait_for_login_complete(tab, timeout: int = 30) -> bool:
-    """等待登录完成（跳转到 dashboard/settings）。"""
-    for _ in range(timeout):
-        if is_logged_in(tab):
-            print(f"[登录] 登录成功，URL: {tab.url[:80]}")
+def _page_body_text(tab) -> str:
+    try:
+        el = tab.ele("tag:body", timeout=2)
+        return (el.text if el else "") or ""
+    except Exception:
+        return ""
+
+
+def _click_first_text(tab, texts: tuple[str, ...]) -> bool:
+    for text in texts:
+        try:
+            el = tab.ele(f"text:{text}", timeout=2)
+            if not el:
+                continue
+            el.click()
             return True
-        time.sleep(1)
+        except Exception:
+            continue
+    return False
+
+
+def complete_desktop_signin_steps(tab, timeout: int = 60) -> bool:
+    """验证码后点完 Continue to sign in → Return to Cursor。"""
+    from desktop_signin import (
+        CONTINUE_BUTTON_TEXTS,
+        RETURN_BUTTON_TEXTS,
+        complete_desktop_signin_steps as _run,
+    )
+
+    return _run(
+        get_url=lambda: tab.url or "",
+        get_body=lambda: _page_body_text(tab),
+        click_continue=lambda: _click_first_text(tab, CONTINUE_BUTTON_TEXTS),
+        click_return=lambda: _click_first_text(tab, RETURN_BUTTON_TEXTS),
+        pause=lambda: time.sleep(1),
+        timeout=timeout,
+    )
+
+
+def wait_for_login_complete(tab, timeout: int = 60) -> bool:
+    """验证码后先完成桌面确认，再认主站已登录。"""
+    if complete_desktop_signin_steps(tab, timeout=timeout):
+        print("[登录] 登录成功（桌面确认完成）")
+        return True
+    if is_logged_in(tab):
+        print(f"[登录] 登录成功，URL: {(tab.url or '')[:80]}")
+        return True
     return False
 
 
@@ -928,8 +968,12 @@ def fill_verification_code(tab, code: str) -> None:
 
 
 def is_logged_in(tab) -> bool:
+    from desktop_signin import is_unfinished_handoff_url
+
     url = tab.url or ""
-    if any(kw in url for kw in ["dashboard", "settings", "/~", "billing"]):
+    if is_unfinished_handoff_url(url):
+        return False
+    if any(kw in url for kw in ["dashboard", "settings", "/~", "billing", "/agents"]):
         return True
     try:
         body = tab.ele("tag:body").text or ""

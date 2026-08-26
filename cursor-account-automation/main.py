@@ -39,6 +39,7 @@ from registration import (
     fill_login_password,
     login_with_email_code,
     fill_verification_code,
+    complete_desktop_signin_steps,
     is_logged_in,
     is_blocked,
     is_on_verification_page,
@@ -213,6 +214,7 @@ def phase_register(browser, tab, config, email, password, use_password: bool = F
             print(f"{step} 验证码: {code}")
             fill_verification_code(tab, code)
             handle_turnstile(tab)
+            complete_desktop_signin_steps(tab, timeout=60)
         else:
             print(f"[警告] 未出现验证码页面")
             _dump_page_state(tab, "状态")
@@ -288,7 +290,7 @@ def phase_login(tab, config, email):
             print(f"[2.3] 验证码: {code}")
             fill_verification_code(tab, code)
 
-            if wait_for_login_complete(tab, timeout=30):
+            if wait_for_login_complete(tab, timeout=60):
                 print("══════ 登录完成 ══════\n")
                 return
             else:

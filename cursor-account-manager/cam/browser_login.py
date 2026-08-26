@@ -853,20 +853,169 @@ def _fill_verification_code(page: Page, code: str) -> None:
         _human_pause(0.1, 0.3)
 
 
-def _wait_logged_in(page: Page, timeout: int = 60) -> bool:
-    """登录后要么 URL 跳到 cursor.com 主站，要么 authenticator 关闭到 dashboard。
-    这里同时接受 URL 或 DOM 两种信号，谁先到就算成功。"""
+def _is_auth_success_page(url: str) -> bool:
+    """验证码通过后 Auth 常停在 /success，不再跳首页。"""
+    text = url or ""
+    return "authenticator.cursor.sh/success" in text or (
+        "/success" in text and "client_redirect_key=" in text
+    )
+
+
+def _is_login_deep_page(url: str) -> bool:
+    """验证码后的第二步：cursor.com/loginDeepPage（All set / Return to Cursor）。"""
+    return "loginDeepPage" in (url or "")
+
+
+def _is_web_app_logged_in(url: str) -> bool:
+    """主站已登录。现在验证码后常直接落到 /agents，不再是 dashboard。"""
+    text = url or ""
+    if _is_login_deep_page(text) or "loginDeepControl" in text:
+        return False
+    if "authenticator.cursor.sh" in text or "cursor.com" not in text:
+        return False
+    return any(
+        part in text
+        for part in (
+            "/agents",
+            "/dashboard",
+            "/settings",
+            "/billing",
+            "/home",
+            "/cn/",
+            "/en/",
+        )
+    )
+
+
+def _page_body_text(page: Page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=1500) or ""
+    except Exception:
+        return ""
+
+
+def _is_desktop_continue_step(page: Page) -> bool:
+    """验证码后的第一步：Sign in to Cursor / Continue to sign in。"""
+    text = _page_body_text(page)
+    return (
+        "Continue to sign in" in text
+        or "complete your sign-in to Cursor desktop" in text
+        or "继续登录" in text
+    )
+
+
+def _is_return_to_cursor_step(page: Page) -> bool:
+    if _is_login_deep_page(_current_url(page)):
+        return True
+    text = _page_body_text(page)
+    return "All set" in text and (
+        "Return to Cursor" in text or "返回 Cursor" in text
+    )
+
+
+def _click_first_matching(page: Page, selectors: tuple[str, ...]) -> bool:
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if loc.count() <= 0:
+                continue
+            loc.first.click(timeout=5000)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+_CONTINUE_SIGNIN_SELECTORS = (
+    'button:has-text("Continue to sign in")',
+    'button:has-text("Continue")',
+    'button:has-text("继续登录")',
+)
+_RETURN_TO_CURSOR_SELECTORS = (
+    'button:has-text("Return to Cursor")',
+    'button:has-text("返回 Cursor")',
+)
+
+
+def _complete_desktop_signin_steps(page: Page, timeout: int = 60) -> bool:
+    """验证码后：有桌面确认就点；已到 /agents 等主站页也算登录成功。"""
     deadline = time.time() + timeout
-    url_kws = ["dashboard", "settings", "cursor.com/cn", "cursor.com/en", "cursor.com/home"]
+    clicked_continue = False
+    clicked_return = False
+    log.info("验证码后等待登录完成（桌面确认或主站 /agents）")
+
     while time.time() < deadline:
         url = _current_url(page)
-        if any(kw in url for kw in url_kws):
+        if _is_web_app_logged_in(url) or _peek_session_token(page):
+            log.info(f"验证码后已进入已登录主站 url={url[:120]}")
             return True
-        # 也可能已跳到 cursor.com 根域
+        if not clicked_continue and _is_desktop_continue_step(page):
+            if _click_first_matching(page, _CONTINUE_SIGNIN_SELECTORS):
+                log.info("已点击 Continue to sign in")
+                clicked_continue = True
+                _human_pause(0.8, 1.6)
+                continue
+
+        if not clicked_return and _is_return_to_cursor_step(page):
+            if _click_first_matching(page, _RETURN_TO_CURSOR_SELECTORS):
+                log.info("已点击 Return to Cursor（loginDeepPage）")
+                clicked_return = True
+                _human_pause(0.8, 1.6)
+                return True
+
+        if clicked_continue and clicked_return:
+            return True
+        time.sleep(0.4)
+
+    log.warning(
+        f"桌面登录确认未完成 continue={clicked_continue} return={clicked_return} "
+        f"url={_current_url(page)[:160]}"
+    )
+    return False
+
+
+def _peek_session_token(page: Page) -> str:
+    """读一次 WorkosCursorSessionToken，没有则返回空串。"""
+    try:
+        cookies = page.context.cookies()
+    except Exception:
+        return ""
+    for cookie in cookies:
+        if cookie.get("name") == "WorkosCursorSessionToken":
+            return str(cookie.get("value") or "")
+    return ""
+
+
+def _wait_logged_in(page: Page, timeout: int = 60) -> bool:
+    """主站已登录或 cookie 已有 session。loginDeepPage / 桌面确认页不算完成。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        url = _current_url(page)
+        if _is_login_deep_page(url) or "loginDeepControl" in url:
+            time.sleep(0.5)
+            continue
+        if _is_auth_success_page(url):
+            return True
+        if _is_web_app_logged_in(url):
+            return True
         if "cursor.com" in url and "authenticator" not in url:
             return True
-        time.sleep(1)
+        if _peek_session_token(page):
+            return True
+        time.sleep(0.5)
     return False
+
+
+def _ensure_session_cookie(page: Page) -> None:
+    """成功页若还没有主站 cookie，主动打开 cursor.com 让 session 落到可采集域。"""
+    if _peek_session_token(page):
+        return
+    log.info("认证已成功但未见 session cookie，打开 cursor.com 承接登录态")
+    try:
+        page.goto("https://cursor.com/", wait_until="domcontentloaded", timeout=30000)
+        _human_pause(1.0, 2.0)
+    except Exception as exc:
+        log.warning(f"打开 cursor.com 承接 session 失败: {exc}")
 
 
 def _is_blocked(page: Page) -> bool:
@@ -880,43 +1029,167 @@ def _is_blocked(page: Page) -> bool:
     return False
 
 
-def _extract_session_token(page: Page, timeout: int = 30) -> tuple[str, str]:
-    """登录成功后，直接从浏览器 cookie 读 WorkosCursorSessionToken。
-
-    做法依据（JiuZ-Chn / hmhm2022 等成功案例）：
-      - 登录成功的瞬间，Cursor 后端会通过 Set-Cookie 写入 WorkosCursorSessionToken
-      - 格式: <user_id>%3A%3A<jwt_access_token>   （URL-encoded 的 `::`）
-      - 这个值同时能用于：
-          * api2.cursor.sh:  Authorization: Bearer <value>
-          * cursor.com:       Cookie: WorkosCursorSessionToken=<value>
-      - 不需要走 loginDeepControl PKCE（那个页面在部分代理链路下会渲染异常）
-
-    返回 (access_token, refresh_token)。这里 refresh_token 为空串，
-    因为 cookie 路径拿不到 refresh_token；token 过期时 token_manager
-    会回退到浏览器重登。
-    """
+def _extract_session_token(page: Page, timeout: int = 8) -> tuple[str, str]:
+    """短等 cookie；/success 页通常不会写入 WorkosCursorSessionToken。"""
     log.info("从浏览器 cookie 读取 WorkosCursorSessionToken ...")
     deadline = time.time() + timeout
-    last_cookies_len = -1
     while time.time() < deadline:
+        value = _peek_session_token(page)
+        if value:
+            head = value.split("%3A%3A")[0][:8] if "%3A%3A" in value else "?"
+            log.info(f"拿到 session token（len={len(value)}, user~{head}...）")
+            return value, ""
+        time.sleep(0.5)
+    raise BrowserLoginError("登录后未在 cookie 中找到 WorkosCursorSessionToken")
+
+
+_DEEP_CONTROL_READY_SELECTORS = (
+    "text=You're currently logged in as:",
+    "text=You are currently logged in as",
+    "text=当前登录",
+    'button:has-text("Yes, Log In")',
+    'button:has-text("Yes, log me in")',
+    'button:has-text("Yes")',
+)
+
+
+def _diagnose_deep_control(page: Page) -> str:
+    """失败时留下 URL / 按钮文案，方便对照线上日志。"""
+    try:
+        info = page.evaluate(
+            """() => ({
+                url: location.href,
+                title: document.title,
+                buttons: Array.from(document.querySelectorAll("button"))
+                    .map((btn) => (btn.innerText || "").trim())
+                    .filter(Boolean)
+                    .slice(0, 8),
+                hint: ((document.body && document.body.innerText) || "").slice(0, 180),
+            })"""
+        )
+        return (
+            f"url={info.get('url')} title={info.get('title')} "
+            f"buttons={info.get('buttons')} hint={info.get('hint')!r}"
+        )
+    except Exception as exc:
+        return f"url={getattr(page, 'url', '?')} diagnose_failed={exc}"
+
+
+def _wait_deep_control_ready(page: Page, timeout_ms: int = 20000) -> bool:
+    """等 Deep Control 出现已登录提示或确认按钮，避免 goto 后立刻空点。"""
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        remaining_ms = max(400, int((deadline - time.time()) * 1000))
+        slice_ms = min(4000, remaining_ms)
+        for sel in _DEEP_CONTROL_READY_SELECTORS:
+            try:
+                page.wait_for_selector(sel, timeout=slice_ms)
+                log.info(f"loginDeepControl 页已就绪: {sel}")
+                return True
+            except Exception:
+                continue
         try:
-            cookies = page.context.cookies()
+            ready = page.evaluate(
+                """() => {
+                    const text = (document.body && document.body.innerText) || "";
+                    if (/logged in as|当前登录/i.test(text)) return true;
+                    return document.querySelectorAll(".min-h-screen").length >= 2;
+                }"""
+            )
+            if ready:
+                log.info("loginDeepControl 页已就绪（DOM）")
+                return True
         except Exception:
-            cookies = []
-        if len(cookies) != last_cookies_len:
-            last_cookies_len = len(cookies)
-        for c in cookies:
-            if c.get("name") == "WorkosCursorSessionToken":
-                value = c.get("value") or ""
-                if value:
-                    # 仅脱敏打印长度和用户段前几位，便于诊断
-                    head = value.split("%3A%3A")[0][:8] if "%3A%3A" in value else "?"
-                    log.info(f"拿到 session token（len={len(value)}, user~{head}...）")
-                    return value, ""
-        time.sleep(1)
-    raise BrowserLoginError(
-        "登录后 30s 内未在 cookie 中找到 WorkosCursorSessionToken"
+            pass
+    log.warning(f"loginDeepControl 页等待就绪超时: {_diagnose_deep_control(page)}")
+    return False
+
+
+def _click_deep_control_confirm(page: Page) -> None:
+    """对齐可用实现：先点 .min-h-screen/.gap-4 第二个 button，再兜底文案。"""
+    try:
+        clicked = page.evaluate(
+            """() => {
+                try {
+                    const button = document.querySelectorAll(".min-h-screen")[1]
+                        .querySelectorAll(".gap-4")[1]
+                        .querySelectorAll("button")[1];
+                    if (button) { button.click(); return "layout"; }
+                } catch (e) {}
+                const buttons = Array.from(document.querySelectorAll("button"));
+                const target = buttons.find((btn) => {
+                    const text = (btn.innerText || "").toLowerCase();
+                    return (
+                        text.includes("yes")
+                        || text.includes("log in")
+                        || text.includes("登录")
+                        || text.includes("确认")
+                    );
+                });
+                if (target) { target.click(); return "text"; }
+                return "";
+            }"""
+        )
+        if clicked:
+            log.info(f"已通过脚本点击 loginDeepControl 确认按钮（{clicked}）")
+            return
+    except Exception as exc:
+        log.warning(f"loginDeepControl 脚本点击失败: {exc}")
+
+    selectors = (
+        'button:has-text("Yes, Log In")',
+        'button:has-text("Yes, log me in")',
+        'button:has-text("Yes")',
+        'button:has-text("登录")',
+        'button:has-text("确认")',
     )
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if loc.count() <= 0:
+                continue
+            loc.first.click(timeout=5000)
+            log.info(f"已点击 loginDeepControl 确认按钮: {sel}")
+            return
+        except Exception:
+            continue
+    raise BrowserLoginError(
+        f"未找到 loginDeepControl 确认按钮（{_diagnose_deep_control(page)}）"
+    )
+
+
+def _resolve_session_tokens(page: Page, *, proxy: Optional[str] = None) -> tuple[str, str]:
+    """优先读 cookie；成功页没有 cookie 时走 loginDeepControl + auth/poll。"""
+    existing = _peek_session_token(page)
+    if existing:
+        head = existing.split("%3A%3A")[0][:8] if "%3A%3A" in existing else "?"
+        log.info(f"拿到 session token（len={len(existing)}, user~{head}...）")
+        return existing, ""
+    log.info("cookie 无 session，改走 loginDeepControl PKCE 取 token")
+
+    params = _generate_pkce()
+    deep_url = (
+        f"{CURSOR_LOGIN_DEEP_CONTROL}"
+        f"?challenge={params['n']}&uuid={params['r']}&mode=login"
+    )
+    try:
+        page.goto(deep_url, wait_until="domcontentloaded", timeout=45000)
+        _human_pause(1.5, 2.5)
+        _wait_deep_control_ready(page)
+        try:
+            _click_deep_control_confirm(page)
+        except BrowserLoginError as exc:
+            # 对齐可用实现：点不到确认按钮也不中断，仍去 auth/poll
+            log.warning(f"确认按钮未点到，仍继续 auth/poll: {exc}")
+        _human_pause(0.8, 1.5)
+    except BrowserLoginError:
+        raise
+    except Exception as exc:
+        raise BrowserLoginError(f"打开 loginDeepControl 失败: {exc}") from exc
+
+    access, refresh = _poll_token(params["r"], params["s"], proxy=proxy)
+    log.info("auth/poll 已拿到 access/refresh token")
+    return access, refresh
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -995,11 +1268,13 @@ def login(
 
                 _fill_verification_code(page, code)
 
-                if not _wait_logged_in(page, timeout=45):
-                    raise BrowserLoginError("验证码填入后未进入已登录态")
+                if not _complete_desktop_signin_steps(page, timeout=60):
+                    raise BrowserLoginError(
+                        f"验证码后未进入已登录态 url={_current_url(page)[:160]}"
+                    )
                 log.info(f"{email_addr} 登录成功（{time.time()-start:.1f}s）")
 
-                access, refresh = _extract_session_token(page)
+                access, refresh = _resolve_session_tokens(page, proxy=proxy)
                 log.info(f"{email_addr} 获取 token 成功")
                 return access, refresh
             finally:

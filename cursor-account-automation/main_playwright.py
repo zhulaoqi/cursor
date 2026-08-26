@@ -43,6 +43,7 @@ from playwright_registration import (
     navigate_to_login,
     login_with_email_code,
     fill_verification_code,
+    complete_desktop_signin_steps,
     is_logged_in,
     is_blocked,
     is_on_verification_page,
@@ -162,6 +163,7 @@ def phase_register(page, config, email, password, use_password: bool = False):
             print(f"{step} 验证码: {code}")
             fill_verification_code(page, code)
             handle_turnstile(page)
+            complete_desktop_signin_steps(page, timeout=60)
         else:
             print("[警告] 未出现验证码页面")
 
@@ -233,7 +235,7 @@ def phase_login(page, config, email):
             print(f"[2.3] 验证码: {code}")
             fill_verification_code(page, code)
 
-            if wait_for_login_complete(page, timeout=30):
+            if wait_for_login_complete(page, timeout=60):
                 print("══════ 登录完成 ══════\n")
                 return
             else:
@@ -273,9 +275,30 @@ def phase_get_token(page, email):
             page.wait_for_selector("text=You're currently logged in as:", timeout=5000)
             break
         except Exception:
+            pass
+        try:
+            page.wait_for_selector("text=Continue to sign in", timeout=2000)
+            break
+        except Exception:
+            pass
+        try:
+            page.wait_for_selector("text=Return to Cursor", timeout=2000)
+            break
+        except Exception:
             time.sleep(2)
 
     time.sleep(2)
+    complete_desktop_signin_steps(page, timeout=15)
+
+    for text in ("Yes, Log In", "Yes"):
+        try:
+            loc = page.locator(f'button:has-text("{text}")')
+            if loc.count() > 0:
+                loc.first.click(timeout=3000)
+                print(f"[Token] 已点击 {text}")
+                break
+        except Exception:
+            continue
 
     try:
         page.evaluate("""() => {
