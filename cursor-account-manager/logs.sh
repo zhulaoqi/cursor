@@ -11,7 +11,7 @@
 WIN_HOST="172.30.90.102"
 WIN_USER="kinch.zhu"
 WIN_PORT=22
-LOG_PATH="C:/deploy/cursor-account-manager/data/logs/cam.log"
+LOG_PATH="D:/deploy/cursor-account-manager/data/logs/cam.log"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=10 -p "$WIN_PORT")
 

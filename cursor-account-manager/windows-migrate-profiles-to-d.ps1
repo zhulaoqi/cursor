@@ -11,7 +11,13 @@
 param(
     [string]$Source = (Join-Path $env:USERPROFILE ".cam\chrome-profiles"),
     [string]$Destination = "D:\cam-data\chrome-profiles",
-    [string]$EnvFile = "C:\deploy\cursor-account-manager\.env",
+    [string]$EnvFile = $(
+        if (Test-Path "D:\deploy\cursor-account-manager\.env") {
+            "D:\deploy\cursor-account-manager\.env"
+        } else {
+            "C:\deploy\cursor-account-manager\.env"
+        }
+    ),
     [switch]$DoMigrate
 )
 

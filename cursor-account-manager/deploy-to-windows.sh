@@ -27,7 +27,7 @@ WIN_HOST="172.30.90.102"
 WIN_USER="kinch.zhu"
 WIN_PORT=22
 SSH_KEY=""
-REMOTE_DIR="C:/deploy/cursor-account-manager"
+REMOTE_DIR="D:/deploy/cursor-account-manager"
 SKIP_CHROME=true   # Chrome 已预装，默认跳过
 
 usage() {
@@ -41,7 +41,7 @@ usage() {
 选项:
   -p <port>    SSH 端口（默认 22）
   -k <key>     SSH 私钥路径（不填则使用密码登录）
-  -d <dir>     远程部署目录（默认 C:/deploy/cursor-account-manager）
+  -d <dir>     远程部署目录（默认 D:/deploy/cursor-account-manager）
   --no-chrome  跳过 Chrome 安装（已安装时使用）
   --no-start   部署完成后不自动启动 Web 服务
   --help       显示此帮助
@@ -177,7 +177,7 @@ success "========================================"
 rm -f "$PACK_PATH"
 
 # ---------- 实时追踪日志，Ctrl+C 才退出 ----------
-LOG_REMOTE="C:/deploy/cursor-account-manager/data/logs/cam.log"
+LOG_REMOTE="${REMOTE_DIR}/data/logs/cam.log"
 info "实时日志（Ctrl+C 退出追踪，服务不受影响）..."
 echo ""
 

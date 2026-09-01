@@ -9,7 +9,13 @@
 # =============================================================================
 
 param(
-    [string]$DeployDir = "C:\deploy\cursor-account-manager",
+    [string]$DeployDir = $(
+        if (Test-Path "D:\deploy\cursor-account-manager") {
+            "D:\deploy\cursor-account-manager"
+        } else {
+            "C:\deploy\cursor-account-manager"
+        }
+    ),
     [switch]$ScanSystem
 )
 
