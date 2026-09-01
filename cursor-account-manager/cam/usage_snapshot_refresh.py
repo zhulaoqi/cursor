@@ -315,22 +315,73 @@ def _record_account_log(
     )
 
 
-def _breaker_blocks_submission(breaker: UsageAuthBreaker) -> bool:
-    """判断熔断器是否仍阻止提交新账号。"""
-    allows = getattr(breaker, "allows_new_submission", None)
-    if callable(allows):
-        return not bool(allows())
-    return breaker.snapshot().state == "open"
+def _quarantine_failure_limit() -> int:
+    return max(1, int(getattr(SETTINGS, "usage_auth_quarantine_failures", 3) or 3))
+
+
+def _is_quarantined_account(token_store: object | None, email: str) -> bool:
+    """连续失败或 disabled 的账号保留历史，但不再污染全局熔断。"""
+    getter = getattr(token_store, "get", None)
+    if not callable(getter):
+        return False
+    record = getter(email)
+    if record is None:
+        return False
+    if str(getattr(record, "status", "") or "").strip().lower() == "disabled":
+        return True
+    failures = int(getattr(record, "consecutive_failures", 0) or 0)
+    return failures >= _quarantine_failure_limit()
+
+
+def _record_breaker_outcome(
+    breaker: UsageAuthBreaker,
+    result: CollectionResult,
+    email: str,
+    *,
+    now: datetime,
+    token_store: object | None,
+) -> None:
+    """只把健康账号的系统性认证结果记入全局熔断。"""
+    outcome = result.auth_outcome
+    if outcome is AuthOutcome.SUCCESS:
+        breaker.record(outcome, email, now=now)
+        return
+    if outcome is AuthOutcome.AUTH_FAILURE and not _is_quarantined_account(
+        token_store, email
+    ):
+        breaker.record(outcome, email, now=now)
+
+
+def _collect_status(result: CollectionResult) -> str:
+    if result.status is CollectionStatus.SUCCESS:
+        return "success"
+    if result.status is CollectionStatus.AUTH_CIRCUIT_OPEN:
+        return "circuit_blocked"
+    return "failed"
+
+
+def _prioritize_accounts(
+    accounts: tuple[MonitoredAccount, ...],
+    token_store: object | None,
+) -> tuple[MonitoredAccount, ...]:
+    """健康/有缓存的账号先采，隔离账号放后面。"""
+    def sort_key(item: MonitoredAccount) -> tuple[int, int, str]:
+        email = item.account.email
+        if _is_quarantined_account(token_store, email):
+            return (2, 0, email)
+        return (0, 0, email)
+
+    return tuple(sorted(accounts, key=sort_key))
 
 
 def _run_bounded(
-    accounts: tuple[MonitoredAccount, ...],
+    accounts: tuple,
     *,
     concurrency: int,
     breaker: UsageAuthBreaker,
-    worker: Callable[[MonitoredAccount], str],
+    worker: Callable[[object], str],
 ) -> UsageRunSummary:
-    """有界增量提交账号任务；冷却中的熔断会停止提交，冷却后允许探针恢复。"""
+    """有界并发提交全部账号。熔断不再中断当天队列。"""
     counts = {
         "success": 0,
         "failed": 0,
@@ -344,8 +395,6 @@ def _run_bounded(
 
     def submit_next(executor: ThreadPoolExecutor) -> bool:
         nonlocal submitted
-        if _breaker_blocks_submission(breaker):
-            return False
         try:
             account = next(iterator)
         except StopIteration:
@@ -416,6 +465,8 @@ def run_usage_periodic(
         accounts = tuple(
             item for item in accounts if item.account.email in wanted
         )
+    token_store = getattr(resolver, "token_store", None)
+    accounts = _prioritize_accounts(accounts, token_store)
     run_id = f"{trigger}:{uuid4().hex}"
     _call_if_present(
         sync_log, "create_run",
@@ -449,14 +500,19 @@ def run_usage_periodic(
                 item.account, snapshot_type=SnapshotType.PERIODIC,
                 snapshot_slot=slot, auth_policy=breaker, collected_at=current,
             )
-            breaker.record(result.auth_outcome, email, now=current)
-            if result.status is CollectionStatus.SUCCESS:
+            _record_breaker_outcome(
+                breaker, result, email, now=current, token_store=token_store,
+            )
+            status = _collect_status(result)
+            if status == "success":
                 store.reconcile_and_write(result.snapshot)
                 _record_account_log(
                     sync_log, run_id=run_id, email=email, status="success",
                     started_at=started_at,
                 )
                 return "success"
+            if status == "circuit_blocked":
+                return "circuit_blocked"
             _record_account_log(
                 sync_log, run_id=run_id, email=email, status="failed",
                 started_at=started_at, error_message=result.error_message,
@@ -553,14 +609,20 @@ def run_usage_pre_reset_due(
                 snapshot_slot=cycle_start, auth_policy=breaker,
                 collected_at=current,
             )
-            breaker.record(result.auth_outcome, email, now=current)
-            if result.status is CollectionStatus.SUCCESS:
+            _record_breaker_outcome(
+                breaker, result, email, now=current,
+                token_store=getattr(resolver, "token_store", None),
+            )
+            status = _collect_status(result)
+            if status == "success":
                 store.reconcile_and_write(result.snapshot)
                 _record_account_log(
                     sync_log, run_id=run_id,
                     email=email, status="success", started_at=started_at,
                 )
                 return "success"
+            if status == "circuit_blocked":
+                return "circuit_blocked"
             _record_account_log(
                 sync_log, run_id=run_id, email=email, status="failed",
                 started_at=started_at, error_message=result.error_message,
@@ -634,7 +696,10 @@ def run_usage_manual_collect(
             auth_policy=breaker,
             collected_at=current,
         )
-        breaker.record(result.auth_outcome, normalized, now=current)
+        _record_breaker_outcome(
+            breaker, result, normalized, now=current,
+            token_store=getattr(resolver, "token_store", None),
+        )
         if result.status is CollectionStatus.SUCCESS:
             store.reconcile_and_write(result.snapshot)
         return result

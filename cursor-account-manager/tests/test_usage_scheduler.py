@@ -49,6 +49,7 @@ class UsageSchedulerTests(unittest.TestCase):
             bi_sync_biz_tz="Asia/Shanghai",
             usage_pre_reset_scan_interval_min=15,
             usage_periodic_alert_enable=True,
+            usage_periodic_retry_minutes=15,
             alert_bot_enable=False,
         )
 
@@ -202,6 +203,37 @@ class UsageSchedulerTests(unittest.TestCase):
             self.assertEqual(level, "error")
             self.assertIn("circuit_blocked=340", content)
             self.assertIn("认证熔断开启", content)
+            coordinator.stop(timeout_sec=1)
+
+    def test_periodic_partial_circuit_blocked_also_reschedules(self) -> None:
+        """有成功/失败时若仍有熔断拦截，当天也必须补采，不能拖到明天。"""
+        done = threading.Event()
+
+        def periodic(**_kwargs):
+            done.set()
+            return SimpleNamespace(
+                success=2, failed=10, skipped=0, lock_busy=0, circuit_blocked=347
+            )
+
+        with (
+            patch("cam.usage_scheduler.SETTINGS", self.settings),
+            patch("cam.usage_scheduler.run_usage_periodic", periodic),
+            patch("cam.usage_scheduler.run_usage_pre_reset_due"),
+            patch("cam.usage_scheduler.send_alert"),
+        ):
+            coordinator = UsageSchedulerCoordinator(poll_interval_sec=1)
+            now = datetime(2026, 7, 28, 22, 0, tzinfo=UTC)
+            before_submit_next = next_usage_periodic_at(now, daily_at="06:00", tz=SHANGHAI)
+            coordinator.tick(now)
+            self.assertTrue(done.wait(0.5))
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                nxt = coordinator._next_periodic_at
+                if nxt is not None and nxt < before_submit_next:
+                    break
+                time.sleep(0.01)
+            self.assertIsNotNone(coordinator._next_periodic_at)
+            self.assertLess(coordinator._next_periodic_at, before_submit_next)
             coordinator.stop(timeout_sec=1)
 
     def test_periodic_and_pre_reset_use_independent_executors(self) -> None:

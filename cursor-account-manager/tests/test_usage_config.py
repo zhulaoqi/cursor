@@ -27,6 +27,7 @@ USAGE_ENV_KEYS = (
     "USAGE_AUTH_BREAKER_COOLDOWN_MIN",
     "USAGE_AUTH_BREAKER_WINDOW_SIZE",
     "USAGE_AUTH_BREAKER_WINDOW_MIN",
+    "USAGE_AUTH_QUARANTINE_FAILURES",
 )
 
 _MISSING_ENV = object()
@@ -96,11 +97,12 @@ class UsageConfigTests(unittest.TestCase):
             "usage_pre_reset_lock_file": "data/cam_usage_pre_reset.lock",
             "usage_account_lock_dir": PROJECT_ROOT / "data/usage-account-locks",
             "usage_account_lock_timeout_sec": 5,
-            "usage_auth_breaker_min_samples": 10,
-            "usage_auth_breaker_failure_ratio": 0.30,
+            "usage_auth_breaker_min_samples": 20,
+            "usage_auth_breaker_failure_ratio": 0.50,
             "usage_auth_breaker_cooldown_min": 30,
             "usage_auth_breaker_window_size": 50,
             "usage_auth_breaker_window_min": 10,
+            "usage_auth_quarantine_failures": 3,
         }
         for field, expected_value in expected.items():
             with self.subTest(field=field):
@@ -200,6 +202,7 @@ class UsageConfigTests(unittest.TestCase):
             "USAGE_AUTH_BREAKER_COOLDOWN_MIN",
             "USAGE_AUTH_BREAKER_WINDOW_SIZE",
             "USAGE_AUTH_BREAKER_WINDOW_MIN",
+            "USAGE_AUTH_QUARANTINE_FAILURES",
         ]
         for key in integer_keys:
             with self.subTest(key=key):

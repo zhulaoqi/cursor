@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from cam.models import Account
+from cam.models import Account, TokenRecord
 from cam.usage_snapshot_models import (
     AccountMappingResult,
     AuthOutcome,
@@ -69,11 +69,26 @@ def snapshot(
     )
 
 
+class FakeTokenStore:
+    """测试用 token 记录。"""
+
+    def __init__(self, records: dict[str, TokenRecord] | None = None) -> None:
+        self.records = records or {}
+
+    def get(self, email: str):
+        return self.records.get(email)
+
+
 class FakeResolver:
     """返回指定监控账号。"""
 
-    def __init__(self, accounts: tuple[MonitoredAccount, ...]) -> None:
+    def __init__(
+        self,
+        accounts: tuple[MonitoredAccount, ...],
+        token_store: FakeTokenStore | None = None,
+    ) -> None:
         self.accounts = accounts
+        self.token_store = token_store or FakeTokenStore()
 
     def resolve(self) -> AccountMappingResult:
         return AccountMappingResult(collectable_accounts=self.accounts)
@@ -357,8 +372,10 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
             ["a@example.com", "b@example.com"],
         )
 
-    def test_熔断开启后停止提交后续账号(self):
+    def test_熔断开启后仍提交后续账号(self):
+        """全局熔断只限制刷新/登录，不得把当天剩余账号整批丢掉。"""
         first, second = monitored("a@example.com"), monitored("b@example.com")
+        slot = periodic_slot(NOW, 24, SHANGHAI)
         collector = FakeCollector(
             {
                 first.account.email: CollectionResult(
@@ -368,8 +385,9 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
                 ),
                 second.account.email: CollectionResult(
                     email=second.account.email,
-                    status=CollectionStatus.FAILED,
-                    auth_outcome=AuthOutcome.AUTH_FAILURE,
+                    status=CollectionStatus.SUCCESS,
+                    snapshot=snapshot(second.account.email, SnapshotType.PERIODIC, slot),
+                    auth_outcome=AuthOutcome.SUCCESS,
                 ),
             }
         )
@@ -384,13 +402,27 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
         )
 
         self.assertEqual(summary.failed, 1)
-        self.assertEqual(summary.circuit_blocked, 1)
-        self.assertEqual(collector.calls, ["a@example.com"])
+        self.assertEqual(summary.success, 1)
+        self.assertEqual(summary.circuit_blocked, 0)
+        self.assertEqual(collector.calls, ["a@example.com", "b@example.com"])
 
-    def test_熔断冷却中开跑不得静默全零(self):
-        """回归：熔断 open 时日常采集曾直接返回全 0 并误报成功。"""
+    def test_熔断冷却中仍采集缓存账号并把探针失败记为拦截(self):
+        """熔断 open 时仍提交；需要刷新的号记 circuit_blocked，不得静默全零。"""
         first, second = monitored("a@example.com"), monitored("b@example.com")
-        collector = FakeCollector({})
+        collector = FakeCollector(
+            {
+                first.account.email: CollectionResult(
+                    email=first.account.email,
+                    status=CollectionStatus.AUTH_CIRCUIT_OPEN,
+                    auth_outcome=AuthOutcome.SKIPPED,
+                ),
+                second.account.email: CollectionResult(
+                    email=second.account.email,
+                    status=CollectionStatus.AUTH_CIRCUIT_OPEN,
+                    auth_outcome=AuthOutcome.SKIPPED,
+                ),
+            }
+        )
         summary = run_usage_periodic(
             now=NOW,
             resolver=FakeResolver((first, second)),
@@ -404,7 +436,7 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
         self.assertEqual(summary.success, 0)
         self.assertEqual(summary.failed, 0)
         self.assertEqual(summary.circuit_blocked, 2)
-        self.assertEqual(collector.calls, [])
+        self.assertCountEqual(collector.calls, [first.account.email, second.account.email])
 
     def test_熔断冷却结束后日常采集应提交探针账号(self):
         """冷却到期后不得因 snapshot.state=open 永久卡死提交。"""
@@ -435,6 +467,50 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
         self.assertEqual(summary.success, 1)
         self.assertEqual(summary.circuit_blocked, 0)
         self.assertEqual(collector.calls, [account.account.email])
+
+    def test_隔离账号认证失败不记入全局熔断(self):
+        """disabled / 连续失败账号继续保留，失败不得拖垮整批熔断。"""
+        bad, good = monitored("bad@example.com"), monitored("good@example.com")
+        slot = periodic_slot(NOW, 24, SHANGHAI)
+        breaker = ClosedBreaker()
+        collector = FakeCollector(
+            {
+                bad.account.email: CollectionResult(
+                    email=bad.account.email,
+                    status=CollectionStatus.FAILED,
+                    auth_outcome=AuthOutcome.AUTH_FAILURE,
+                ),
+                good.account.email: CollectionResult(
+                    email=good.account.email,
+                    status=CollectionStatus.SUCCESS,
+                    snapshot=snapshot(good.account.email, SnapshotType.PERIODIC, slot),
+                    auth_outcome=AuthOutcome.SUCCESS,
+                ),
+            }
+        )
+        summary = run_usage_periodic(
+            now=NOW,
+            resolver=FakeResolver(
+                (bad, good),
+                token_store=FakeTokenStore(
+                    {
+                        bad.account.email: TokenRecord(
+                            email=bad.account.email,
+                            status="disabled",
+                            consecutive_failures=5,
+                        ),
+                    }
+                ),
+            ),
+            store=FakeStore(),
+            collector=collector,
+            sync_log=FakeSyncLog(),
+            breaker=breaker,
+            concurrency=1,
+        )
+
+        self.assertEqual((summary.success, summary.failed), (1, 1))
+        self.assertEqual(breaker.outcomes, [(AuthOutcome.SUCCESS, good.account.email)])
 
     def test_同槽超过重试限额跳过(self):
         account = monitored("a@example.com")

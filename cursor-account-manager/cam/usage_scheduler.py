@@ -294,14 +294,28 @@ class UsageSchedulerCoordinator:
             )
         except Exception:
             log.exception("用量日常采集结果通知发送失败")
-        if success == 0 and failed == 0 and (lock_busy or circuit_blocked):
-            retry_at = scheduled_at.astimezone(timezone.utc) + timedelta(minutes=15)
+        if lock_busy and success == 0 and failed == 0:
+            retry_minutes = int(
+                getattr(SETTINGS, "usage_periodic_retry_minutes", 15) or 15
+            )
+            retry_at = scheduled_at.astimezone(timezone.utc) + timedelta(
+                minutes=retry_minutes
+            )
             with self._lock:
                 self._next_periodic_at = retry_at
-            reason = "未拿到全局锁" if lock_busy else "认证熔断未恢复"
+            log.warning("用量日常采集未拿到全局锁，将于 %s 重试", retry_at.isoformat())
+        elif circuit_blocked > 0:
+            retry_minutes = int(
+                getattr(SETTINGS, "usage_periodic_retry_minutes", 15) or 15
+            )
+            retry_at = scheduled_at.astimezone(timezone.utc) + timedelta(
+                minutes=retry_minutes
+            )
+            with self._lock:
+                self._next_periodic_at = retry_at
             log.warning(
-                "用量日常采集%s，将于 %s 重试",
-                reason,
+                "用量日常采集仍有 %s 个账号被熔断拦截，将于 %s 补采",
+                circuit_blocked,
                 retry_at.isoformat(),
             )
 
