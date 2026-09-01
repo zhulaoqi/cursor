@@ -80,6 +80,12 @@ class ConfigConcurrencyTests(unittest.TestCase):
                 settings = config.load_settings()
         self.assertEqual(settings.chrome_profiles_dir, Path.home() / ".cam" / "chrome-profiles")
 
+    def test_windows_account_files_are_on_d_drive(self):
+        with patch.object(config.os, "name", "nt"):
+            settings = config.load_settings()
+        self.assertEqual(settings.tokens_db, config.WINDOWS_DATA_DIR / "tokens.db")
+        self.assertEqual(settings.accounts_csv, config.WINDOWS_DATA_DIR / "accounts.csv")
+
     def test_chrome_profiles_dir_on_windows_is_always_d_drive(self):
         with patch.object(config.os, "name", "nt"):
             with patch.dict(
