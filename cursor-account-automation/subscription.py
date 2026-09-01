@@ -9,8 +9,8 @@
 import random
 import time
 
-BILLING_URL = "https://cursor.com/settings"
-BILLING_TAB_URL = "https://cursor.com/dashboard?tab=billing"
+BILLING_URL = "https://cursor.com/dashboard"
+BILLING_TAB_URL = "https://cursor.com/dashboard"
 
 PLAN_MAP = {
     "pro": "Pro",

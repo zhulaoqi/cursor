@@ -1087,8 +1087,8 @@ _BILLING_MONTH_TRIGGER_SELECTOR = 'button[aria-expanded][aria-controls],button[a
 _BILLING_MONTH_OPTION_SELECTOR = '[role="option"],[role="menuitem"],[data-radix-collection-item],button'
 
 _BILLING_URLS = [
-    "https://cursor.com/dashboard/billing",   # 月份下拉控件可靠，优先尝试
-    "https://cursor.com/settings/billing",    # 备用
+    "https://cursor.com/dashboard",           # 现行主地址，页内再进 Billing
+    "https://cursor.com/dashboard/billing",   # 旧深链，登录后仍可能直达
 ]
 
 
@@ -1173,6 +1173,41 @@ _BILLING_PAGE_READY_JS = """
   return false;
 }
 """
+
+
+_BILLING_TAB_SELECTORS = (
+    'a[href*="/dashboard/billing"]',
+    'a[href*="tab=billing"]',
+    '[role="tab"]:has-text("Billing")',
+    'nav a:has-text("Billing")',
+    'button:has-text("Billing")',
+    'a:has-text("Billing")',
+    '[role="tab"]:has-text("账单")',
+    'a:has-text("账单")',
+)
+
+
+async def _open_dashboard_billing_section(page, *, account_label: str = "") -> None:
+    """主地址是 /dashboard 时，点开 Billing 分区再等 Invoices。"""
+    try:
+        current = (page.url or "").lower()
+    except Exception:
+        current = ""
+    if "/dashboard/billing" in current:
+        return
+    for sel in _BILLING_TAB_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if not await loc.is_visible(timeout=1500):
+                continue
+            await loc.click(timeout=3000)
+            await page.wait_for_timeout(800)
+            log.info(
+                f"{_log_prefix(account_label)}已打开 Dashboard Billing 分区: {sel}"
+            )
+            return
+        except Exception:
+            continue
 
 
 async def _wait_billing_page_ready(page, *, timeout_ms: int = 25000) -> bool:
@@ -1666,6 +1701,9 @@ async def _fetch_billing_list_in_ctx(
                     )
                 except Exception as e:
                     goto_err = e
+                await _open_dashboard_billing_section(
+                    page, account_label=account_label
+                )
                 ready = await _wait_billing_page_ready(page)
                 if not ready:
                     if goto_err is not None:
@@ -1921,6 +1959,7 @@ async def _billing_page_get_stripe_items(cookie_val: str, invoice_month: str = "
             for billing_url in _BILLING_URLS:
                 try:
                     await page.goto(billing_url, wait_until="load", timeout=20000)
+                    await _open_dashboard_billing_section(page)
                     ready = await _wait_billing_page_ready(page)
                     if not ready:
                         log.info(f"账单页核心区域未就绪，跳过 URL: {billing_url}")

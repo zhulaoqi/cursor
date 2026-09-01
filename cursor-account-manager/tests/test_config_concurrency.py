@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from cam import config
@@ -72,6 +73,32 @@ class ConfigConcurrencyTests(unittest.TestCase):
         self.assertEqual(settings.billing_ledger_refresh_lock_file, "/tmp/cam_billing_ledger_refresh.lock")
         self.assertFalse(settings.alert_bot_enable)
         self.assertEqual(settings.alert_to_emails, "")
+
+    def test_chrome_profiles_dir_defaults_to_home_on_non_windows(self):
+        with patch.object(config.os, "name", "posix"):
+            with patch.dict(os.environ, {"CAM_CHROME_PROFILES_DIR": ""}, clear=False):
+                settings = config.load_settings()
+        self.assertEqual(settings.chrome_profiles_dir, Path.home() / ".cam" / "chrome-profiles")
+
+    def test_chrome_profiles_dir_on_windows_is_always_d_drive(self):
+        with patch.object(config.os, "name", "nt"):
+            with patch.dict(
+                os.environ,
+                {"CAM_CHROME_PROFILES_DIR": r"C:\Users\x\.cam\chrome-profiles"},
+                clear=False,
+            ):
+                settings = config.load_settings()
+        self.assertEqual(settings.chrome_profiles_dir, config.WINDOWS_CHROME_PROFILES_DIR)
+
+    def test_chrome_profiles_dir_reads_absolute_env_on_non_windows(self):
+        with patch.object(config.os, "name", "posix"):
+            with patch.dict(
+                os.environ,
+                {"CAM_CHROME_PROFILES_DIR": "/tmp/cam-chrome-profiles"},
+                clear=False,
+            ):
+                settings = config.load_settings()
+        self.assertEqual(settings.chrome_profiles_dir, Path("/tmp/cam-chrome-profiles"))
 
 
 if __name__ == "__main__":

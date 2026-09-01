@@ -94,10 +94,9 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ready", _BILLING_MONTH_REFRESH_STATE_JS)
 
     def test_billing_pages_dashboard_tried_first_for_speed(self):
-        self.assertEqual(_BILLING_URLS[0], "https://cursor.com/dashboard/billing",
-                         "dashboard/billing 应首先尝试，因其月份控件可靠")
-        self.assertIn("https://cursor.com/settings/billing", _BILLING_URLS,
-                      "settings/billing 应作为备用保留")
+        self.assertEqual(_BILLING_URLS[0], "https://cursor.com/dashboard")
+        self.assertIn("https://cursor.com/dashboard/billing", _BILLING_URLS)
+        self.assertNotIn("https://cursor.com/settings/billing", _BILLING_URLS)
         self.assertNotIn("https://cursor.com/cn/dashboard/billing", _BILLING_URLS)
 
     async def test_fetch_billing_items_selects_requested_month_before_parsing_rows(self):
@@ -135,7 +134,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         page = FakePage()
         select_calls: list = []
 
-        async def fake_select(_page, invoice_month):
+        async def fake_select(_page, invoice_month, **_kwargs):
             select_calls.append(invoice_month)
             return exporter.BillingMonthSelectionResult("selected")
 
@@ -182,7 +181,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
 
         page = FakePage()
 
-        async def fake_select(_page, invoice_month):
+        async def fake_select(_page, invoice_month, **_kwargs):
             return exporter.BillingMonthSelectionResult("inconclusive", "not ready")
 
         original = exporter._select_billing_month_in_ctx
@@ -201,9 +200,11 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
         from cam import exporter
 
         fn_src = inspect.getsource(exporter._select_billing_month_via_playwright)
+        click_src = inspect.getsource(exporter._click_visible_billing_month_option)
         self.assertIn("find_invoices_month_trigger", fn_src)
         self.assertIn('.dropdown-items-container[role="menu"]', fn_src)
-        self.assertIn('[role="menuitem"][data-radix-collection-item]', fn_src)
+        self.assertIn("_click_visible_billing_month_option", fn_src)
+        self.assertIn('[role="menuitem"][data-radix-collection-item]', click_src)
         self.assertNotIn("_BILLING_MONTH_OPTIONS_VISIBLE_JS", fn_src)
         self.assertNotIn("_BILLING_MONTH_PROBE_SELECT_JS", fn_src)
 
@@ -250,6 +251,7 @@ class InvoicePaidFilterTests(unittest.IsolatedAsyncioTestCase):
 
         fn_src = inspect.getsource(exporter._fetch_billing_list_in_ctx)
         self.assertIn("_wait_billing_page_ready", fn_src)
+        self.assertIn("_open_dashboard_billing_section", fn_src)
         self.assertNotIn('wait_for_selector("button, a[href]"', fn_src)
 
     def test_download_invoices_all_uses_single_browser_multi_context(self):

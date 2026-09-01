@@ -41,8 +41,8 @@ log = get("browser")
 
 _LOGIN_SEMAPHORE = threading.Semaphore(max(1, SETTINGS.browser_login_concurrency))
 
-# user-data 基目录：放在用户 home 下，避免 /tmp 清理；每个账号一个独立子目录
-_USER_DATA_BASE = pathlib.Path.home() / ".cam" / "chrome-profiles"
+# Windows 固定 D:\cam-data\chrome-profiles；其他系统默认 ~/.cam/chrome-profiles
+_USER_DATA_BASE = pathlib.Path(SETTINGS.chrome_profiles_dir)
 _USER_DATA_BASE.mkdir(parents=True, exist_ok=True)
 
 
