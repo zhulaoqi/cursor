@@ -8,7 +8,7 @@
 #   ./logs.sh --clear   # 清空日志文件
 # =============================================================================
 
-WIN_HOST="172.30.90.102"
+WIN_HOST="172.30.91.93"
 WIN_USER="kinch.zhu"
 WIN_PORT=22
 LOG_PATH="D:/deploy/cursor-account-manager/data/logs/cam.log"

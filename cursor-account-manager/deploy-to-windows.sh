@@ -23,7 +23,7 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 # ---------- 参数解析 ----------
-WIN_HOST="172.30.90.102"
+WIN_HOST="172.30.91.93"
 WIN_USER="kinch.zhu"
 WIN_PORT=22
 SSH_KEY=""
