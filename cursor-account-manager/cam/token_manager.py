@@ -208,12 +208,22 @@ class TokenManager:
         "Timeout",
         "timeout",
     )
-    _NETWORK_RETRY = 3        # 网络抖动最多重试次数
-    _NETWORK_RETRY_DELAY = 5  # 每次重试前等待秒数
+    _NETWORK_RETRY = 3             # 网络抖动最多重试次数
+    _NETWORK_RETRY_DELAY = 30      # 首次重试前等待秒数（指数退避基数）
+    _NETWORK_RETRY_BACKOFF_MAX = 180  # 单次等待上限，避免间隔无限拉长
 
     def _is_transient(self, e: Exception) -> bool:
         msg = str(e)
         return any(k in msg for k in self._TRANSIENT_ERRORS)
+
+    @classmethod
+    def _network_retry_delay_sec(cls, attempt: int) -> int:
+        """登录失败（网络抖动）重试等待：指数退避并封顶。
+
+        attempt 从 1 起：30s → 60s → 120s …，不超过 ``_NETWORK_RETRY_BACKOFF_MAX``。
+        """
+        delay = cls._NETWORK_RETRY_DELAY * (2 ** max(0, attempt - 1))
+        return min(delay, cls._NETWORK_RETRY_BACKOFF_MAX)
 
     def _browser_login_and_save(self, account: Account, *, force_fresh: bool = False) -> str:
         log.info(f"[{account.email}] 启动浏览器登录兜底")
@@ -235,11 +245,12 @@ class TokenManager:
             except Exception as e:
                 if self._is_transient(e) and attempt < self._NETWORK_RETRY:
                     # 临时网络错误，等待后重试，不计入失败次数
+                    delay = self._network_retry_delay_sec(attempt)
                     log.warning(
                         f"[{account.email}] 网络抖动（{attempt}/{self._NETWORK_RETRY}），"
-                        f"{self._NETWORK_RETRY_DELAY}s 后重试: {e}"
+                        f"{delay}s 后重试: {e}"
                     )
-                    time.sleep(self._NETWORK_RETRY_DELAY * attempt)
+                    time.sleep(delay)
                     continue
                 # 非网络错误，或已达重试上限，才计入失败
                 n = self.store.bump_failure(account.email, MAX_CONSECUTIVE_FAILURES)
