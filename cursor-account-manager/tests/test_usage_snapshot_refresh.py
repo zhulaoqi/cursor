@@ -27,6 +27,7 @@ from cam.usage_snapshot_refresh import (
     run_usage_periodic,
     run_usage_pre_reset_due,
 )
+from cam.usage_snapshot_store import StaleCycleWriteError
 
 
 UTC = timezone.utc
@@ -116,6 +117,19 @@ class FakeStore:
         self.writes.append(value)
 
 
+class StaleForEmailStore(FakeStore):
+    """指定账号写入旧账期时抛出生产同款保护异常。"""
+
+    def __init__(self, stale_email: str) -> None:
+        super().__init__()
+        self.stale_email = stale_email
+
+    def reconcile_and_write(self, value: UsageSnapshot):
+        if value.email == self.stale_email:
+            raise StaleCycleWriteError("拒绝写入早于最新已知账期的快照")
+        return super().reconcile_and_write(value)
+
+
 class FakeCollector:
     """按邮箱返回预设采集结果。"""
 
@@ -134,6 +148,7 @@ class FakeSyncLog:
     def __init__(self, attempts=None) -> None:
         self.attempts = attempts or {}
         self.logs: list[dict] = []
+        self.finished: list[dict] = []
 
     def get_account_attempt_state(self, *, account_email, trigger_type):
         return self.attempts.get(
@@ -143,6 +158,9 @@ class FakeSyncLog:
 
     def add_account_log(self, **kwargs) -> None:
         self.logs.append(kwargs)
+
+    def finish_run(self, **kwargs) -> None:
+        self.finished.append(kwargs)
 
 
 class ClosedBreaker:
@@ -371,6 +389,88 @@ class UsageSnapshotRefreshTests(unittest.TestCase):
             collector.calls,
             ["a@example.com", "b@example.com"],
         )
+
+    def test_periodic_旧账期写入只失败当前账号并正常收尾(self):
+        stale = monitored("a@example.com")
+        succeeded = monitored("b@example.com")
+        slot = periodic_slot(NOW, 24, SHANGHAI)
+        collector = FakeCollector(
+            {
+                item.account.email: CollectionResult(
+                    email=item.account.email,
+                    status=CollectionStatus.SUCCESS,
+                    snapshot=snapshot(
+                        item.account.email, SnapshotType.PERIODIC, slot
+                    ),
+                    auth_outcome=AuthOutcome.SUCCESS,
+                )
+                for item in (stale, succeeded)
+            }
+        )
+        sync_log = FakeSyncLog()
+
+        summary = run_usage_periodic(
+            now=NOW,
+            resolver=FakeResolver((stale, succeeded)),
+            store=StaleForEmailStore(stale.account.email),
+            collector=collector,
+            sync_log=sync_log,
+            breaker=ClosedBreaker(),
+            concurrency=1,
+        )
+
+        self.assertEqual((summary.failed, summary.success), (1, 1))
+        stale_log = next(
+            row for row in sync_log.logs
+            if row["account_email"] == stale.account.email
+        )
+        self.assertEqual(stale_log["status"], "failed")
+        self.assertIn("StaleCycleWriteError", stale_log["error_message"])
+        self.assertEqual(sync_log.finished[0]["status"], "partial_failed")
+        self.assertEqual(sync_log.finished[0]["account_success"], 1)
+        self.assertEqual(sync_log.finished[0]["account_failed"], 1)
+
+    def test_pre_reset_旧账期写入只失败当前账号并继续其他账号(self):
+        stale = monitored("a@example.com")
+        succeeded = monitored("b@example.com")
+        cycle_end = NOW + timedelta(minutes=120)
+        store = StaleForEmailStore(stale.account.email)
+        collector_results = {}
+        for item in (stale, succeeded):
+            email = item.account.email
+            store.latest_cycles[email] = {
+                "billing_cycle_start": datetime(2026, 7, 1, tzinfo=UTC),
+                "billing_cycle_end": cycle_end,
+            }
+            collector_results[email] = CollectionResult(
+                email=email,
+                status=CollectionStatus.SUCCESS,
+                snapshot=snapshot(
+                    email,
+                    SnapshotType.PRE_RESET,
+                    datetime(2026, 7, 1, tzinfo=UTC),
+                    cycle_end=cycle_end,
+                ),
+                auth_outcome=AuthOutcome.SUCCESS,
+            )
+        sync_log = FakeSyncLog()
+
+        summary = run_usage_pre_reset_due(
+            now=NOW,
+            resolver=FakeResolver((stale, succeeded)),
+            store=store,
+            collector=FakeCollector(collector_results),
+            sync_log=sync_log,
+            breaker=ClosedBreaker(),
+            concurrency=1,
+        )
+
+        self.assertEqual((summary.failed, summary.success), (1, 1))
+        stale_log = next(
+            row for row in sync_log.logs
+            if row["account_email"] == stale.account.email
+        )
+        self.assertIn("StaleCycleWriteError", stale_log["error_message"])
 
     def test_熔断开启后仍提交后续账号(self):
         """全局熔断只限制刷新/登录，不得把当天剩余账号整批丢掉。"""

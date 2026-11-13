@@ -588,7 +588,9 @@ def _goto_login_page(page: Page) -> None:
 
 _SEL_EMAIL      = 'input[name="email"]'
 _SEL_MAGIC_BTN  = 'button[value="magic-code"]'
-_SEL_CODE_INPUT = 'input[data-index="0"]'
+_SEL_CODE_LEGACY = 'input[data-index="0"]'
+_SEL_CODE_SINGLE = 'input[name="code"][maxlength="6"], input[autocomplete="one-time-code"]'
+_SEL_CODE_INPUT = f"{_SEL_CODE_LEGACY}, {_SEL_CODE_SINGLE}"
 _CHANGE_EMAIL_SELECTORS = (
     'text=更改电子邮件',
     'text=Change email',
@@ -841,10 +843,19 @@ def _click_magic_code_button(page: Page, max_retries: int = 3) -> None:
 def _fill_verification_code(page: Page, code: str) -> None:
     log.info(f"填入验证码: {code}")
     try:
-        page.wait_for_selector('[data-index="0"]', timeout=15000)
+        page.wait_for_selector(_SEL_CODE_INPUT, timeout=15000)
     except Exception:
         raise BrowserLoginError("验证码输入框未出现")
 
+    # 新版页面视觉上仍是六格，DOM 实际是单个 maxlength=6 的 input。
+    single = page.locator(_SEL_CODE_SINGLE)
+    if single.count() > 0:
+        field = single.first
+        field.click()
+        field.fill(code)
+        return
+
+    # 兼容旧版六个 data-index 输入框。
     for i, digit in enumerate(code):
         el = page.locator(f'[data-index="{i}"]')
         el.click()

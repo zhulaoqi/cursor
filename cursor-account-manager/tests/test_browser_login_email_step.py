@@ -37,6 +37,34 @@ class _FakeLocator:
 
 
 class BrowserLoginEmailStepTests(unittest.TestCase):
+    def test_new_single_code_input_is_recognized_as_code_step(self) -> None:
+        """新版验证码页用单个 name=code 输入框，不再提供 data-index。"""
+        page = MagicMock()
+        page.locator.side_effect = lambda sel: (
+            _FakeLocator(count=1)
+            if 'input[name="code"]' in sel
+            else _FakeLocator(count=0)
+        )
+
+        self.assertTrue(browser_login._is_code_step(page))
+
+    def test_fill_verification_code_supports_new_single_input(self) -> None:
+        """新版视觉六格实际是一个 maxlength=6 的 input，应一次填入完整验证码。"""
+        page = MagicMock()
+        single = MagicMock()
+        single.count.return_value = 1
+        single.first = single
+        page.locator.side_effect = lambda sel: (
+            single
+            if 'input[name="code"]' in sel
+            else _FakeLocator(count=0)
+        )
+
+        with patch.object(browser_login, "_human_pause"):
+            browser_login._fill_verification_code(page, "123456")
+
+        single.fill.assert_called_once_with("123456")
+
     def test_password_step_with_matching_email_skips_fill(self) -> None:
         page = MagicMock()
         page.url = (

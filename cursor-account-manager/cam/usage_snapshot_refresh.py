@@ -27,6 +27,7 @@ from .usage_snapshot_models import (
     MonitoredAccount,
     SnapshotType,
 )
+from .usage_snapshot_store import StaleCycleWriteError
 
 if TYPE_CHECKING:
     from .token_store import TokenStore
@@ -315,6 +316,31 @@ def _record_account_log(
     )
 
 
+def _write_snapshot_for_account(
+    store: UsageSnapshotStore,
+    snapshot,
+    *,
+    sync_log: SyncLogStore,
+    run_id: str,
+    email: str,
+    started_at: int,
+) -> bool:
+    """写入单账号快照；旧账期仅记当前账号失败，不中断整批任务。"""
+    try:
+        store.reconcile_and_write(snapshot)
+        return True
+    except StaleCycleWriteError as exc:
+        _record_account_log(
+            sync_log,
+            run_id=run_id,
+            email=email,
+            status="failed",
+            started_at=started_at,
+            error_message=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+
+
 def _quarantine_failure_limit() -> int:
     return max(1, int(getattr(SETTINGS, "usage_auth_quarantine_failures", 3) or 3))
 
@@ -505,7 +531,15 @@ def run_usage_periodic(
             )
             status = _collect_status(result)
             if status == "success":
-                store.reconcile_and_write(result.snapshot)
+                if not _write_snapshot_for_account(
+                    store,
+                    result.snapshot,
+                    sync_log=sync_log,
+                    run_id=run_id,
+                    email=email,
+                    started_at=started_at,
+                ):
+                    return "failed"
                 _record_account_log(
                     sync_log, run_id=run_id, email=email, status="success",
                     started_at=started_at,
@@ -615,7 +649,15 @@ def run_usage_pre_reset_due(
             )
             status = _collect_status(result)
             if status == "success":
-                store.reconcile_and_write(result.snapshot)
+                if not _write_snapshot_for_account(
+                    store,
+                    result.snapshot,
+                    sync_log=sync_log,
+                    run_id=run_id,
+                    email=email,
+                    started_at=started_at,
+                ):
+                    return "failed"
                 _record_account_log(
                     sync_log, run_id=run_id,
                     email=email, status="success", started_at=started_at,
