@@ -208,8 +208,9 @@ class TokenManager:
         "Timeout",
         "timeout",
     )
-    _NETWORK_RETRY = 3        # 网络抖动最多重试次数
-    _NETWORK_RETRY_DELAY = 5  # 每次重试前等待秒数
+    _NETWORK_RETRY = 3  # 网络抖动最多尝试次数（含首次）
+    # 第 1、2 次失败后的等待秒数；第 3 档预留给日后加长尝试次数
+    _NETWORK_RETRY_DELAYS = (2, 4, 8)
 
     def _is_transient(self, e: Exception) -> bool:
         msg = str(e)
@@ -235,11 +236,12 @@ class TokenManager:
             except Exception as e:
                 if self._is_transient(e) and attempt < self._NETWORK_RETRY:
                     # 临时网络错误，等待后重试，不计入失败次数
+                    delay = self._NETWORK_RETRY_DELAYS[attempt - 1]
                     log.warning(
                         f"[{account.email}] 网络抖动（{attempt}/{self._NETWORK_RETRY}），"
-                        f"{self._NETWORK_RETRY_DELAY}s 后重试: {e}"
+                        f"{delay}s 后重试: {e}"
                     )
-                    time.sleep(self._NETWORK_RETRY_DELAY * attempt)
+                    time.sleep(delay)
                     continue
                 # 非网络错误，或已达重试上限，才计入失败
                 n = self.store.bump_failure(account.email, MAX_CONSECUTIVE_FAILURES)
