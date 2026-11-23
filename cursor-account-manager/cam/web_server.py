@@ -44,6 +44,8 @@ from .alerting import send_alert
 from .bi_sync import run_daily_sync
 from .account_store import load_accounts
 from .config import SETTINGS, web_fetch_thread_workers
+from .devin_api import router as devin_router
+from .devin_scheduler import start_devin_scheduler_once, stop_devin_scheduler
 from .logger import get
 from .models import Account, AccountSnapshot
 from .plan_scraper import SpendingPanelBatchItem, fetch_spending_panels_batch
@@ -110,6 +112,7 @@ app.add_middleware(
 
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+app.include_router(devin_router)
 
 
 # ─── 运行中任务状态 ────────────────────────────────────────────────
@@ -744,6 +747,10 @@ async def _start_embedded_scheduler() -> None:
     global _scheduler_started, _legacy_scheduler_thread
     if _scheduler_started:
         return
+    try:
+        start_devin_scheduler_once()
+    except Exception:
+        log.exception("Devin 调度器启动失败（不影响其他功能）")
     if SETTINGS.usage_snapshot_enable:
         start_usage_scheduler_once()
     if (
@@ -780,6 +787,7 @@ async def _stop_embedded_scheduler() -> None:
     global _scheduler_started, _legacy_scheduler_thread
     _legacy_scheduler_stop.set()
     stop_usage_scheduler(timeout_sec=30)
+    stop_devin_scheduler(timeout_sec=10)
     if _legacy_scheduler_thread is not None:
         _legacy_scheduler_thread.join(timeout=35)
     _legacy_scheduler_thread = None
@@ -1102,6 +1110,11 @@ async def favicon():
 async def root():
     html_path = _STATIC / "index.html"
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/devin", response_class=HTMLResponse)
+async def devin_page():
+    return HTMLResponse((_STATIC / "devin.html").read_text(encoding="utf-8"))
 
 
 @app.post("/api/upload")

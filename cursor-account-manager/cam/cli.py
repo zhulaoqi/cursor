@@ -476,5 +476,11 @@ def cmd_sync_scheduler_loop(poll_interval: int) -> None:
     run_scheduler_loop(poll_interval_sec=poll_interval)
 
 
+# ═══ devin-*（Devin 平台运维命令）════════════════════════════════
+from .devin_cli import register as _register_devin_commands  # noqa: E402
+
+_register_devin_commands(cli)
+
+
 if __name__ == "__main__":
     main()

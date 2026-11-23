@@ -1,0 +1,42 @@
+/* 平台切换菜单：分段式（segmented）导航，Cursor / Devin / … 从左到右排列 */
+.platform-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: #EEF2F6;
+  border: 1px solid var(--line-subtle, #E5E7EB);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.platform-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted, #6B7280);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.platform-nav-item:hover { color: var(--text, #111827); background: rgba(255, 255, 255, .6); }
+.platform-nav-item:focus-visible { outline: 2px solid var(--primary, #0969DA); outline-offset: 2px; }
+.platform-nav-item.is-active {
+  color: var(--primary, #0969DA);
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .12);
+}
+.platform-nav-item svg { flex-shrink: 0; }
+@media (max-width: 720px) {
+  .platform-nav-item { padding: 0 9px; }
+  .platform-nav-item span { display: none; }
+  .platform-nav-item.is-active span { display: inline; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .platform-nav-item { transition: none; }
+}

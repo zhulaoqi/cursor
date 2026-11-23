@@ -404,6 +404,21 @@ Cursor 的发票 API 路径历史变过几次，本项目同时尝试了多个�
 
 ---
 
+## Devin 平台监控
+
+顶部菜单「Cursor / Devin」切换；Devin 页面 `/devin` 提供用量监控、账号管理、导入账号、采集记录。
+每天 02:30 自动登录各账号采集套餐、周额度、按需用量，并以飞书卡片播报成功/失败个数与失败原因。
+
+```bash
+scripts/devin-ops.sh import accounts.xlsx   # 导入账号（Windows: .\scripts\devin-ops.ps1）
+scripts/devin-ops.sh probe you@corp.com --headed   # 单账号探针
+scripts/devin-ops.sh status --failed        # 查看失败账号
+```
+
+配置项见 `.env.example` 的 `DEVIN_*` 段；完整运维说明见 [docs/devin-ops.md](docs/devin-ops.md)。
+
+---
+
 ## 技术文档
 
 - **[docs/技术说明与学习定位.md](docs/技术说明与学习定位.md)** — 技术栈、架构分层、业务功能图解、API 与配置速查（新人学习入口）

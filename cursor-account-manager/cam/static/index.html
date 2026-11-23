@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="apple-touch-icon" href="/static/favicon.svg" />
+  <link rel="stylesheet" href="/static/platforms.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -3551,6 +3552,7 @@
       <span class="brand-title">Cursor Account Manager</span>
     </div>
     <div class="header-actions">
+      <nav data-platform-nav data-active="cursor"></nav>
       <nav class="header-breadcrumb" aria-label="页面导航">
         <span class="header-breadcrumb-link" @click="goList()">账号库</span>
         <span class="header-breadcrumb-tail" x-show="view !== 'list'" x-cloak>
@@ -8087,5 +8089,6 @@ function app() {
   };
 }
 </script>
+<script src="/static/platforms.js"></script>
 </body>
 </html>

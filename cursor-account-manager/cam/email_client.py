@@ -158,9 +158,12 @@ def fetch_verification_code(
     timeout_sec: int | None = None,
     poll_interval_sec: int = 5,
     since_ts: float | None = None,
+    sender_keywords: tuple[str, ...] = ("cursor",),
+    extra_search_queries: tuple[str, ...] | None = None,
+    product_label: str = "Cursor",
 ) -> str:
     """
-    登录飞书 IMAP，在 timeout_sec 内轮询来自 Cursor 的验证码邮件。
+    登录飞书 IMAP，在 timeout_sec 内轮询来自 Cursor（或 sender_keywords 指定平台）的验证码邮件。
 
     Args:
         since_ts: 只接受 Date >= 此时间戳的邮件（秒级 unix ts），防止拿到历史旧验证码。
@@ -184,14 +187,18 @@ def fetch_verification_code(
 
         # 搜索策略：兼容多种发件域名和邮箱服务商的 IMAP 搜索方言
         # Cursor 实际发件人可能是 no-reply@cursor.com 或 no-reply@cursor.sh
-        search_queries = [
-            f'(FROM "{sender}")',
-            '(FROM "cursor.com")',
-            '(FROM "cursor.sh")',
-            '(HEADER Subject "Cursor")',
-            '(HEADER Subject "verification")',
-            "(UNSEEN)",  # 最后兜底：所有未读邮件，客户端自己过滤
-        ]
+        if extra_search_queries is None:
+            search_queries = [
+                f'(FROM "{sender}")',
+                '(FROM "cursor.com")',
+                '(FROM "cursor.sh")',
+                '(HEADER Subject "Cursor")',
+                '(HEADER Subject "verification")',
+                "(UNSEEN)",  # 最后兜底：所有未读邮件，客户端自己过滤
+            ]
+        else:
+            search_queries = list(extra_search_queries)
+        keywords = tuple(k.lower() for k in sender_keywords if k)
 
         while time.time() < deadline:
             poll_count += 1
@@ -261,7 +268,7 @@ def fetch_verification_code(
                     except Exception:
                         from_hdr, subj_hdr = "", ""
 
-                    if ("cursor" not in from_hdr) and ("cursor" not in subj_hdr):
+                    if not any(k in from_hdr or k in subj_hdr for k in keywords):
                         continue
 
                     code = _extract_code(raw)
@@ -279,7 +286,7 @@ def fetch_verification_code(
             time.sleep(poll_interval_sec)
 
         raise VerificationCodeTimeoutError(
-            f"[{email_addr}] {timeout}s 内未收到 Cursor 验证邮件（轮询 {poll_count} 次）"
+            f"[{email_addr}] {timeout}s 内未收到 {product_label} 验证邮件（轮询 {poll_count} 次）"
         )
     finally:
         try:

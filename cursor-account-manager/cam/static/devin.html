@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Devin · Account Manager</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/platforms.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    /* 设计令牌与 Cursor 页完全一致，保证两个平台视觉统一（Data-Dense Dashboard 风格） */
+    :root {
+      --primary:#0969DA; --secondary:#218BFF; --cta:#F97316;
+      --bg:#F6F8FA; --surface:#FFFFFF; --text:#111827; --muted:#6B7280;
+      --border:#D0D7DE; --line-subtle:#E5E7EB; --line-soft:#EEF2F6;
+      --success:#15803D; --success-bg:#DCFCE7;
+      --warn:#B45309; --warn-bg:#FEF3C7;
+      --danger:#B91C1C; --danger-bg:#FEE2E2;
+      --info-bg:#EFF6FF;
+      --shadow-soft:0 1px 2px rgba(16,24,40,.06);
+      --shadow-pop:0 8px 28px rgba(16,24,40,.16);
+      --shell:1600px; --gutter:32px;
+      --font-ui:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei","Segoe UI Variable Text","Segoe UI","SF Pro Text","Helvetica Neue",Arial,sans-serif;
+      --font-mono:"Cascadia Mono","SF Mono","JetBrains Mono","Consolas","Menlo",monospace;
+      --ease:cubic-bezier(.2,.8,.2,1);
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    [x-cloak]{display:none!important}
+    body{margin:0;font-family:var(--font-ui);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+    .shell{width:min(var(--shell),calc(100vw - var(--gutter)*2));margin:0 auto}
+    .num{font-variant-numeric:tabular-nums lining-nums;font-family:var(--font-ui)}
+    .mono{font-family:var(--font-mono);font-size:13px}
+    .muted{color:var(--muted)} .xs{font-size:12px} .strong{font-weight:600}
+    :focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:6px}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+    /* ── 顶栏 ── */
+    .app-header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--line-subtle)}
+    .app-header-inner{height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .brand-row{display:flex;align-items:center;gap:10px;min-width:0}
+    .brand-title{font-size:16px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+    .header-actions{display:flex;align-items:center;gap:12px;flex-shrink:0}
+    .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap}
+    .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+    .b-ok{background:var(--success-bg);color:var(--success)} .b-fail{background:var(--danger-bg);color:var(--danger)}
+    .b-warn{background:var(--warn-bg);color:var(--warn)} .b-info{background:var(--info-bg);color:var(--primary)}
+    .b-mute{background:#F1F5F9;color:#475569}
+
+    /* ── 页面骨架 ── */
+    .main{padding:28px 0 56px;display:flex;flex-direction:column;gap:20px}
+    .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    h1.title{margin:0 0 2px;font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1.25}
+    .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line-subtle)}
+    .tab{appearance:none;background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:10px 14px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer;transition:color .18s,border-color .18s;min-height:42px}
+    .tab:hover{color:var(--text)} .tab[aria-selected=true]{color:var(--primary);border-bottom-color:var(--primary)}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-soft)}
+    .card-pad{padding:18px 20px}
+    /* 注意：x-show 会移除内联 display，布局必须走 class，不能写在 style 里 */
+    .stack{display:flex;flex-direction:column;gap:16px}
+
+    /* ── 按钮 / 表单 ── */
+    .btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer;transition:background-color .18s,border-color .18s,box-shadow .18s,opacity .18s;white-space:nowrap}
+    .btn:hover:not(:disabled){background:#F3F4F6;border-color:#B6BEC8}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+    .btn-primary:hover:not(:disabled){background:#0757B8;border-color:#0757B8}
+    .btn-danger{color:var(--danger)} .btn-danger:hover:not(:disabled){background:var(--danger-bg);border-color:#FCA5A5}
+    .btn-sm{min-height:30px;padding:0 10px;font-size:13px;font-weight:600}
+    .btn-icon{width:34px;min-height:34px;padding:0;justify-content:center}
+    .btn-icon svg{display:block}
+    .btn-ghost{border-color:transparent;background:transparent}
+    .spin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .input{min-height:36px;padding:0 12px;border:1px solid var(--border);border-radius:8px;font:inherit;background:#fff;color:var(--text);width:100%}
+    .input:focus{outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)}
+    label.field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:#374151}
+    .check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:500}
+    .check input{width:16px;height:16px;accent-color:var(--primary)}
+
+    /* ── KPI ── */
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+    .kpi{padding:14px 16px;display:flex;flex-direction:column;gap:2px;position:relative}
+    .kpi-label{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+    .kpi-value{font-size:26px;font-weight:700;line-height:1.2;letter-spacing:-.01em}
+    .kpi-sub{font-size:12px;color:var(--muted)}
+    .kpi.alert .kpi-value{color:var(--danger)} .kpi.warn .kpi-value{color:var(--warn)}
+
+    /* ── 调度条 / 进度 ── */
+    .progress-card{padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+    .bar{height:8px;border-radius:999px;background:#E5E7EB;overflow:hidden}
+    .bar>span{display:block;height:100%;border-radius:999px;background:var(--primary);transition:width .4s var(--ease)}
+
+    /* ── 工具栏 ── */
+    .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .toolbar .grow{flex:1 1 220px;min-width:200px;max-width:360px;position:relative}
+    .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff}
+    .seg button{appearance:none;border:0;background:#fff;min-height:34px;padding:0 12px;font:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-right:1px solid var(--line-subtle);transition:background-color .18s,color .18s}
+    .seg button:last-child{border-right:0}
+    .seg button:hover{background:#F3F4F6} .seg button[aria-pressed=true]{background:var(--info-bg);color:var(--primary)}
+
+    /* ── 表格 ── */
+    .table-wrap{overflow-x:auto;border-radius:12px}
+    table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+    thead th{position:sticky;top:0;background:#F8FAFC;text-align:left;font-size:12px;font-weight:700;color:#475569;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;letter-spacing:.02em}
+    thead th.sortable{cursor:pointer;user-select:none} thead th.sortable:hover{color:var(--text)}
+    tbody td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+    tbody tr{transition:background-color .15s} tbody tr:hover{background:#F8FAFC}
+    tbody tr:last-child td{border-bottom:0}
+    td.r,th.r{text-align:right}
+    .email-cell{display:flex;flex-direction:column;gap:1px;min-width:220px}
+    .email-cell .e{font-weight:600;word-break:break-all}
+    .meter{display:flex;flex-direction:column;gap:4px;min-width:150px}
+    .meter-top{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+    .meter .bar{height:6px}
+    .bar.lv-ok>span{background:#16A34A} .bar.lv-mid>span{background:#D97706} .bar.lv-hi>span{background:#DC2626}
+    .empty{padding:48px 24px;text-align:center;color:var(--muted)}
+    .empty strong{display:block;color:var(--text);font-size:15px;margin-bottom:4px}
+    .row-actions{display:flex;gap:6px;justify-content:flex-end}
+    .err-text{color:var(--danger);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+
+    /* ── 导入 ── */
+    .drop{border:2px dashed #C9D7EE;border-radius:14px;background:#fff;padding:40px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;transition:border-color .2s,background .2s;text-align:center}
+    .drop:hover,.drop.over,.drop:focus-visible{border-color:var(--primary);background:var(--info-bg)}
+    .grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .warn-list{margin:0;padding:10px 14px 10px 30px;background:var(--warn-bg);border-radius:8px;color:#78350F;font-size:12px;max-height:140px;overflow:auto}
+
+    /* ── 抽屉 / 弹层 / Toast ── */
+    .scrim{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200}
+    .drawer{position:fixed;top:0;right:0;bottom:0;width:min(720px,100vw);background:var(--surface);z-index:210;box-shadow:var(--shadow-pop);display:flex;flex-direction:column}
+    .drawer-head{padding:16px 20px;border-bottom:1px solid var(--line-subtle);display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .drawer-body{padding:16px 20px;overflow:auto;display:flex;flex-direction:column;gap:16px}
+    pre.json{margin:0;background:#0F172A;color:#E2E8F0;padding:14px;border-radius:10px;font:12px/1.55 var(--font-mono);max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+    .toasts{position:fixed;right:20px;bottom:20px;z-index:300;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+    .toast{pointer-events:auto;min-width:240px;max-width:420px;padding:10px 14px;border-radius:10px;color:#fff;font-weight:500;box-shadow:var(--shadow-pop)}
+    .toast.ok{background:#15803D} .toast.err{background:#B91C1C} .toast.info{background:#1D4ED8}
+    .fade-enter{animation:fadeIn .18s var(--ease)} @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    @media (max-width:900px){:root{--gutter:16px}.kpi-value{font-size:22px}}
+    @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+  </style>
+</head>
+<body x-data="devinApp()" x-init="init()">
+
+<header class="app-header">
+  <div class="shell app-header-inner">
+    <div class="brand-row">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      <span class="brand-title">Cursor Account Manager</span>
+    </div>
+    <div class="header-actions">
+      <nav data-platform-nav data-active="devin"></nav>
+      <span class="badge" :class="serverOk ? 'b-ok' : 'b-fail'" role="status">
+        <span class="dot"></span><span x-text="serverOk ? '服务正常' : '服务异常'"></span>
+      </span>
+    </div>
+  </div>
+</header>
+
+<main class="shell main">
+  <div class="page-head">
+    <div>
+      <h1 class="title">Devin 账号与用量</h1>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Devin 功能">
+    <template x-for="t in tabs" :key="t.key">
+      <button class="tab" role="tab" :aria-selected="view === t.key" @click="go(t.key)">
+        <span x-text="t.label"></span>
+        <span class="badge b-mute" style="margin-left:6px;padding:0 7px" x-show="t.key==='accounts' && accounts.length" x-text="accounts.length"></span>
+      </button>
+    </template>
+  </div>
+
+  <!-- ══════════ 用量监控 ══════════ -->
+  <section x-show="view === 'usage'" x-cloak class="fade-enter stack" aria-label="用量监控">
+
+    <div class="kpis">
+      <div class="card kpi"><span class="kpi-label">账号总数</span>
+        <span class="kpi-value num" x-text="kpis.total ?? 0"></span>
+        <span class="kpi-sub num">启用 <b x-text="kpis.active ?? 0"></b> · 停用 <b x-text="kpis.disabled ?? 0"></b></span></div>
+      <div class="card kpi"><span class="kpi-label">已采集到数据</span>
+        <span class="kpi-value num" x-text="kpis.with_data ?? 0"></span>
+        <span class="kpi-sub num">未采集 <b x-text="kpis.never_collected ?? 0"></b></span></div>
+      <div class="card kpi" :class="(kpis.failed_latest||0) > 0 ? 'alert' : ''"><span class="kpi-label">最近一次失败</span>
+        <span class="kpi-value num" x-text="kpis.failed_latest ?? 0"></span>
+        <span class="kpi-sub">点“重试失败”可只重采这些账号</span></div>
+      <div class="card kpi"><span class="kpi-label">周额度平均已用</span>
+        <span class="kpi-value num" x-text="kpis.avg_weekly_used_pct == null ? '—' : fmtPct(kpis.avg_weekly_used_pct)"></span>
+        <span class="kpi-sub num">空闲(&lt;5%) <b x-text="kpis.idle ?? 0"></b> 个</span></div>
+      <div class="card kpi" :class="(kpis.high_usage||0) > 0 ? 'warn' : ''"><span class="kpi-label">周额度 ≥ 80%</span>
+        <span class="kpi-value num" x-text="kpis.high_usage ?? 0"></span>
+        <span class="kpi-sub">接近耗尽，注意切换</span></div>
+      <div class="card kpi"><span class="kpi-label">套餐分布 / 按需已用</span>
+        <span class="kpi-value" style="font-size:16px;line-height:1.5;min-height:39px;display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px">
+          <template x-for="(n, name) in (kpis.plan_distribution || {})" :key="name"><span class="badge b-info"><span x-text="name"></span>×<span class="num" x-text="n"></span></span></template>
+          <span x-show="!Object.keys(kpis.plan_distribution || {}).length" class="muted">—</span>
+        </span>
+        <span class="kpi-sub num">按需合计 <b x-text="fmtUsd(kpis.on_demand_used_total)"></b></span></div>
+    </div>
+
+    <div class="card progress-card fade-enter" x-show="progress.running" x-cloak role="status" aria-live="polite">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="strong">采集进行中…</span>
+        <span class="num muted"><span x-text="progress.done"></span> / <span x-text="progress.total"></span> · 成功 <span x-text="progress.ok"></span> · 失败 <span x-text="progress.failed"></span></span>
+      </div>
+      <div class="bar" role="progressbar" :aria-valuenow="progress.done" aria-valuemin="0" :aria-valuemax="progress.total"><span :style="`width:${progress.total ? Math.round(progress.done / progress.total * 100) : 0}%`"></span></div>
+      <span class="xs muted" x-show="progress.current && progress.current.length" x-text="'正在处理：' + (progress.current || []).join('、')"></span>
+    </div>
+
+    <div class="toolbar">
+      <div class="grow">
+        <label class="sr-only" for="q">搜索账号</label>
+        <input id="q" class="input" type="search" placeholder="搜索邮箱 / 负责人 / 备注" x-model.debounce.250ms="q" />
+      </div>
+      <div style="flex:1"></div>
+      <button class="btn" @click="exportXlsx()" title="导出当前看板为 Excel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出 Excel</button>
+      <button class="btn" :disabled="progress.running || !(kpis.failed_latest > 0)" @click="collectFailed()">重试失败</button>
+      <button class="btn btn-primary" :disabled="progress.running || !(kpis.active > 0)" @click="collectAll()">
+        <span class="spin" x-show="progress.running" aria-hidden="true"></span>
+        <span x-text="progress.running ? '采集中…' : '立即采集全部'"></span></button>
+    </div>
+
+    <div class="card table-wrap">
+      <table>
+        <thead><tr>
+          <th class="sortable" @click="sortBy('email')">账号 <span aria-hidden="true" x-text="sortMark('email')"></span></th>
+          <th class="sortable" @click="sortBy('plan_name')">套餐 <span aria-hidden="true" x-text="sortMark('plan_name')"></span></th>
+          <th class="sortable" @click="sortBy('cycle_end')">账期 <span aria-hidden="true" x-text="sortMark('cycle_end')"></span></th>
+          <th class="sortable" @click="sortBy('weekly_used_pct')">周额度 <span aria-hidden="true" x-text="sortMark('weekly_used_pct')"></span></th>
+          <th>日额度</th>
+          <th class="r sortable" @click="sortBy('on_demand_used_usd')">按需已用 <span aria-hidden="true" x-text="sortMark('on_demand_used_usd')"></span></th>
+          <th class="r">按需余额</th>
+          <th class="r">消息上限</th>
+          <th class="sortable" @click="sortBy('data_collected_at')">数据时间 <span aria-hidden="true" x-text="sortMark('data_collected_at')"></span></th>
+          <th>采集状态</th>
+          <th class="r">操作</th>
+        </tr></thead>
+        <tbody>
+          <template x-for="r in visibleRows" :key="r.email">
+            <tr>
+              <td><div class="email-cell"><span class="e" x-text="r.email"></span>
+                <span class="xs muted" x-text="[r.owner_email, r.note].filter(Boolean).join(' · ')"></span></div></td>
+              <td>
+                <template x-if="r.plan_name"><div><span class="badge b-info" x-text="r.plan_name"></span>
+                  <div class="xs muted num" x-show="r.plan_price_usd != null" x-text="fmtUsd(r.plan_price_usd, 0) + '/' + (r.billing_period === 'year' ? '年' : '月')"></div></div></template>
+                <span class="muted" x-show="!r.plan_name">—</span>
+              </td>
+              <td class="num">
+                <template x-if="r.cycle_end"><div>
+                  <div class="xs" x-text="r.cycle_start.slice(5) + ' → ' + r.cycle_end.slice(5)"></div>
+                  <div class="xs" :class="daysLeft(r.cycle_end) <= 3 ? 'err-text' : 'muted'" x-text="cycleLeftText(r.cycle_end)"></div></div></template>
+                <span class="muted" x-show="!r.cycle_end">—</span>
+              </td>
+              <td>
+                <template x-if="r.weekly_used_pct != null">
+                  <div class="meter">
+                    <div class="meter-top num"><span x-text="fmtPct(r.weekly_used_pct)"></span><span class="xs muted" x-text="resetText(r.weekly_reset_at)"></span></div>
+                    <div class="bar" :class="levelClass(r.weekly_used_pct)" role="progressbar" :aria-valuenow="r.weekly_used_pct" aria-valuemin="0" aria-valuemax="100" :aria-label="'周额度已用 ' + fmtPct(r.weekly_used_pct)"><span :style="`width:${Math.min(100, r.weekly_used_pct)}%`"></span></div>
+                  </div>
+                </template>
+                <span class="muted" x-show="r.weekly_used_pct == null">—</span>
+              </td>
+              <td class="num"><span x-show="r.daily_used_pct != null" x-text="fmtPct(r.daily_used_pct)"></span><span class="muted" x-show="r.daily_used_pct == null">—</span></td>
+              <td class="r num" x-text="fmtUsd(r.on_demand_used_usd)"></td>
+              <td class="r num" x-text="fmtUsd(r.on_demand_balance_usd)"></td>
+              <td class="r num" x-text="fmtUsd(r.message_limit_usd, 0)"></td>
+              <td class="num xs" x-text="r.data_collected_at ? fmtTime(r.data_collected_at) : '—'"></td>
+              <td>
+                <template x-if="r.status !== 'active'"><span class="badge b-mute">已停用</span></template>
+                <template x-if="r.status === 'active' && r.last_attempt_at == null"><span class="badge b-mute">未采集</span></template>
+                <template x-if="r.status === 'active' && r.last_attempt_ok === true"><span class="badge b-ok"><span class="dot"></span>成功</span></template>
+                <template x-if="r.status === 'active' && r.last_attempt_ok === false">
+                  <div><span class="badge b-fail"><span class="dot"></span>失败</span>
+                    <span class="err-text" :title="r.last_error_message" x-text="errLabel(r.last_error_code)"></span></div></template>
+              </td>
+              <td><div class="row-actions">
+                <button class="btn btn-sm" :disabled="progress.running || r.status !== 'active'" @click="collectOne(r.email)" :aria-label="'立即采集 ' + r.email">采集</button>
+                <button class="btn btn-sm" @click="openDetail(r)" :aria-label="'查看 ' + r.email + ' 详情'">详情</button>
+              </div></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="empty" x-show="!loading && !visibleRows.length" x-cloak>
+        <strong x-text="rows.length ? '没有符合筛选条件的账号' : '还没有 Devin 账号'"></strong>
+        <span x-show="!rows.length">到“导入账号”页上传 CSV / Excel，导入后点“立即采集全部”。</span>
+        <div style="margin-top:14px" x-show="!rows.length"><button class="btn btn-primary" @click="go('import')">去导入账号</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 账号管理 ══════════ -->
+  <section x-show="view === 'accounts'" x-cloak class="fade-enter stack" aria-label="账号管理">
+    <div class="toolbar">
+      <div class="grow"><label class="sr-only" for="aq">搜索账号</label><input id="aq" class="input" type="search" placeholder="搜索邮箱 / 负责人 / 备注" x-model.debounce.250ms="aq" /></div>
+      <div style="flex:1"></div>
+      <button class="btn btn-primary" @click="go('import')">导入账号</button>
+    </div>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>邮箱</th><th>IMAP</th><th>负责人</th><th>备注</th><th>状态</th><th class="r">连续失败</th><th>最近登录</th><th class="r">操作</th></tr></thead>
+        <tbody>
+          <template x-for="a in filteredAccounts" :key="a.email">
+            <tr>
+              <td class="strong" style="word-break:break-all" x-text="a.email"></td>
+              <td class="mono muted" x-text="a.imap_host + ':' + a.imap_port"></td>
+              <td x-text="a.owner_email || '—'"></td>
+              <td style="min-width:200px"><input class="input" style="min-height:30px" :value="a.note" @change="saveNote(a, $event.target.value)" :aria-label="'备注 ' + a.email" placeholder="备注" /></td>
+              <td><span class="badge" :class="a.status === 'active' ? 'b-ok' : 'b-mute'" x-text="a.status === 'active' ? '启用' : '停用'"></span></td>
+              <td class="r num" :style="a.consecutive_failures >= 3 ? 'color:var(--danger);font-weight:700' : ''" x-text="a.consecutive_failures"></td>
+              <td class="num xs" x-text="a.last_login_at ? fmtTime(a.last_login_at) : '—'"></td>
+              <td><div class="row-actions">
+                <button class="btn btn-icon" @click="toggleStatus(a)" :title="a.status === 'active' ? '停用' : '启用'" :aria-label="(a.status === 'active' ? '停用 ' : '启用 ') + a.email">
+                  <svg x-show="a.status === 'active'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>
+                  <svg x-show="a.status !== 'active'" x-cloak width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                </button>
+                <button class="btn btn-icon btn-danger" @click="removeAccount(a)" title="删除" :aria-label="'删除 ' + a.email">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
+              </div></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="empty" x-show="!filteredAccounts.length" x-cloak><strong>暂无账号</strong>点击右上角“导入账号”。</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 账期与发票 ══════════ -->
+  <section x-show="view === 'billing'" x-cloak class="fade-enter stack" aria-label="账期与发票">
+    <div class="card card-pad" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+        <div>
+          <div class="strong" style="font-size:16px">发票导出</div>
+          <div class="muted xs">实时登录 Devin 读取发票页，<b>直接导出 Excel</b>（含发票链接，能拿到时附带 PDF），不写入数据库。</div>
+        </div>
+        <button class="btn btn-primary" :disabled="invProgress.running || progress.running || !(kpis.active > 0)" @click="exportInvoices([])">
+          <span class="spin" x-show="invProgress.running" aria-hidden="true"></span>
+          <span x-text="invProgress.running ? '导出中…' : '导出全部账号发票'"></span></button>
+      </div>
+      <div class="progress-card fade-enter" x-show="invProgress.running" x-cloak role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <span class="strong">正在读取发票…</span>
+          <span class="num muted"><span x-text="invProgress.done"></span> / <span x-text="invProgress.total"></span> · 成功 <span x-text="invProgress.ok"></span> · 失败 <span x-text="invProgress.failed"></span></span>
+        </div>
+        <div class="bar" role="progressbar" :aria-valuenow="invProgress.done" aria-valuemin="0" :aria-valuemax="invProgress.total"><span :style="`width:${invProgress.total ? Math.round(invProgress.done / invProgress.total * 100) : 0}%`"></span></div>
+        <span class="xs muted" x-show="invProgress.current && invProgress.current.length" x-text="'正在处理：' + (invProgress.current || []).join('、')"></span>
+      </div>
+      <div class="table-wrap" style="border:1px solid var(--line-subtle)">
+        <table>
+          <thead><tr><th>导出文件</th><th>生成时间</th><th class="r">大小</th><th class="r">操作</th></tr></thead>
+          <tbody><template x-for="f in invFiles" :key="f.name"><tr>
+            <td class="mono" x-text="f.name"></td><td class="num xs" x-text="fmtTime(f.modified_at)"></td>
+            <td class="r num xs" x-text="(f.size / 1024).toFixed(1) + ' KB'"></td>
+            <td class="r"><a class="btn btn-sm" :href="'/api/devin/invoices/files/' + encodeURIComponent(f.name)">下载</a></td></tr></template></tbody>
+        </table>
+        <div class="empty" x-show="!invFiles.length" x-cloak><strong>还没有导出过发票</strong>点击右上角“导出全部账号发票”，或在账号详情里导出单个账号。</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="grow"><label class="sr-only" for="cq">搜索账期</label><input id="cq" class="input" type="search" placeholder="搜索邮箱" x-model.debounce.250ms="cq" /></div>
+      <div class="seg" role="group" aria-label="账期筛选">
+        <template x-for="f in cycleFilters" :key="f.key">
+          <button type="button" :aria-pressed="cycleFilter === f.key" @click="cycleFilter = f.key" x-text="f.label + ' (' + cycles.filter(c => f.key === 'all' || c.state === f.key).length + ')'"></button>
+        </template>
+      </div>
+      <div style="flex:1"></div>
+      <span class="muted xs">账期随每次成功采集自动入库；周期结束后最后一次采样即该账期最终用量。</span>
+      <button class="btn" @click="exportXlsx()" title="导出 Excel（含“账期”工作表）">导出 Excel</button>
+    </div>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>账号</th><th>账期</th><th>状态</th><th>套餐</th><th>周额度峰值</th><th class="r">按需已用峰值</th><th class="r">按需余额</th><th class="r">采样</th><th>最近采集</th></tr></thead>
+        <tbody>
+          <template x-for="c in visibleCycles" :key="c.email + c.cycle_end">
+            <tr>
+              <td class="strong" style="word-break:break-all" x-text="c.email"></td>
+              <td class="num xs" x-text="c.cycle_start + ' → ' + c.cycle_end"></td>
+              <td><span class="badge" :class="c.state === 'current' ? 'b-ok' : 'b-mute'" x-text="c.state === 'current' ? ('进行中 · ' + cycleLeftText(c.cycle_end)) : '已结束'"></span></td>
+              <td><span class="badge b-info" x-show="c.plan_name" x-text="c.plan_name"></span>
+                <span class="xs muted num" x-show="c.plan_price_usd != null" x-text="fmtUsd(c.plan_price_usd, 0) + '/' + (c.billing_period === 'year' ? '年' : '月')"></span></td>
+              <td>
+                <template x-if="c.peak_weekly_used_pct != null"><div class="meter">
+                  <div class="meter-top num"><span x-text="fmtPct(c.peak_weekly_used_pct)"></span></div>
+                  <div class="bar" :class="levelClass(c.peak_weekly_used_pct)"><span :style="`width:${Math.min(100, c.peak_weekly_used_pct)}%`"></span></div></div></template>
+                <span class="muted" x-show="c.peak_weekly_used_pct == null">—</span>
+              </td>
+              <td class="r num" x-text="fmtUsd(c.peak_on_demand_used_usd)"></td>
+              <td class="r num" x-text="fmtUsd(c.on_demand_balance_usd)"></td>
+              <td class="r num" x-text="c.samples"></td>
+              <td class="num xs" x-text="fmtTime(c.last_seen_at)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="empty" x-show="!visibleCycles.length" x-cloak><strong>还没有账期数据</strong>采集成功并识别到续费日期后，会自动生成账期记录。</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 导入账号 ══════════ -->
+  <section x-show="view === 'import'" x-cloak class="fade-enter stack" style="max-width:1100px" aria-label="导入账号">
+    <div class="card card-pad" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+        <div><div class="strong" style="font-size:16px">批量导入 Devin 账号</div>
+          <div class="muted xs">必填：email、imap_password；可选：imap_host、imap_port、owner_email、note。Devin 账号库与 Cursor 账号库完全独立。</div></div>
+        <a class="btn" href="/api/devin/accounts/template.xlsx">下载 Excel 模板</a>
+      </div>
+      <div class="drop" :class="dragOver && 'over'" tabindex="0" role="button" aria-label="选择或拖入 CSV / Excel 文件"
+           @click="$refs.file.click()" @keydown.enter.prevent="$refs.file.click()" @keydown.space.prevent="$refs.file.click()"
+           @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="dragOver = false; onFile($event.dataTransfer.files[0])">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div class="strong">拖入文件，或点击选择</div>
+        <div class="muted xs">支持 .csv / .xlsx，UTF-8 编码</div>
+        <input x-ref="file" type="file" accept=".csv,.txt,.xlsx,.xls" class="sr-only" @change="onFile($event.target.files[0]); $event.target.value = ''" />
+      </div>
+
+      <template x-if="preview.length">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+            <div class="strong">解析到 <span class="num" x-text="preview.length"></span> 个账号
+              <span class="muted xs num">（已存在 <span x-text="preview.filter(p => p.exists).length"></span> 个）</span></div>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+              <label class="check"><input type="checkbox" x-model="overwrite" /> 覆盖已存在账号（更新授权码/负责人）</label>
+              <button class="btn" @click="preview = []; warnings = []">清空</button>
+              <button class="btn btn-primary" :disabled="saving" @click="saveImport()"><span class="spin" x-show="saving" aria-hidden="true"></span>确认导入</button>
+            </div>
+          </div>
+          <ul class="warn-list" x-show="warnings.length"><template x-for="w in warnings" :key="w"><li x-text="w"></li></template></ul>
+          <div class="table-wrap" style="border:1px solid var(--line-subtle);max-height:340px;overflow:auto">
+            <table><thead><tr><th>邮箱</th><th>IMAP</th><th>负责人</th><th>备注</th><th>库中</th></tr></thead>
+              <tbody><template x-for="p in preview" :key="p.email"><tr>
+                <td class="strong" x-text="p.email"></td><td class="mono muted" x-text="(p.imap_host || '默认') + ':' + (p.imap_port || '默认')"></td>
+                <td x-text="p.owner_email || '—'"></td><td x-text="p.note || '—'"></td>
+                <td><span class="badge" :class="p.exists ? 'b-warn' : 'b-ok'" x-text="p.exists ? (overwrite ? '将覆盖' : '将跳过') : '新增'"></span></td></tr></template></tbody></table>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="card card-pad" style="display:flex;flex-direction:column;gap:12px">
+      <div class="strong" style="font-size:16px">手动添加单个账号</div>
+      <form class="grid-2" @submit.prevent="addOne()">
+        <label class="field">邮箱 *<input class="input" type="email" required x-model="one.email" autocomplete="off" placeholder="cursor456@eclicktech.com.cn" /></label>
+        <label class="field">IMAP 授权码 *<input class="input" type="password" required x-model="one.imap_password" autocomplete="new-password" /></label>
+        <label class="field">负责人邮箱<input class="input" type="email" x-model="one.owner_email" autocomplete="off" /></label>
+        <label class="field">备注<input class="input" x-model="one.note" autocomplete="off" /></label>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" type="submit" :disabled="saving">添加 / 更新</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ══════════ 采集记录 ══════════ -->
+  <section x-show="view === 'runs'" x-cloak class="fade-enter stack" aria-label="采集记录">
+    <div class="toolbar">
+      <span class="muted">每次批量采集（定时 / 手动）的结果汇总，失败原因与飞书播报口径一致。</span>
+      <div style="flex:1"></div>
+      <button class="btn" @click="loadRuns()">刷新</button>
+      <button class="btn" :disabled="!runs.length" @click="notifyLast()" title="把最近一次批次再发一遍飞书卡片，用于验证通知">重发最近一次飞书通知</button>
+    </div>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>开始时间</th><th>触发</th><th>状态</th><th class="r">总数</th><th class="r">成功</th><th class="r">失败</th><th class="r">跳过</th><th>耗时</th><th>失败原因</th><th></th></tr></thead>
+        <template x-for="run in runs" :key="run.run_id">
+            <tbody>
+              <tr>
+                <td class="num" x-text="fmtTime(run.started_at)"></td>
+                <td x-text="run.trigger === 'scheduler' ? '定时' : '手动'"></td>
+                <td><span class="badge" :class="{success:'b-ok',partial_failed:'b-warn',failed:'b-fail',running:'b-info',interrupted:'b-mute'}[run.status] || 'b-mute'" x-text="{success:'成功',partial_failed:'部分失败',failed:'失败',running:'执行中',interrupted:'已中断'}[run.status] || run.status"></span></td>
+                <td class="r num" x-text="run.total"></td><td class="r num" x-text="run.success"></td>
+                <td class="r num" :style="run.failed ? 'color:var(--danger);font-weight:700' : ''" x-text="run.failed"></td><td class="r num" x-text="run.skipped"></td>
+                <td class="num" x-text="run.finished_at ? durationText(run.finished_at - run.started_at) : '—'"></td>
+                <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <template x-for="(n, code) in run.failure_breakdown" :key="code"><span class="badge b-fail"><span x-text="errLabel(code)"></span> <span class="num" x-text="n"></span></span></template>
+                  <span class="muted" x-show="!Object.keys(run.failure_breakdown || {}).length">—</span></div></td>
+                <td class="r"><button class="btn btn-sm btn-ghost" x-show="(run.failures_json || []).length" @click="expandedRun = expandedRun === run.run_id ? '' : run.run_id" x-text="expandedRun === run.run_id ? '收起' : '失败明细'"></button></td>
+              </tr>
+              <tr x-show="expandedRun === run.run_id" x-cloak><td colspan="10" style="background:#FAFBFC">
+                <div style="display:flex;flex-direction:column;gap:6px;padding:4px 0">
+                  <template x-for="f in (run.failures_json || [])" :key="f.email"><div class="xs"><b x-text="f.email"></b> · <span style="color:var(--danger)" x-text="errLabel(f.code)"></span> <span class="muted" x-text="f.message"></span></div></template>
+                </div></td></tr>
+            </tbody>
+        </template>
+      </table>
+      <div class="empty" x-show="!runs.length" x-cloak><strong>还没有采集记录</strong>导入账号后点击“立即采集全部”，或等待凌晨定时任务。</div>
+    </div>
+  </section>
+</main>
+
+<!-- ══════════ 详情抽屉 ══════════ -->
+<div class="scrim" x-show="detail" x-cloak @click="detail = null" aria-hidden="true"></div>
+<aside class="drawer" x-show="detail" x-cloak role="dialog" aria-modal="true" :aria-label="'账号详情 ' + (detail?.email || '')" @keydown.escape.window="detail = null">
+  <div class="drawer-head">
+    <div><div class="strong" style="font-size:16px;word-break:break-all" x-text="detail?.email"></div>
+      <div class="muted xs" x-text="[detail?.owner_email, detail?.note].filter(Boolean).join(' · ')"></div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" :disabled="invProgress.running || progress.running || detail?.status !== 'active'" @click="exportInvoices([detail.email])" title="实时读取该账号发票并导出 Excel">导出发票</button>
+      <button class="btn btn-sm" @click="detail = null" aria-label="关闭详情">关闭</button>
+    </div>
+  </div>
+  <div class="drawer-body">
+    <div>
+      <div class="strong" style="margin-bottom:8px">最近采集记录</div>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>时间</th><th>结果</th><th>套餐</th><th class="r">周额度</th><th class="r">按需已用</th><th>来源</th><th></th></tr></thead>
+        <tbody><template x-for="h in history" :key="h.id"><tr>
+          <td class="num xs" x-text="fmtTime(h.collected_at)"></td>
+          <td><span class="badge" :class="h.ok ? 'b-ok' : 'b-fail'" x-text="h.ok ? '成功' : (h.error_label || '失败')"></span></td>
+          <td x-text="h.plan_name || '—'"></td><td class="r num" x-text="h.weekly_used_pct == null ? '—' : fmtPct(h.weekly_used_pct)"></td>
+          <td class="r num" x-text="fmtUsd(h.on_demand_used_usd)"></td><td class="xs muted" x-text="h.source || '—'"></td>
+          <td class="r"><button class="btn btn-sm btn-ghost" @click="openRaw(h.id)">原始数据</button></td></tr></template></tbody></table>
+        <div class="empty" x-show="!history.length" x-cloak>暂无记录</div></div>
+    </div>
+    <div x-show="rawText" x-cloak>
+      <div class="strong" style="margin-bottom:8px">原始数据（API 响应 + 页面文本，便于核对解析）</div>
+      <div class="xs" style="color:var(--danger);margin-bottom:6px" x-show="rawError" x-text="rawError"></div>
+      <pre class="json" x-text="rawText"></pre>
+    </div>
+  </div>
+</aside>
+
+<div class="toasts" aria-live="polite" aria-atomic="false">
+  <template x-for="t in toasts" :key="t.id"><div class="toast fade-enter" :class="t.type" x-text="t.msg"></div></template>
+</div>
+
+<script src="/static/platforms.js"></script>
+<script>
+function devinApp() {
+  return {
+    view: 'usage', tabs: [
+      { key: 'usage', label: '用量监控' }, { key: 'accounts', label: '账号管理' },
+      { key: 'billing', label: '账期与发票' }, { key: 'import', label: '导入账号' }, { key: 'runs', label: '采集记录' },
+    ],
+    serverOk: true, loading: true,
+    rows: [], kpis: {}, schedule: {}, progress: { running: false, total: 0, done: 0, ok: 0, failed: 0, current: [] },
+    lastRun: null, errorLabels: {},
+    q: '', filter: 'all', sortKey: 'email', sortDir: 1,
+    accounts: [], aq: '',
+    dragOver: false, preview: [], warnings: [], overwrite: false, saving: false,
+    one: { email: '', imap_password: '', owner_email: '', note: '' },
+    runs: [], expandedRun: '',
+    cycles: [], cq: '', cycleFilter: 'all',
+    cycleFilters: [{ key: 'all', label: '全部' }, { key: 'current', label: '进行中' }, { key: 'ended', label: '已结束' }],
+    invProgress: { running: false, total: 0, done: 0, ok: 0, failed: 0, current: [] }, invFiles: [], _invPoll: null,
+    detail: null, history: [], rawText: '', rawError: '',
+    toasts: [], _poll: null,
+
+    async init() {
+      this.view = (location.hash || '#usage').slice(1);
+      if (!this.tabs.some(t => t.key === this.view)) this.view = 'usage';
+      window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (this.tabs.some(t => t.key === v)) { this.view = v; this.onViewChange(); } });
+      await this.refresh();
+      this.onViewChange();
+    },
+    go(key) { this.view = key; history.replaceState(null, '', '#' + key); this.onViewChange(); },
+    onViewChange() {
+      if (this.view === 'accounts') this.loadAccounts();
+      if (this.view === 'runs') this.loadRuns();
+      if (this.view === 'billing') { this.loadCycles(); this.loadInvoices(); }
+    },
+
+    // ── 请求封装 ──
+    async api(url, opts = {}) {
+      let res;
+      try { res = await fetch(url, opts); this.serverOk = true; }
+      catch (e) { this.serverOk = false; throw new Error('无法连接服务'); }
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+        const err = new Error(msg); err.status = res.status; throw err;
+      }
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('json') ? res.json() : res;
+    },
+    toast(msg, type = 'ok') {
+      const id = Date.now() + Math.random();
+      this.toasts.push({ id, msg, type });
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, type === 'err' ? 6000 : 3500);
+    },
+
+    // ── 数据 ──
+    async refresh() {
+      try {
+        const d = await this.api('/api/devin/dashboard');
+        this.rows = d.rows; this.kpis = d.kpis; this.schedule = d.schedule; this.lastRun = d.last_run;
+        this.progress = d.progress; this.errorLabels = d.error_labels || {};
+      } catch (e) { this.toast(e.message, 'err'); }
+      finally { this.loading = false; }
+      this.syncPolling();
+    },
+    syncPolling() {
+      if (this.progress.running && !this._poll) {
+        this._poll = setInterval(async () => {
+          try {
+            const p = await this.api('/api/devin/progress'); this.progress = p;
+            if (!p.running) { clearInterval(this._poll); this._poll = null; await this.refresh(); this.toast('本轮采集已完成'); }
+          } catch (_) {}
+        }, 2500);
+      }
+    },
+    async loadAccounts() { try { this.accounts = (await this.api('/api/devin/accounts')).accounts; } catch (e) { this.toast(e.message, 'err'); } },
+    async loadCycles() { try { this.cycles = (await this.api('/api/devin/cycles?limit=1000')).cycles; } catch (e) { this.toast(e.message, 'err'); } },
+    get visibleCycles() {
+      const kw = this.cq.trim().toLowerCase();
+      return this.cycles.filter(c => (this.cycleFilter === 'all' || c.state === this.cycleFilter) && (!kw || c.email.toLowerCase().includes(kw)));
+    },
+    async loadInvoices() {
+      try {
+        const d = await this.api('/api/devin/invoices/progress');
+        const wasRunning = this.invProgress.running;
+        this.invProgress = d.progress; this.invFiles = d.files;
+        if (d.progress.running) this.syncInvPolling();
+        else if (wasRunning) this.toast(d.progress.last_error ? '发票导出失败：' + d.progress.last_error : '发票导出完成，可在下方下载', d.progress.last_error ? 'err' : 'ok');
+      } catch (e) { this.toast(e.message, 'err'); }
+    },
+    syncInvPolling() {
+      if (this._invPoll) return;
+      this._invPoll = setInterval(async () => {
+        await this.loadInvoices();
+        if (!this.invProgress.running) { clearInterval(this._invPoll); this._invPoll = null; }
+      }, 2500);
+    },
+    async exportInvoices(emails) {
+      try {
+        await this.api('/api/devin/invoices/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }) });
+        this.toast(emails.length ? '已开始导出 ' + emails[0] + ' 的发票' : '已开始导出全部账号发票', 'info');
+        this.invProgress = { ...this.invProgress, running: true, done: 0, ok: 0, failed: 0 };
+        if (this.view !== 'billing') this.go('billing');
+        this.syncInvPolling();
+      } catch (e) { this.toast(e.message, 'err'); }
+    },
+    daysLeft(end) { if (!end) return null; const d = new Date(end + 'T00:00:00'); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 86400000); },
+    cycleLeftText(end) { const n = this.daysLeft(end); return n == null ? '' : n < 0 ? '已过期 ' + (-n) + ' 天' : n === 0 ? '今天续费' : '剩 ' + n + ' 天'; },
+    async loadRuns() { try { this.runs = (await this.api('/api/devin/runs?limit=30')).runs; } catch (e) { this.toast(e.message, 'err'); } },
+
+    // ── 采集 ──
+    async startCollect(url, body, okMsg) {
+      try {
+        await this.api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+        this.toast(okMsg, 'info');
+        this.progress = { ...this.progress, running: true, done: 0, ok: 0, failed: 0, total: this.progress.total || 0 };
+        setTimeout(() => this.refresh(), 800);
+      } catch (e) { this.toast(e.message, 'err'); }
+    },
+    collectAll() { return this.startCollect('/api/devin/collect', {}, '已开始采集全部启用账号'); },
+    collectFailed() { return this.startCollect('/api/devin/collect-failed', {}, '已开始重试失败账号'); },
+    collectOne(email) { return this.startCollect('/api/devin/collect', { emails: [email] }, '已开始采集 ' + email); },
+    exportXlsx() { window.location.href = '/api/devin/export.xlsx'; },
+
+    // ── 看板视图 ──
+    rowState(r) {
+      if (r.status !== 'active') return 'off';
+      if (r.last_attempt_at == null) return 'never';
+      return r.last_attempt_ok ? 'ok' : 'fail';
+    },
+    matchFilter(r, key) {
+      if (key === 'all') return true;
+      if (key === 'high') return (r.weekly_used_pct ?? -1) >= 80;
+      return this.rowState(r) === key;
+    },
+    get visibleRows() {
+      const kw = this.q.trim().toLowerCase();
+      let list = this.rows.filter(r => this.matchFilter(r, this.filter) &&
+        (!kw || [r.email, r.owner_email, r.note].some(x => (x || '').toLowerCase().includes(kw))));
+      const k = this.sortKey, dir = this.sortDir;
+      return list.sort((a, b) => {
+        const x = a[k], y = b[k];
+        if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+        return (typeof x === 'string' ? x.localeCompare(y) : x - y) * dir;
+      });
+    },
+    sortBy(k) { if (this.sortKey === k) this.sortDir *= -1; else { this.sortKey = k; this.sortDir = k === 'email' || k === 'plan_name' ? 1 : -1; } },
+    sortMark(k) { return this.sortKey === k ? (this.sortDir === 1 ? '▲' : '▼') : ''; },
+    get filteredAccounts() {
+      const kw = this.aq.trim().toLowerCase();
+      return this.accounts.filter(a => !kw || [a.email, a.owner_email, a.note].some(x => (x || '').toLowerCase().includes(kw)));
+    },
+
+    // ── 格式化 ──
+    fmtPct(v) { return v == null ? '—' : (Math.round(v * 10) / 10) + '%'; },
+    fmtUsd(v, d = 2) { return v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); },
+    fmtTime(ts) { return ts ? new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; },
+    resetText(ts) {
+      if (!ts) return '';
+      const diff = ts - Math.floor(Date.now() / 1000);
+      if (diff <= 0) return '即将重置';
+      const d = Math.floor(diff / 86400), h = Math.floor((diff % 86400) / 3600), m = Math.floor((diff % 3600) / 60);
+      return (d ? d + '天' : '') + (h ? h + '小时' : (!d ? m + '分钟' : '')) + '后重置';
+    },
+    durationText(sec) { sec = Math.max(0, sec | 0); if (sec < 60) return sec + ' 秒'; const m = Math.floor(sec / 60); return m < 60 ? m + ' 分 ' + (sec % 60) + ' 秒' : Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分'; },
+    levelClass(p) { return p >= 80 ? 'lv-hi' : p >= 50 ? 'lv-mid' : 'lv-ok'; },
+    errLabel(code) { return this.errorLabels[code] || code || '未知错误'; },
+
+    // ── 详情 ──
+    async openDetail(r) {
+      this.detail = r; this.history = []; this.rawText = ''; this.rawError = '';
+      try { this.history = (await this.api('/api/devin/history/' + encodeURIComponent(r.email))).snapshots; } catch (e) { this.toast(e.message, 'err'); }
+    },
+    async openRaw(id) {
+      try {
+        const s = await this.api('/api/devin/snapshots/' + id);
+        this.rawError = s.ok ? '' : ('失败原因：' + (s.error_message || s.error_code));
+        this.rawText = JSON.stringify(s.raw && Object.keys(s.raw).length ? s.raw : { note: '该次采集没有保存原始数据' }, null, 2);
+      } catch (e) { this.toast(e.message, 'err'); }
+    },
+
+    // ── 账号管理 ──
+    async toggleStatus(a) {
+      const next = a.status === 'active' ? 'disabled' : 'active';
+      try { await this.api('/api/devin/accounts/' + encodeURIComponent(a.email) + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
+        a.status = next; this.toast((next === 'active' ? '已启用 ' : '已停用 ') + a.email); this.refresh(); } catch (e) { this.toast(e.message, 'err'); }
+    },
+    async saveNote(a, note) {
+      try { await this.api('/api/devin/accounts/' + encodeURIComponent(a.email) + '/note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) }); a.note = note; this.toast('备注已保存'); } catch (e) { this.toast(e.message, 'err'); }
+    },
+    async removeAccount(a) {
+      if (!confirm('确定从 Devin 账号库删除 ' + a.email + '？历史采集快照会保留。')) return;
+      try { await this.api('/api/devin/accounts/' + encodeURIComponent(a.email), { method: 'DELETE' });
+        this.accounts = this.accounts.filter(x => x.email !== a.email); this.toast('已删除 ' + a.email); this.refresh(); } catch (e) { this.toast(e.message, 'err'); }
+    },
+
+    // ── 导入 ──
+    async onFile(file) {
+      if (!file) return;
+      const fd = new FormData(); fd.append('file', file);
+      try {
+        const d = await this.api('/api/devin/upload', { method: 'POST', body: fd });
+        this.preview = d.accounts; this.warnings = d.warnings || [];
+        this.toast('解析到 ' + d.count + ' 个账号' + (d.duplicates_in_file ? '（文件内重复 ' + d.duplicates_in_file + ' 条已合并）' : ''), 'info');
+      } catch (e) { this.preview = []; this.toast(e.message, 'err'); }
+    },
+    async saveImport() {
+      this.saving = true;
+      try {
+        const d = await this.api('/api/devin/accounts/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accounts: this.preview, overwrite: this.overwrite, source: 'upload' }) });
+        this.toast('导入完成：保存 ' + d.saved + '，跳过 ' + d.skipped);
+        this.preview = []; this.warnings = []; await this.refresh(); this.go('accounts');
+      } catch (e) { this.toast(e.message, 'err'); } finally { this.saving = false; }
+    },
+    async addOne() {
+      this.saving = true;
+      try {
+        const d = await this.api('/api/devin/accounts/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accounts: [this.one], overwrite: true, source: 'manual' }) });
+        this.toast('已保存 ' + d.saved + ' 个账号'); this.one = { email: '', imap_password: '', owner_email: '', note: '' }; await this.refresh();
+      } catch (e) { this.toast(e.message, 'err'); } finally { this.saving = false; }
+    },
+    async notifyLast() {
+      try { const d = await this.api('/api/devin/notify-last-run', { method: 'POST' });
+        this.toast(d.alert_enabled ? '已发送飞书通知' : '告警未启用（ALERT_BOT_ENABLE=false），仅写入日志', d.alert_enabled ? 'ok' : 'info'); } catch (e) { this.toast(e.message, 'err'); }
+    },
+  };
+}
+</script>
+</body>
+</html>

@@ -64,6 +64,9 @@ def _field_label(key: str) -> str:
         "date": "触发日期",
         "status": "任务状态",
         "stage": "失败阶段",
+        "platform": "平台",
+        "account_total": "账号总数",
+        "duration": "耗时",
         "account_success": "成功账号",
         "account_failed": "失败账号",
         "account_skipped": "跳过账号",
@@ -88,6 +91,8 @@ def _format_card_value(key: str, value: str) -> str:
             "replay": "自定义补偿",
             "daily": "每日同步",
             "usage_periodic": "用量日常采集",
+            "devin_daily": "Devin 每日采集",
+            "devin_manual": "Devin 手动采集",
         }.get(value, value)
     if key == "status":
         return {
@@ -113,8 +118,9 @@ def _build_feishu_card(title: str, content: str, *, level: str) -> dict:
     level_text = _level_label(level)
     sent_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     fields, details = _parse_kv_content(content)
-    basic_keys = ("trigger_type", "biz_date", "date", "run_id", "status", "stage")
+    basic_keys = ("platform", "trigger_type", "biz_date", "date", "run_id", "status", "stage")
     metric_keys = (
+        "account_total",
         "account_success",
         "account_failed",
         "account_skipped",
@@ -123,6 +129,7 @@ def _build_feishu_card(title: str, content: str, *, level: str) -> dict:
         "on_demand_open",
         "on_demand_historical",
         "ods_rows",
+        "duration",
     )
     detail_keys = ("reason", "error", "errors")
 
