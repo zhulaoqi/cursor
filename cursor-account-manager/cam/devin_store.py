@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .config import SETTINGS
-from .devin_parser import cycle_start_from_end
+from .devin_parser import cycle_start_from_end, missing_fields
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS devin_accounts (
@@ -434,6 +434,7 @@ class DevinStore:
                 cycle_start_from_end(row["cycle_end"], row.get("billing_period") or "month")
                 if row["cycle_end"] else ""
             )
+            row["missing"] = missing_fields(row) if ok else []
             rows.append(row)
         return rows
 

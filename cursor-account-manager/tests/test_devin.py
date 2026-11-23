@@ -592,3 +592,96 @@ def test_api_cycles_and_invoice_files(client, store, tmp_path, monkeypatch):
     assert client.get("/api/devin/invoices/files/devin-invoices-20261123-010203.xlsx").status_code == 200
     assert client.get("/api/devin/invoices/files/secret.xlsx").status_code == 404
     assert client.get("/api/devin/invoices/files/..%2Fsecret.xlsx").status_code == 404
+
+
+# ─── 额度解析 / 数据完整性 ───────────────────────────────────────
+
+REAL_USAGE_TEXT = """Usage & limits
+Overview
+Usage history
+Are you an early-stage startup?
+Devin for Startups gives eligible companies up to $65k in credits and grants.
+Apply now
+Current plan
+Max
+$200/month
+Renews on December 13, 2026
+Purchase on-demand usage
+Configure auto-reload settings
+Manage billing
+Your included usage
+Weekly quota
+1% used
+Resets in 6 days
+On-demand usage
+Your on-demand usage
+$0.00
+Remaining balance
+$0.00
+No on-demand balance remaining. Sessions will pause when your included quota is exceeded.
+Message usage limit
+Maximum on-demand usage that Devin can use per message you send
+$
+20
+"""
+
+REAL_PLANS_TEXT = """Plans
+Current plan
+Max
+$200/month
+Renews on December 13, 2026
+Purchase on-demand usage
+Individual plans
+Free
+Free
+Pro
+$20/month
+Max
+$200/month
+Current plan
+Teams
+$80/month
+"""
+
+
+def test_parse_real_usage_page_all_fields():
+    from cam.devin_parser import missing_fields
+
+    data = parse_usage_text(REAL_USAGE_TEXT, now=NOW)
+    assert data["plan_name"] == "Max" and data["plan_price_usd"] == 200.0
+    assert data["renews_at"] == "2026-12-13"
+    assert data["weekly_used_pct"] == 1.0 and data["weekly_reset_at"]
+    assert data["on_demand_used_usd"] == 0.0 and data["on_demand_balance_usd"] == 0.0
+    assert data["message_limit_usd"] == 20.0
+    assert missing_fields(data) == []
+
+
+def test_plans_page_does_not_leak_other_plan_prices_or_purchase_button_money():
+    data = parse_usage_text(REAL_PLANS_TEXT, now=NOW)
+    assert data["plan_price_usd"] == 200.0            # 不能取到 Pro 的 $20 / Teams 的 $80
+    assert "on_demand_used_usd" not in data           # “Purchase on-demand usage”按钮后面的价格不是已用金额
+
+    # 没有 Current plan 标签、只有套餐卡片时：只取与套餐名相邻的价格
+    only_cards = "Free\nFree\nPro\n$20/month\nMax\n$200/month\nCurrent plan\n"
+    assert parse_usage_text(only_cards, now=NOW).get("plan_price_usd") in (None, 200.0)
+
+
+def test_missing_fields_by_devin_quota_model():
+    from cam.devin_parser import missing_fields
+
+    assert missing_fields({}) == ["套餐"]
+    assert missing_fields({"plan_name": "Free"}) == []
+    assert missing_fields({"plan_name": "Max"}) == ["账期", "周额度", "按需用量"]
+    assert missing_fields({"plan_name": "Max", "renews_at": "2026-12-13", "weekly_used_pct": 0.0,
+                           "on_demand_balance_usd": 0.0}) == []
+
+
+def test_dashboard_marks_incomplete_rows(store):
+    _add(store, "a@x.com")
+    _add(store, "b@x.com")
+    store.add_snapshot(email="a@x.com", ok=True, data={"plan_name": "Max", "plan_price_usd": 20.0})
+    store.add_snapshot(email="b@x.com", ok=True, data={
+        "plan_name": "Max", "renews_at": "2026-12-13", "weekly_used_pct": 1.0, "on_demand_used_usd": 0.0})
+    rows = {r["email"]: r for r in store.dashboard_rows()}
+    assert rows["a@x.com"]["missing"] == ["账期", "周额度", "按需用量"]
+    assert rows["b@x.com"]["missing"] == []

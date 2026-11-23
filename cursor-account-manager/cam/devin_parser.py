@@ -144,6 +144,39 @@ def _plan_name_from_lines(lines: list[str]) -> str:
     return ""
 
 
+_PRICE_RE = re.compile(_MONEY + r"\s*/?\s*(month|mo|year|yr|annually|monthly)\b", re.I)
+
+
+def _current_plan_price(lines: list[str], plan: str) -> tuple[float, str] | None:
+    """只取“当前套餐”那张卡片里的价格，绝不取页面上别的套餐卡（Pro $20 / Teams $80 …）。
+
+    1) "Current plan" 标签之后的几行里找 `$N/month`；
+    2) 没有标签时，找“套餐名独占一行 + 紧随其后的价格行”；
+    3) 都找不到就不返回，宁缺毋错。
+    """
+    def pick(chunk: str) -> tuple[float, str] | None:
+        m = _PRICE_RE.search(chunk)
+        if not m:
+            return None
+        val = _to_float(m.group(1))
+        if val is None:
+            return None
+        return val, ("year" if m.group(2).lower().startswith(("y", "a")) else "month")
+
+    for idx, line in enumerate(lines):
+        if re.search(r"current\s+plan", line, re.I):
+            found = pick("\n".join(lines[idx: idx + 5]))
+            if found:
+                return found
+    if plan:
+        for idx, line in enumerate(lines):
+            if line.strip().lower() == plan.lower():
+                found = pick("\n".join(lines[idx + 1: idx + 3]))
+                if found:
+                    return found
+    return None
+
+
 def parse_usage_text(text: str, *, now: datetime | None = None) -> dict[str, Any]:
     """解析页面可见文本，只返回识别到的字段。"""
     now = now or datetime.now(timezone.utc)
@@ -161,11 +194,10 @@ def parse_usage_text(text: str, *, now: datetime | None = None) -> dict[str, Any
     if plan:
         out["plan_name"] = plan
 
-    m = re.search(_MONEY + r"\s*/\s*(month|mo|year|yr|annually|monthly)", flat, re.I)
-    if m:
-        out["plan_price_usd"] = _to_float(m.group(1))
-        unit = m.group(2).lower()
-        out["billing_period"] = "year" if unit.startswith(("y", "a")) else "month"
+    price_m = _current_plan_price(lines, plan)
+    if price_m:
+        out["plan_price_usd"] = price_m[0]
+        out["billing_period"] = price_m[1]
 
     m = re.search(r"(?:renews?|renewal|next\s+billing(?:\s+date)?)\s*(?:on|date)?\s*[:\-]?\s*([^\n]{3,40})", flat, re.I)
     if m:
@@ -180,7 +212,9 @@ def parse_usage_text(text: str, *, now: datetime | None = None) -> dict[str, Any
             if reset_sec is not None:
                 out[f"{key}_reset_at"] = int(now.timestamp()) + reset_sec
 
-    m = re.search(r"on[-\s]?demand\s+usage[^$]{0,60}" + _MONEY, flat, re.I) or re.search(
+    # 不能把“Purchase on-demand usage”按钮文案后面的套餐价格（$20/month）当成按需已用；
+    # 标签与金额之间最多隔两行，避免跨区块误取。
+    m = re.search(r"(?<!purchase )on[-\s]?demand\s+usage(?:[^$\n]*\n){0,2}[^$\n]*" + _MONEY, flat, re.I) or re.search(
         r"on[-\s]?demand[^$]{0,40}spent[^$]{0,20}" + _MONEY, flat, re.I
     )
     if m:
@@ -443,3 +477,23 @@ def merge_invoices(
         for a in api_rows:
             merged.append({"number": "", "invoice_url": "", "pdf_url": "", **a})
     return merged
+
+
+def missing_fields(data: dict[str, Any]) -> list[str]:
+    """按 Devin 的额度模型判断还缺哪些核心项（中文名，给页面/日志用）。
+
+    Free 套餐没有续费日和固定周额度，不按缺失处理。
+    """
+    plan = (data.get("plan_name") or "").strip().lower()
+    if not plan:
+        return ["套餐"]
+    if plan == "free":
+        return []
+    missing: list[str] = []
+    if not data.get("renews_at"):
+        missing.append("账期")
+    if data.get("weekly_used_pct") is None:
+        missing.append("周额度")
+    if data.get("on_demand_used_usd") is None and data.get("on_demand_balance_usd") is None:
+        missing.append("按需用量")
+    return missing

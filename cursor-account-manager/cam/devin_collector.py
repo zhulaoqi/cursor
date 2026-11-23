@@ -35,6 +35,7 @@ from .devin_parser import (
     extract_invoices_from_api,
     has_core_data,
     merge_invoices,
+    missing_fields,
     merge_results,
     parse_invoices_text,
     parse_usage_text,
@@ -284,6 +285,7 @@ def _wait_usage_rendered(page: Page, timeout: float = 25) -> None:
 
 
 def _scrape(page: Page, email: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    """读取用量页（必要时再读套餐页），**轮询到核心项齐全或超时**，避免页面还在加载就读到半截数据。"""
     responses: list[Any] = []
 
     def on_response(resp: Any) -> None:
@@ -294,24 +296,44 @@ def _scrape(page: Page, email: str) -> tuple[dict[str, Any], str, dict[str, Any]
         except Exception:
             pass
 
+    def snapshot_data(text_data: dict[str, Any]) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
+        payloads = _read_api_payloads(responses)
+        data, source = merge_results(extract_from_api(payloads), text_data)
+        return data, source, payloads
+
     page.on("response", on_response)
     texts: list[str] = []
+    text_data: dict[str, Any] = {}
     try:
         page.goto(DEVIN_USAGE_URL, wait_until="domcontentloaded")
         _wait_usage_rendered(page)
-        usage_text = _body_text(page)
-        texts.append(usage_text)
-        text_data = parse_usage_text(usage_text)
 
-        # 套餐信息不全时再看 /settings/plans（价格/续费日期通常在这里）
-        if not (text_data.get("plan_name") and text_data.get("renews_at")):
+        # 反复读取用量页文本并合并，直到核心项齐全或超时（页面是异步加载的，一次读取常常是半截）
+        texts.append("")
+        deadline = time.time() + 40
+        while True:
+            text = _body_text(page)
+            if text:
+                texts[0] = text
+            for key, val in parse_usage_text(text).items():
+                if val is not None:
+                    text_data[key] = val
+            merged, _src, _payloads = snapshot_data(text_data)
+            if not missing_fields(merged) or time.time() >= deadline:
+                break
+            time.sleep(1.5)
+
+        # 用量页仍缺套餐/账期（价格、续费日常在套餐页）→ 再读 /settings/plans
+        data_now, _s, _p = snapshot_data(text_data)
+        if any(x in missing_fields(data_now) for x in ("套餐", "账期")) or data_now.get("plan_price_usd") is None:
             try:
                 page.goto(DEVIN_PLANS_URL, wait_until="domcontentloaded")
-                _wait_until(lambda: bool(re.search(r"current\s+plan|renews", _body_text(page), re.I)), 15, 1.0)
+                _wait_until(lambda: bool(re.search(r"current\s+plan|renews", _body_text(page), re.I)), 20, 1.0)
                 plans_text = _body_text(page)
                 texts.append(plans_text)
                 for key, val in parse_usage_text(plans_text).items():
                     text_data.setdefault(key, val)
+                time.sleep(1.0)
             except Exception as exc:
                 log.debug(f"[{email}] plans 页读取失败（忽略）: {exc}")
     finally:
@@ -320,15 +342,19 @@ def _scrape(page: Page, email: str) -> tuple[dict[str, Any], str, dict[str, Any]
         except Exception:
             pass
 
-    payloads = _read_api_payloads(responses)
-    api_data = extract_from_api(payloads)
-    data, source = merge_results(api_data, text_data)
+    data, source, payloads = snapshot_data(text_data)
+    missing = missing_fields(data)
     raw = {
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "page_url": page.url,
         "api": payloads,
         "text": [t[:6000] for t in texts],
+        "missing": missing,
     }
+    if missing:
+        # 数据不全：留下截图 + 页面文本，方便对照真实页面调整解析
+        raw["artifact"] = _save_artifacts(page, email, "incomplete")
+        log.warning(f"[{email}] Devin 数据不全 missing={missing} {raw['artifact']}")
     return data, source, raw
 
 

@@ -67,6 +67,7 @@
     .btn-primary:hover:not(:disabled){background:#0757B8;border-color:#0757B8}
     .btn-danger{color:var(--danger)} .btn-danger:hover:not(:disabled){background:var(--danger-bg);border-color:#FCA5A5}
     .btn-sm{min-height:30px;padding:0 10px;font-size:13px;font-weight:600}
+    .warn-text{color:var(--warn,#B45309);font-weight:600}
     .btn-icon{width:34px;min-height:34px;padding:0;justify-content:center}
     .btn-icon svg{display:block}
     .btn-ghost{border-color:transparent;background:transparent}
@@ -77,6 +78,13 @@
     label.field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:#374151}
     .check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:500}
     .check input{width:16px;height:16px;accent-color:var(--primary)}
+    .inv-picker{border:1px solid var(--line-subtle);border-radius:10px;background:#fff;overflow:hidden}
+    .inv-picker-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line-subtle);background:#F8FAFC}
+    .inv-picker-bar .input{flex:1;min-width:200px;width:auto}
+    .inv-picker-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 12px;max-height:176px;overflow:auto;padding:8px 12px}
+    .inv-item{min-height:32px;min-width:0}
+    .inv-email{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .inv-empty{grid-column:1/-1;padding:8px 0}
 
     /* ── KPI ── */
     .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
@@ -231,10 +239,8 @@
           <th class="sortable" @click="sortBy('plan_name')">套餐 <span aria-hidden="true" x-text="sortMark('plan_name')"></span></th>
           <th class="sortable" @click="sortBy('cycle_end')">账期 <span aria-hidden="true" x-text="sortMark('cycle_end')"></span></th>
           <th class="sortable" @click="sortBy('weekly_used_pct')">周额度 <span aria-hidden="true" x-text="sortMark('weekly_used_pct')"></span></th>
-          <th>日额度</th>
-          <th class="r sortable" @click="sortBy('on_demand_used_usd')">按需已用 <span aria-hidden="true" x-text="sortMark('on_demand_used_usd')"></span></th>
-          <th class="r">按需余额</th>
-          <th class="r">消息上限</th>
+          <th class="r sortable" @click="sortBy('on_demand_used_usd')" title="超出套餐额度后按量付费的已用金额与剩余余额">按需用量 <span aria-hidden="true" x-text="sortMark('on_demand_used_usd')"></span></th>
+          <th class="r" title="单条消息最多可用的按需金额">消息上限</th>
           <th class="sortable" @click="sortBy('data_collected_at')">数据时间 <span aria-hidden="true" x-text="sortMark('data_collected_at')"></span></th>
           <th>采集状态</th>
           <th class="r">操作</th>
@@ -253,7 +259,7 @@
                 <template x-if="r.cycle_end"><div>
                   <div class="xs" x-text="r.cycle_start.slice(5) + ' → ' + r.cycle_end.slice(5)"></div>
                   <div class="xs" :class="daysLeft(r.cycle_end) <= 3 ? 'err-text' : 'muted'" x-text="cycleLeftText(r.cycle_end)"></div></div></template>
-                <span class="muted" x-show="!r.cycle_end">—</span>
+                <span class="xs" :class="r.snapshot_id && r.plan_name && r.plan_name.toLowerCase() !== 'free' ? 'warn-text' : 'muted'" x-show="!r.cycle_end" x-text="r.snapshot_id && r.plan_name && r.plan_name.toLowerCase() !== 'free' ? '未获取' : '—'"></span>
               </td>
               <td>
                 <template x-if="r.weekly_used_pct != null">
@@ -262,17 +268,22 @@
                     <div class="bar" :class="levelClass(r.weekly_used_pct)" role="progressbar" :aria-valuenow="r.weekly_used_pct" aria-valuemin="0" aria-valuemax="100" :aria-label="'周额度已用 ' + fmtPct(r.weekly_used_pct)"><span :style="`width:${Math.min(100, r.weekly_used_pct)}%`"></span></div>
                   </div>
                 </template>
-                <span class="muted" x-show="r.weekly_used_pct == null">—</span>
+                <span class="xs" :class="r.snapshot_id ? 'warn-text' : 'muted'" x-show="r.weekly_used_pct == null" x-text="r.snapshot_id ? '未获取' : '—'"></span>
               </td>
-              <td class="num"><span x-show="r.daily_used_pct != null" x-text="fmtPct(r.daily_used_pct)"></span><span class="muted" x-show="r.daily_used_pct == null">—</span></td>
-              <td class="r num" x-text="fmtUsd(r.on_demand_used_usd)"></td>
-              <td class="r num" x-text="fmtUsd(r.on_demand_balance_usd)"></td>
-              <td class="r num" x-text="fmtUsd(r.message_limit_usd, 0)"></td>
+              <td class="r num">
+                <template x-if="r.on_demand_used_usd != null || r.on_demand_balance_usd != null"><div>
+                  <div x-text="fmtUsd(r.on_demand_used_usd)"></div>
+                  <div class="xs muted" x-text="'余额 ' + fmtUsd(r.on_demand_balance_usd)"></div></div></template>
+                <span class="xs" :class="r.snapshot_id ? 'warn-text' : 'muted'" x-show="r.on_demand_used_usd == null && r.on_demand_balance_usd == null" x-text="r.snapshot_id ? '未获取' : '—'"></span>
+              </td>
+              <td class="r num"><span x-show="r.message_limit_usd != null" x-text="fmtUsd(r.message_limit_usd, 0)"></span><span class="muted" x-show="r.message_limit_usd == null">—</span></td>
               <td class="num xs" x-text="r.data_collected_at ? fmtTime(r.data_collected_at) : '—'"></td>
               <td>
                 <template x-if="r.status !== 'active'"><span class="badge b-mute">已停用</span></template>
                 <template x-if="r.status === 'active' && r.last_attempt_at == null"><span class="badge b-mute">未采集</span></template>
-                <template x-if="r.status === 'active' && r.last_attempt_ok === true"><span class="badge b-ok"><span class="dot"></span>成功</span></template>
+                <template x-if="r.status === 'active' && r.last_attempt_ok === true">
+                  <div><span class="badge" :class="(r.missing || []).length ? 'b-warn' : 'b-ok'"><span class="dot"></span><span x-text="(r.missing || []).length ? '数据不全' : '成功'"></span></span>
+                    <div class="xs warn-text" x-show="(r.missing || []).length" x-text="'缺：' + (r.missing || []).join('、')"></div></div></template>
                 <template x-if="r.status === 'active' && r.last_attempt_ok === false">
                   <div><span class="badge b-fail"><span class="dot"></span>失败</span>
                     <span class="err-text" :title="r.last_error_message" x-text="errLabel(r.last_error_code)"></span></div></template>
@@ -338,9 +349,27 @@
           <div class="strong" style="font-size:16px">发票导出</div>
           <div class="muted xs">实时登录 Devin 读取发票页，<b>直接导出 Excel</b>（含发票链接，能拿到时附带 PDF），不写入数据库。</div>
         </div>
-        <button class="btn btn-primary" :disabled="invProgress.running || progress.running || !(kpis.active > 0)" @click="exportInvoices([])">
-          <span class="spin" x-show="invProgress.running" aria-hidden="true"></span>
-          <span x-text="invProgress.running ? '导出中…' : '导出全部账号发票'"></span></button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" :disabled="invProgress.running || progress.running || !(kpis.active > 0)" @click="exportInvoices([])">导出全部账号发票</button>
+          <button class="btn btn-primary" :disabled="invProgress.running || progress.running || !invSelected.length" @click="exportInvoices(invSelected)">
+            <span class="spin" x-show="invProgress.running" aria-hidden="true"></span>
+            <span x-text="invProgress.running ? '导出中…' : '导出所选账号发票' + (invSelected.length ? '（' + invSelected.length + '）' : '')"></span></button>
+        </div>
+      </div>
+      <div class="inv-picker">
+        <div class="inv-picker-bar">
+          <input class="input" type="search" placeholder="搜索账号，勾选后导出所选" aria-label="搜索要导出发票的账号" x-model.debounce.200ms="invQ" />
+          <button type="button" class="btn btn-sm" @click="invSelectAll()" :disabled="!invVisible.length">全选当前</button>
+          <button type="button" class="btn btn-sm" @click="invSelected = []" :disabled="!invSelected.length">清空</button>
+          <span class="xs muted num" x-text="'已选 ' + invSelected.length + ' / ' + invAccounts.length"></span>
+        </div>
+        <div class="inv-picker-list">
+          <template x-for="a in invVisible" :key="a.email">
+            <label class="check inv-item" :title="a.email"><input type="checkbox" :value="a.email" x-model="invSelected" />
+              <span class="mono inv-email" x-text="a.email"></span></label>
+          </template>
+          <div class="xs muted inv-empty" x-show="!invVisible.length" x-cloak x-text="invAccounts.length ? '没有匹配的账号' : '暂无启用中的账号'"></div>
+        </div>
       </div>
       <div class="progress-card fade-enter" x-show="invProgress.running" x-cloak role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -358,7 +387,7 @@
             <td class="r num xs" x-text="(f.size / 1024).toFixed(1) + ' KB'"></td>
             <td class="r"><a class="btn btn-sm" :href="'/api/devin/invoices/files/' + encodeURIComponent(f.name)">下载</a></td></tr></template></tbody>
         </table>
-        <div class="empty" x-show="!invFiles.length" x-cloak><strong>还没有导出过发票</strong>点击右上角“导出全部账号发票”，或在账号详情里导出单个账号。</div>
+        <div class="empty" x-show="!invFiles.length" x-cloak><strong>还没有导出过发票</strong>勾选账号后点“导出所选账号发票”，或直接导出全部账号。</div>
       </div>
     </div>
 
@@ -546,6 +575,13 @@ function devinApp() {
     cycles: [], cq: '', cycleFilter: 'all',
     cycleFilters: [{ key: 'all', label: '全部' }, { key: 'current', label: '进行中' }, { key: 'ended', label: '已结束' }],
     invProgress: { running: false, total: 0, done: 0, ok: 0, failed: 0, current: [] }, invFiles: [], _invPoll: null,
+    invQ: '', invSelected: [],
+    get invAccounts() { return this.accounts.filter(a => a.status === 'active'); },
+    get invVisible() {
+      const kw = this.invQ.trim().toLowerCase();
+      return this.invAccounts.filter(a => !kw || a.email.toLowerCase().includes(kw));
+    },
+    invSelectAll() { this.invSelected = [...new Set([...this.invSelected, ...this.invVisible.map(a => a.email)])]; },
     detail: null, history: [], rawText: '', rawError: '',
     toasts: [], _poll: null,
 
@@ -560,7 +596,13 @@ function devinApp() {
     onViewChange() {
       if (this.view === 'accounts') this.loadAccounts();
       if (this.view === 'runs') this.loadRuns();
-      if (this.view === 'billing') { this.loadCycles(); this.loadInvoices(); }
+      if (this.view === 'billing') {
+        this.loadCycles(); this.loadInvoices();
+        this.loadAccounts().then(() => {
+          const ok = new Set(this.invAccounts.map(a => a.email));
+          this.invSelected = this.invSelected.filter(e => ok.has(e));
+        });
+      }
     },
 
     // ── 请求封装 ──
@@ -627,7 +669,7 @@ function devinApp() {
     async exportInvoices(emails) {
       try {
         await this.api('/api/devin/invoices/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }) });
-        this.toast(emails.length ? '已开始导出 ' + emails[0] + ' 的发票' : '已开始导出全部账号发票', 'info');
+        this.toast(emails.length === 1 ? '已开始导出 ' + emails[0] + ' 的发票' : emails.length ? '已开始导出 ' + emails.length + ' 个账号的发票' : '已开始导出全部账号发票', 'info');
         this.invProgress = { ...this.invProgress, running: true, done: 0, ok: 0, failed: 0 };
         if (this.view !== 'billing') this.go('billing');
         this.syncInvPolling();

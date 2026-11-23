@@ -109,6 +109,7 @@ def _kpis(rows: list[dict]) -> dict[str, Any]:
         "failed_latest": len(failed_latest),
         "avg_weekly_used_pct": round(sum(pcts) / len(pcts), 2) if pcts else None,
         "high_usage": len([p for p in pcts if p >= HIGH_USAGE_PCT]),
+        "incomplete": len([r for r in with_data if r.get("missing")]),
         "idle": len([p for p in pcts if p < 5]),
         "renewing_soon": len([r for r in with_data if 0 <= (_days_left(r.get("cycle_end")) if r.get("cycle_end") else -1) <= 7]),
         "plan_distribution": plans,
@@ -448,7 +449,7 @@ async def export_xlsx():
     ws.title = "Devin 用量与套餐"
     headers = [
         "邮箱", "负责人", "状态", "套餐", "套餐价格(USD)", "计费周期", "账期起", "账期止(续费日)",
-        "周额度已用(%)", "周额度重置时间", "日额度已用(%)", "按需已用(USD)", "按需余额(USD)",
+        "周额度已用(%)", "周额度重置时间", "按需已用(USD)", "按需余额(USD)",
         "消息用量上限(USD)", "数据时间", "最近一次采集", "最近失败原因", "备注",
     ]
     ws.append(headers)
@@ -456,7 +457,7 @@ async def export_xlsx():
         ws.append([
             r["email"], r["owner_email"], "启用" if r["status"] == "active" else "停用",
             r.get("plan_name") or "", r.get("plan_price_usd"), r.get("billing_period") or "", r.get("cycle_start") or "", r.get("cycle_end") or "",
-            r.get("weekly_used_pct"), _ts(r.get("weekly_reset_at")), r.get("daily_used_pct"),
+            r.get("weekly_used_pct"), _ts(r.get("weekly_reset_at")),
             r.get("on_demand_used_usd"), r.get("on_demand_balance_usd"), r.get("message_limit_usd"),
             _ts(r.get("data_collected_at")),
             ("成功" if r.get("last_attempt_ok") else "失败") if r.get("last_attempt_at") else "未采集",
@@ -467,7 +468,7 @@ async def export_xlsx():
         cell.font = Font(bold=True)
         cell.fill = fill
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    widths = (30, 26, 8, 10, 14, 10, 12, 14, 14, 20, 14, 14, 14, 16, 20, 14, 26, 24)
+    widths = (30, 26, 8, 10, 14, 10, 12, 14, 14, 20, 14, 14, 16, 20, 14, 26, 24)
     for idx, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = w
     ws.freeze_panes = "B2"
