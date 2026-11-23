@@ -158,7 +158,7 @@ def register(cli: click.Group) -> None:
     @cli.command("devin-invoices")
     @click.option("--email", "emails", multiple=True, help="只导出指定账号（可重复）；缺省=全部启用账号")
     def cmd_devin_invoices(emails: tuple[str, ...]) -> None:
-        """实时读取发票并直接导出 Excel（不入库）。文件在 DEVIN_EXPORT_DIR。"""
+        """实时读取发票，下载每张发票的 PDF 并打包成 zip（不入库）。文件在 DEVIN_EXPORT_DIR。"""
         from .devin_invoices import run_invoice_export
 
         summary = run_invoice_export(emails=[normalize_email(e) for e in emails] or None)
@@ -169,6 +169,7 @@ def register(cli: click.Group) -> None:
         _echo_json({
             "file": str(out) if out else "", "accounts": summary.total, "success": summary.success,
             "failed": summary.failed, "invoices": summary.invoice_count,
+            "pdf": summary.pdf_count, "pdf_missing": summary.pdf_missing,
             "amount_total_usd": summary.amount_total_usd,
             "failures": [{"email": f["email"], "reason": f["label"]} for f in summary.failures],
         })

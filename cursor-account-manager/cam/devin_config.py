@@ -54,7 +54,6 @@ class DevinSettings:
     code_timeout_sec: int
     artifacts_dir: Path
     export_dir: Path
-    invoice_pdf: bool
 
 
 def load_devin_settings() -> DevinSettings:
@@ -85,7 +84,6 @@ def load_devin_settings() -> DevinSettings:
         code_timeout_sec=_env_int("DEVIN_CODE_TIMEOUT_SEC", 180, minimum=30),
         artifacts_dir=artifacts,
         export_dir=export_dir,
-        invoice_pdf=_env_bool("DEVIN_INVOICE_PDF", True),
     )
 
 

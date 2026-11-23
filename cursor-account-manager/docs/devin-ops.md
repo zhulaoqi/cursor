@@ -14,7 +14,7 @@
 | 调度/批跑 | `cam/devin_runner.py`、`cam/devin_scheduler.py` | 每日凌晨批跑、重试、双层锁、飞书播报 |
 | 接口 | `cam/devin_api.py` | `/api/devin/*` |
 | 前端 | `cam/static/devin.html`、`platforms.js` | 用量监控 / 账号管理 / 导入账号 / 采集记录 |
-| 发票导出 | `cam/devin_invoices.py` | 实时读取发票页 → 直接导出 xlsx（不入库） |
+| 发票导出 | `cam/devin_invoices.py` | 实时读取发票页 → 下载每张发票 PDF → 打包 zip（不入库） |
 | 运维 CLI | `cam/devin_cli.py` | `python -m cam devin-*` |
 
 与 Cursor 完全独立：账号库独立（`devin_accounts`），不会读写 Cursor 的账号 CSV 或 `usage_snapshots`。
@@ -47,14 +47,23 @@
 - 查看：页面「账期与发票」、`GET /api/devin/cycles`、`scripts/devin-ops.sh cycles`、Excel 导出里的「账期」工作表。
 - 用量监控表里的「账期」列显示起止日期与剩余天数（≤3 天标红），7 天内续费的账号数显示在顶部状态条。
 
-**发票：实时读取，直接导出 Excel，不写数据库。**
-- 页面「账期与发票」→「导出全部账号发票」，或账号详情抽屉里的「导出发票」（单账号）；
+**账期的来源（依次兜底）**：① 页面的 `Billing period A – B` 区间（起止都有，直接存真实起点）→ ② `Renews on / Next billing date`
+→ ③ 已取消套餐的 `Ends / Expires / Cancels on` → ④ 页面 API 的 `currentPeriodEnd / nextBillingDate …` 字段（页面可见日期优先，
+因为 API 是 UTC 时间戳，转日期可能差一天）→ ⑤ 以上都没有时读 `/settings/invoices`，用最近一张金额 ≥ 套餐价的已支付发票
+推算（发票日 = 起点，+1 个周期 = 终点；终点已过期则不猜）。采集记录的原始数据里 `cycle_source` 标明来源（`page` / `invoice`）。
+
+**发票：实时读取，下载每张发票的 PDF，打包成 zip，不写数据库。**
+- 页面「账期与发票」→ 勾选账号后「导出所选账号发票」或「导出全部账号发票」，也可在账号详情抽屉里「导出发票」（单账号）；
   CLI：`scripts/devin-ops.sh invoices [--email X]`（`.ps1`：`invoices -Email a,b`）。
-- 流程：登录 → 打开 `/settings/invoices` → 解析表格（日期 / 状态 / 金额）→ 取每行 "View invoice" 外链
-  → 若页面 API 返回了发票号/PDF 地址则补全，并下载 PDF。
-- 输出：`DEVIN_EXPORT_DIR`（默认 `data/exports/devin`）下 `devin-invoices-YYYYMMDD-HHMMSS.xlsx`，
-  含「发票明细」（含可点击的发票链接）、「账号汇总」、「读取失败」三个工作表；PDF 在 `invoice-pdf/<邮箱>/`。
-- 金额以页面可见文本为准；API 只用来补充发票号、链接和 PDF。
+- 流程：登录 → 打开 `/settings/invoices` → 解析表格（日期 / 状态 / 金额）→ 按“发票行”定位入口并取外链（Stripe 托管发票页）：
+  行里有链接就直接读；窗口较窄时 “View invoice” 文字会收起、只剩绿色箭头，此时点击该箭头，捕获新开标签页（或当前页跳转）的地址
+  → 逐张取 PDF，依次尝试：页面 API 给的 `invoice_pdf` 直链 → 由 Stripe 托管页地址推导的 PDF 直链 → 打开发票页点
+  “下载发票”按钮（与 Cursor 侧同一套选择器，跳过“收据”）→ 最后才把发票页打印成 PDF（清单里标注“非官方文件”）。
+- 输出：`DEVIN_EXPORT_DIR`（默认 `data/exports/devin`）下 `devin-invoices-YYYYMMDD-HHMMSS.zip`：
+  `<邮箱>/<日期>-<发票号>.pdf` + `清单.csv`（账号 / 日期 / 状态 / 金额 / PDF 来源 / 没拿到 PDF 的原因 / 读取失败账号）。
+  PDF 原文件也留在 `invoice-pdf/<邮箱>/`。没拿到 PDF 的发票不会悄悄漏掉：清单里写明原因，页面完成提示里也会告警，
+  并在 `data/artifacts/devin` 留下发票页的截图和文本。
+- 金额以页面可见文本为准；API 只用来补充发票号、链接和 PDF 地址。
 - 导出与每日采集共用进程内锁，二者不会同时跑（同一账号共用一个 Chrome profile）。导出期间触发的定时采集会被跳过并提示 `lock_busy`。
 - 停用账号不会被读取。
 
@@ -87,7 +96,7 @@ Linux / macOS / CentOS：`scripts/devin-ops.sh <命令>`；Windows：`.\scripts\
 | `probe <邮箱> [--headed] [--save]` | 单账号探针：打印解析结果与原始数据；`--headed` 肉眼观察 |
 | `notify-test [--send]` | 模拟数据生成播报卡片；`--send` 真发 |
 | `cycles [--email X]` | 查看已入库的账期 |
-| `invoices [--email X]` | 实时读取发票并导出 Excel（不入库） |
+| `invoices [--email X]` | 实时读取发票并下载 PDF，打包成 zip（不入库） |
 | `next-run` | 下次定时采集时间 |
 | `artifacts [N]` | 失败现场（截图 + 页面文本） |
 | `logs [N]` | 服务日志中 devin / ERROR 行 |
@@ -131,5 +140,5 @@ Linux / macOS / CentOS：`scripts/devin-ops.sh <命令>`；Windows：`.\scripts\
 ## 8. 备份与清理
 
 - `backup-db` 使用 SQLite 在线备份（WAL 安全）。
-- 页面删除账号默认保留历史快照，需同时清除时调 `DELETE /api/devin/accounts/{email}?purge=true`；`devin_snapshots` 每次采集（含失败）一行；`devin_cycles` 每账期一行（量很小，无需清理）；`DEVIN_EXPORT_DIR` 里的发票 xlsx/PDF 不会自动清理，长期运行可按需清理 90 天前数据。
+- 页面删除账号默认保留历史快照，需同时清除时调 `DELETE /api/devin/accounts/{email}?purge=true`；`devin_snapshots` 每次采集（含失败）一行；`devin_cycles` 每账期一行（量很小，无需清理）；`DEVIN_EXPORT_DIR` 里的发票 zip/PDF 不会自动清理，长期运行可按需清理 90 天前数据。
 - Chrome profile 位于 `CAM_CHROME_PROFILES_DIR`（目录名 `devin__*`），删除账号后可手动清理。

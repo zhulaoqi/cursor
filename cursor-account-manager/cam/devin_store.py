@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -287,7 +288,10 @@ class DevinStore:
             )
             snapshot_id = int(cur.lastrowid)
             if ok:
-                self._upsert_cycle(conn, email, snapshot_id, int(collected_at or time.time()), fields)
+                self._upsert_cycle(
+                    conn, email, snapshot_id, int(collected_at or time.time()),
+                    {**fields, "cycle_start": data.get("cycle_start")},
+                )
             return snapshot_id
 
     # ─── 账期 ─────────────────────────────────────────────────────
@@ -299,9 +303,12 @@ class DevinStore:
         if not cycle_end:
             return
         period = (f.get("billing_period") or "month").strip() or "month"
-        cycle_start = cycle_start_from_end(cycle_end, period)
-        if not cycle_start:
+        derived = cycle_start_from_end(cycle_end, period)
+        if not derived:
             return
+        # 页面/API 直接给了起点就用真实值，否则按计费周期往前推
+        given = (f.get("cycle_start") or "").strip() if isinstance(f.get("cycle_start"), str) else ""
+        cycle_start = given if re.fullmatch(r"\d{4}-\d{2}-\d{2}", given) and given < cycle_end else derived
         old = conn.execute(
             "SELECT * FROM devin_cycles WHERE email = ? AND cycle_end = ?", (email, cycle_end)
         ).fetchone()
@@ -406,6 +413,10 @@ class DevinStore:
                     """
                 ).fetchall()
             }
+            real_start = {
+                (r["email"], r["cycle_end"]): r["cycle_start"]
+                for r in conn.execute("SELECT email, cycle_end, cycle_start FROM devin_cycles").fetchall()
+            }
         rows: list[dict] = []
         for acc in accounts:
             email = acc["email"]
@@ -431,7 +442,8 @@ class DevinStore:
                 row[key] = ok.get(key)
             row["cycle_end"] = row.get("renews_at") or ""
             row["cycle_start"] = (
-                cycle_start_from_end(row["cycle_end"], row.get("billing_period") or "month")
+                real_start.get((email, row["cycle_end"]))
+                or cycle_start_from_end(row["cycle_end"], row.get("billing_period") or "month")
                 if row["cycle_end"] else ""
             )
             row["missing"] = missing_fields(row) if ok else []

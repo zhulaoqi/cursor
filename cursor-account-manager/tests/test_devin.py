@@ -421,7 +421,7 @@ def test_email_client_default_behaviour_unchanged_signature():
 # ─── 账期（入库）─────────────────────────────────────────────────
 
 from cam.devin_collector import InvoiceResult  # noqa: E402
-from cam.devin_invoices import build_invoice_xlsx, run_invoice_export  # noqa: E402
+from cam.devin_invoices import build_invoice_zip, run_invoice_export  # noqa: E402
 from cam.devin_parser import (  # noqa: E402
     cycle_start_from_end,
     extract_invoices_from_api,
@@ -519,19 +519,31 @@ def test_extract_and_merge_invoices_prefers_visible_amount():
     assert merged[1]["invoice_url"] == "https://l/2"          # 无 API 匹配时回落到页面链接
 
 
-def test_build_invoice_xlsx_sheets():
-    from openpyxl import load_workbook
+def test_build_invoice_zip_contains_pdfs_and_manifest(tmp_path):
+    import csv
+    import zipfile
 
-    data = build_invoice_xlsx(
-        [{"email": "a@x.com", "invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2,
-          "invoice_url": "https://i/1", "owner_email": "o@x.com"}],
+    pdf = tmp_path / "2026-11-13-INV-1.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    data = build_invoice_zip(
+        [
+            {"email": "a@x.com", "invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2,
+             "number": "INV-1", "invoice_url": "https://i/1", "owner_email": "o@x.com",
+             "pdf_file": str(pdf), "pdf_source": "direct"},
+            {"email": "a@x.com", "invoice_date": "2026-10-13", "status": "Paid", "amount_usd": 200.0,
+             "pdf_file": "", "pdf_error": "没有取到发票链接"},
+        ],
         [{"email": "b@x.com", "label": "验证码邮件超时未收到", "message": "m"}],
     )
-    wb = load_workbook(io.BytesIO(data))
-    assert wb.sheetnames == ["发票明细", "账号汇总", "读取失败"]
-    assert wb["发票明细"]["D2"].value == 213.2
-    assert wb["发票明细"]["F2"].hyperlink.target == "https://i/1"
-    assert wb["账号汇总"]["C2"].value == 1
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    assert sorted(zf.namelist()) == ["a@x.com/2026-11-13-INV-1.pdf", "清单.csv"]
+    assert zf.read("a@x.com/2026-11-13-INV-1.pdf").startswith(b"%PDF")
+    rows = list(csv.reader(io.StringIO(zf.read("清单.csv").decode("utf-8-sig"))))
+    assert rows[0][:3] == ["账号", "负责人", "发票日期"]
+    by_date = {r[2]: r for r in rows[1:] if r[2]}
+    assert by_date["2026-11-13"][6] == "a@x.com/2026-11-13-INV-1.pdf" and by_date["2026-11-13"][7] == "官方直链"
+    assert by_date["2026-10-13"][6] == "" and "没有取到发票链接" in by_date["2026-10-13"][8]   # 缺 PDF 不静默
+    assert any("读取失败" in r[8] and r[0] == "b@x.com" for r in rows[1:])
 
 
 def test_run_invoice_export_writes_file_without_touching_db(store, tmp_path, monkeypatch):
@@ -542,18 +554,24 @@ def test_run_invoice_export_writes_file_without_touching_db(store, tmp_path, mon
     store.set_status("b@x.com", "disabled")
     _add(store, "c@x.com")
 
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
     def fetcher(account):
         if account["email"] == "c@x.com":
             return InvoiceResult(email="c@x.com", ok=False, error_code="code_timeout", error_message="no mail")
         return InvoiceResult(email=account["email"], ok=True, invoices=[
-            {"invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2, "invoice_url": "https://i/1"},
+            {"invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2, "invoice_url": "https://i/1",
+             "pdf_file": str(pdf), "pdf_source": "download"},
+            {"invoice_date": "2026-10-13", "status": "Paid", "amount_usd": 200.0, "pdf_file": "", "pdf_error": "x"},
         ])
 
     summary = run_invoice_export(store=store, fetcher=fetcher)
     assert (summary.total, summary.success, summary.failed) == (2, 1, 1)   # 停用账号不读
-    assert summary.invoice_count == 1 and summary.amount_total_usd == 213.2
+    assert summary.invoice_count == 2 and summary.amount_total_usd == 413.2
+    assert (summary.pdf_count, summary.pdf_missing) == (1, 1)
     assert summary.failures[0]["email"] == "c@x.com" and "验证码" in summary.failures[0]["label"]
-    assert (tmp_path / "exp" / summary.file).is_file()
+    assert summary.file.endswith(".zip") and (tmp_path / "exp" / summary.file).is_file()
     assert store.list_snapshots("a@x.com") == []                            # 发票不入库
 
 
@@ -580,17 +598,22 @@ def test_api_cycles_and_invoice_files(client, store, tmp_path, monkeypatch):
 
     wb = load_workbook(io.BytesIO(client.get("/api/devin/export.xlsx").content))
     assert "账期" in wb.sheetnames
+    sheet = wb["Devin 用量与套餐"]
+    headers = [c.value for c in sheet[1]]
+    assert "缺失项" in headers
+    assert sheet.cell(row=2, column=headers.index("缺失项") + 1).value == "按需用量"   # 只缺按需用量
 
     # 发票：未知账号 404；文件下载只允许规范文件名
     assert client.post("/api/devin/invoices/export", json={"emails": ["nobody@x.com"]}).status_code == 404
     exp = tmp_path / "exp"
     exp.mkdir()
-    (exp / "devin-invoices-20261123-010203.xlsx").write_bytes(b"x")
-    (exp / "secret.xlsx").write_bytes(b"x")
+    (exp / "devin-invoices-20261123-010203.zip").write_bytes(b"PK")
+    (exp / "secret.zip").write_bytes(b"x")
     listed = client.get("/api/devin/invoices/progress").json()
-    assert [f["name"] for f in listed["files"]] == ["devin-invoices-20261123-010203.xlsx"]
-    assert client.get("/api/devin/invoices/files/devin-invoices-20261123-010203.xlsx").status_code == 200
-    assert client.get("/api/devin/invoices/files/secret.xlsx").status_code == 404
+    assert [f["name"] for f in listed["files"]] == ["devin-invoices-20261123-010203.zip"]
+    res = client.get("/api/devin/invoices/files/devin-invoices-20261123-010203.zip")
+    assert res.status_code == 200 and res.headers["content-type"] == "application/zip"
+    assert client.get("/api/devin/invoices/files/secret.zip").status_code == 404
     assert client.get("/api/devin/invoices/files/..%2Fsecret.xlsx").status_code == 404
 
 
@@ -685,3 +708,183 @@ def test_dashboard_marks_incomplete_rows(store):
     rows = {r["email"]: r for r in store.dashboard_rows()}
     assert rows["a@x.com"]["missing"] == ["账期", "周额度", "按需用量"]
     assert rows["b@x.com"]["missing"] == []
+
+
+# ─── 账期：多来源识别 ────────────────────────────────────────────
+
+def test_billing_period_text_variants():
+    from cam.devin_parser import parse_billing_period
+
+    # 起止都有的区间（起点省略年份、跨年）
+    assert parse_billing_period("Billing period\nNov 13 – Dec 13, 2026", now=NOW) == {
+        "cycle_start": "2026-11-13", "renews_at": "2026-12-13"}
+    assert parse_billing_period("Billing cycle: Dec 13, 2026 - Jan 13, 2027", now=NOW) == {
+        "cycle_start": "2026-12-13", "renews_at": "2027-01-13"}
+    assert parse_billing_period("Current period: Dec 13 – Jan 13, 2027", now=NOW)["cycle_start"] == "2026-12-13"
+    # 只有续费日 / 下次扣费日
+    assert parse_billing_period("Renews on December 13, 2026", now=NOW) == {"renews_at": "2026-12-13"}
+    assert parse_billing_period("Next billing date: 2026-12-13", now=NOW) == {"renews_at": "2026-12-13"}
+    # 已设置取消的套餐：没有 Renews，只有 Ends / Cancels
+    assert parse_billing_period("Your plan cancels on Dec 13, 2026", now=NOW) == {"renews_at": "2026-12-13"}
+    # 没有任何账期信息不要乱猜
+    assert parse_billing_period("Weekly quota 1% used Resets in 6 days", now=NOW) == {}
+
+
+def test_billing_period_from_api_keys_and_visible_text_wins():
+    def ts(y, m, d):
+        return int(datetime(y, m, d, tzinfo=timezone.utc).timestamp())
+
+    api = extract_from_api([{"url": "https://api.devin.ai/billing/subscription", "body": {
+        "subscription": {"currentPeriodStart": ts(2026, 11, 13), "currentPeriodEnd": ts(2026, 12, 13) * 1000}}}])
+    assert api["cycle_start"] == "2026-11-13" and api["renews_at"] == "2026-12-13"   # 秒/毫秒都认
+    # 发票对象里的 period_end 是历史账期，不能当作当前账期
+    assert "renews_at" not in extract_from_api([{"url": "https://api.devin.ai/billing/invoices", "body": {
+        "invoices": [{"period_end": ts(2026, 11, 13)}]}}])
+    # 页面可见日期优先于 API（API 是 UTC 时间戳，转日期可能差一天）
+    merged, _ = merge_results({"renews_at": "2026-12-14"}, {"renews_at": "2026-12-13", "plan_name": "Max"})
+    assert merged["renews_at"] == "2026-12-13"
+
+
+def test_cycle_from_invoices_fallback():
+    from cam.devin_parser import cycle_from_invoices
+
+    rows = [
+        {"invoice_date": "2026-11-20", "status": "Paid", "amount_usd": 20.0},     # 按需充值，不是续费
+        {"invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2},
+        {"invoice_date": "2026-10-13", "status": "Paid", "amount_usd": 200.0},
+    ]
+    assert cycle_from_invoices(rows, plan_price=200.0, now=NOW) == {
+        "cycle_start": "2026-11-13", "renews_at": "2026-12-13"}
+    # 没有套餐价时只能取最近一张已支付
+    assert cycle_from_invoices(rows, now=NOW)["cycle_start"] == "2026-11-20"
+    # 推算出的终点早已过去（订阅可能已停）→ 不猜
+    assert cycle_from_invoices([{"invoice_date": "2026-01-13", "status": "Paid", "amount_usd": 200.0}], now=NOW) == {}
+    assert cycle_from_invoices([{"invoice_date": "2026-11-13", "status": "Open", "amount_usd": 200.0}], now=NOW) == {}
+
+
+def test_real_cycle_start_is_stored_and_shown(store):
+    _add(store, "a@x.com")
+    store.add_snapshot(email="a@x.com", ok=True, data={
+        "plan_name": "Max", "billing_period": "month", "renews_at": "2026-12-20", "cycle_start": "2026-11-13",
+        "weekly_used_pct": 1.0, "on_demand_used_usd": 0.0})
+    assert store.list_cycles("a@x.com")[0]["cycle_start"] == "2026-11-13"            # 页面给了真实起点就用它
+    assert store.dashboard_rows()[0]["cycle_start"] == "2026-11-13"
+    store.add_snapshot(email="a@x.com", ok=True, data={"plan_name": "Max", "renews_at": "2027-01-13"})
+    assert store.list_cycles("a@x.com")[0]["cycle_start"] == "2026-12-13"            # 没有起点则按周期往前推
+
+
+# ─── 发票 PDF 获取 ───────────────────────────────────────────────
+
+def test_stripe_pdf_url_derivation():
+    from cam.devin_parser import stripe_pdf_url
+
+    assert stripe_pdf_url("https://invoice.stripe.com/i/acct_1ABC/live_xyz?s=ap") == \
+        "https://pay.stripe.com/invoice/acct_1ABC/live_xyz/pdf?s=ap"
+    assert stripe_pdf_url("https://invoice.stripe.com/i/acct_1ABC/live_xyz") == \
+        "https://pay.stripe.com/invoice/acct_1ABC/live_xyz/pdf"
+    assert stripe_pdf_url("https://example.com/invoice/1") == ""
+    assert stripe_pdf_url("") == ""
+
+
+class _FakeResp:
+    def __init__(self, body: bytes, ok: bool = True):
+        self._body, self.ok = body, ok
+
+    def body(self) -> bytes:
+        return self._body
+
+
+class _FakeRequest:
+    def __init__(self, table: dict[str, _FakeResp]):
+        self.table, self.calls = table, []
+
+    def get(self, url, timeout=0):
+        self.calls.append(url)
+        return self.table.get(url, _FakeResp(b"<html>", ok=True))
+
+
+class _FakeContext:
+    def __init__(self, table: dict[str, _FakeResp]):
+        self.request = _FakeRequest(table)
+
+
+def test_download_invoice_pdf_prefers_api_pdf_then_stripe_derived(tmp_path):
+    from cam import devin_collector
+
+    inv = {"invoice_url": "https://invoice.stripe.com/i/acct_1/live_a?s=ap", "pdf_url": "https://api/x.pdf"}
+    # 1) API 直链是真 PDF
+    ctx = _FakeContext({"https://api/x.pdf": _FakeResp(b"%PDF-1.7 a")})
+    path, source, err = devin_collector._download_invoice_pdf(ctx, inv, tmp_path / "a.pdf", "a@x.com")
+    assert source == "direct" and err == "" and (tmp_path / "a.pdf").read_bytes().startswith(b"%PDF")
+    # 2) API 直链不是 PDF → 用 Stripe 托管页推导出的直链
+    ctx = _FakeContext({"https://pay.stripe.com/invoice/acct_1/live_a/pdf?s=ap": _FakeResp(b"%PDF-1.7 b")})
+    path, source, err = devin_collector._download_invoice_pdf(ctx, inv, tmp_path / "b.pdf", "a@x.com")
+    assert source == "direct" and path.endswith("b.pdf")
+    assert ctx.request.calls == ["https://api/x.pdf", "https://pay.stripe.com/invoice/acct_1/live_a/pdf?s=ap"]
+    # 3) 没有任何链接：明确报原因，不抛异常
+    path, source, err = devin_collector._download_invoice_pdf(_FakeContext({}), {}, tmp_path / "c.pdf", "a@x.com")
+    assert path == "" and "没有取到发票链接" in err
+
+
+def test_pick_invoice_links_ignores_sidebar_invoices_nav():
+    from cam.devin_collector import pick_invoice_links
+
+    anchors = [
+        {"text": "Plans", "href": "https://app.devin.ai/settings/plans"},
+        {"text": "Invoices", "href": "https://app.devin.ai/settings/invoices"},      # 左侧导航，不是发票
+        {"text": "View invoice →", "href": "https://invoice.stripe.com/i/acct_1/live_a?s=ap"},
+        {"text": "View invoice →", "href": "https://app.devin.ai/settings/invoices"},   # 无真实外链
+        {"text": "View invoice", "href": "https://invoice.stripe.com/i/acct_1/live_b"},
+    ]
+    assert pick_invoice_links(anchors) == [
+        "https://invoice.stripe.com/i/acct_1/live_a?s=ap", "https://invoice.stripe.com/i/acct_1/live_b"]
+
+
+def test_read_message_limit_from_input_value():
+    from cam.devin_collector import _read_message_limit
+
+    class FakePage:
+        def __init__(self, value=None, boom=False):
+            self.value, self.boom = value, boom
+
+        def evaluate(self, _js):
+            if self.boom:
+                raise RuntimeError("page closed")
+            return self.value
+
+    # 金额在输入框里（innerText 读不到），取 input.value
+    assert _read_message_limit(FakePage("20")) == 20.0
+    assert _read_message_limit(FakePage("1,250.50")) == 1250.5
+    assert _read_message_limit(FakePage("$ 20")) == 20.0
+    assert _read_message_limit(FakePage(None)) is None
+    assert _read_message_limit(FakePage("abc")) is None
+    assert _read_message_limit(FakePage(boom=True)) is None
+
+
+def test_invoices_rendered_even_without_view_invoice_text():
+    from cam.devin_collector import _invoices_rendered
+
+    # 窄窗口下 “View invoice” 文字被收起，只剩绿色箭头，也要认出发票页已渲染
+    assert _invoices_rendered("Invoices\nFilter by date\nDate\nStatus\nAmount\nNov 13, 2026\nPaid\n$213.20")
+    assert _invoices_rendered("No invoices yet")
+    assert not _invoices_rendered("Invoices\nFilter by date\nLoading…")
+
+
+def test_invoice_number_from_stripe_page_text():
+    from cam.devin_collector import invoice_number_from_text
+
+    zh = "账单已付\nUS$213.20\n账单编号\nOVNB3L63-0001\n付款日期\n2026年11月13日\n支付方式\nVisa 3115"
+    assert invoice_number_from_text(zh) == "OVNB3L63-0001"
+    assert invoice_number_from_text("Invoice number  OVNB3L63-0002\nDate paid") == "OVNB3L63-0002"
+    assert invoice_number_from_text("没有编号") == ""
+
+
+def test_pdf_name_is_unique_per_account():
+    from cam.devin_collector import _pdf_name
+
+    used: set[str] = set()
+    a = _pdf_name({"invoice_date": "2026-11-13", "number": "AB-001"}, used)
+    b = _pdf_name({"invoice_date": "2026-11-13", "number": "AB-001"}, used)
+    c = _pdf_name({"invoice_date": "2026-11-13", "status": "Paid", "amount_usd": 213.2}, used)
+    assert a == "2026-11-13-AB-001.pdf" and b == "2026-11-13-AB-001-2.pdf"
+    assert c == "2026-11-13-paid-213.2.pdf" and len({a, b, c}) == 3

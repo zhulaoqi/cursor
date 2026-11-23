@@ -347,7 +347,7 @@
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
         <div>
           <div class="strong" style="font-size:16px">发票导出</div>
-          <div class="muted xs">实时登录 Devin 读取发票页，<b>直接导出 Excel</b>（含发票链接，能拿到时附带 PDF），不写入数据库。</div>
+          <div class="muted xs">实时登录 Devin 读取发票页，<b>下载每张发票的 PDF 并打包成 zip</b>（按账号分文件夹，附清单），不写入数据库。</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" :disabled="invProgress.running || progress.running || !(kpis.active > 0)" @click="exportInvoices([])">导出全部账号发票</button>
@@ -373,7 +373,7 @@
       </div>
       <div class="progress-card fade-enter" x-show="invProgress.running" x-cloak role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <span class="strong">正在读取发票…</span>
+          <span class="strong">正在读取发票并下载 PDF…</span>
           <span class="num muted"><span x-text="invProgress.done"></span> / <span x-text="invProgress.total"></span> · 成功 <span x-text="invProgress.ok"></span> · 失败 <span x-text="invProgress.failed"></span></span>
         </div>
         <div class="bar" role="progressbar" :aria-valuenow="invProgress.done" aria-valuemin="0" :aria-valuemax="invProgress.total"><span :style="`width:${invProgress.total ? Math.round(invProgress.done / invProgress.total * 100) : 0}%`"></span></div>
@@ -527,7 +527,7 @@
     <div><div class="strong" style="font-size:16px;word-break:break-all" x-text="detail?.email"></div>
       <div class="muted xs" x-text="[detail?.owner_email, detail?.note].filter(Boolean).join(' · ')"></div></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-sm" :disabled="invProgress.running || progress.running || detail?.status !== 'active'" @click="exportInvoices([detail.email])" title="实时读取该账号发票并导出 Excel">导出发票</button>
+      <button class="btn btn-sm" :disabled="invProgress.running || progress.running || detail?.status !== 'active'" @click="exportInvoices([detail.email])" title="实时读取该账号发票，下载 PDF 并打包为 zip">导出发票</button>
       <button class="btn btn-sm" @click="detail = null" aria-label="关闭详情">关闭</button>
     </div>
   </div>
@@ -656,7 +656,12 @@ function devinApp() {
         const wasRunning = this.invProgress.running;
         this.invProgress = d.progress; this.invFiles = d.files;
         if (d.progress.running) this.syncInvPolling();
-        else if (wasRunning) this.toast(d.progress.last_error ? '发票导出失败：' + d.progress.last_error : '发票导出完成，可在下方下载', d.progress.last_error ? 'err' : 'ok');
+        else if (wasRunning) {
+          const p = d.progress;
+          if (p.last_error) this.toast('发票导出失败：' + p.last_error, 'err');
+          else if (p.last_pdf_missing > 0) this.toast('导出完成，但有 ' + p.last_pdf_missing + ' 张发票没拿到 PDF，原因见压缩包里的“清单.csv”', 'err');
+          else this.toast('发票 PDF 导出完成，可在下方下载', 'ok');
+        }
       } catch (e) { this.toast(e.message, 'err'); }
     },
     syncInvPolling() {

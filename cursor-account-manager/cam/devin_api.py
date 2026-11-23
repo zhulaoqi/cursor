@@ -380,7 +380,7 @@ async def list_cycles(email: str = "", limit: int = 500):
     return {"count": len(rows), "cycles": rows}
 
 
-# ─── 发票（实时读取，直接导出 Excel，不入库）──────────────────────
+# ─── 发票（实时读取，下载 PDF 打包 zip，不入库）────────────────────
 
 class InvoiceExportRequest(BaseModel):
     emails: List[str] = []
@@ -400,7 +400,7 @@ def _start_invoice_export(emails: list[str]) -> None:
 
 @router.post("/invoices/export")
 async def start_invoice_export(req: InvoiceExportRequest):
-    """后台实时读取发票并导出 xlsx（emails 为空=全部启用账号）。进度见 /invoices/progress。"""
+    """后台实时读取发票、下载 PDF 并打包 zip（emails 为空=全部启用账号）。进度见 /invoices/progress。"""
     if is_running() or get_invoice_progress()["running"]:
         raise HTTPException(status_code=409, detail="已有采集/发票导出任务在执行，请稍后")
     emails = [normalize_email(e) for e in req.emails if normalize_email(e)]
@@ -423,10 +423,11 @@ async def download_invoice_file(name: str):
     path = export_path(name)
     if path is None:
         raise HTTPException(status_code=404, detail="导出文件不存在")
-    return FileResponse(
-        path, filename=path.name,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    media = (
+        "application/zip" if path.suffix == ".zip"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    return FileResponse(path, filename=path.name, media_type=media)
 
 
 # ─── 导出 ─────────────────────────────────────────────────────────
@@ -450,7 +451,7 @@ async def export_xlsx():
     headers = [
         "邮箱", "负责人", "状态", "套餐", "套餐价格(USD)", "计费周期", "账期起", "账期止(续费日)",
         "周额度已用(%)", "周额度重置时间", "按需已用(USD)", "按需余额(USD)",
-        "消息用量上限(USD)", "数据时间", "最近一次采集", "最近失败原因", "备注",
+        "消息用量上限(USD)", "数据时间", "缺失项", "最近一次采集", "最近失败原因", "备注",
     ]
     ws.append(headers)
     for r in rows:
@@ -460,6 +461,7 @@ async def export_xlsx():
             r.get("weekly_used_pct"), _ts(r.get("weekly_reset_at")),
             r.get("on_demand_used_usd"), r.get("on_demand_balance_usd"), r.get("message_limit_usd"),
             _ts(r.get("data_collected_at")),
+            "、".join(r.get("missing") or []),
             ("成功" if r.get("last_attempt_ok") else "失败") if r.get("last_attempt_at") else "未采集",
             error_label(r["last_error_code"]) if r.get("last_error_code") else "", r.get("note") or "",
         ])
@@ -468,7 +470,7 @@ async def export_xlsx():
         cell.font = Font(bold=True)
         cell.fill = fill
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    widths = (30, 26, 8, 10, 14, 10, 12, 14, 14, 20, 14, 14, 16, 20, 14, 26, 24)
+    widths = (30, 26, 8, 10, 14, 10, 12, 14, 14, 20, 14, 14, 16, 20, 22, 14, 26, 24)
     for idx, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = w
     ws.freeze_panes = "B2"

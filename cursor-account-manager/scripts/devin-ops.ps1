@@ -18,7 +18,7 @@
   probe <邮箱> [-Headed] [-Save]  单账号探针；失败落截图/页面文本
   notify-test [-Send]          播报卡片自检
   cycles [-Email a]            查看已入库的账期
-  invoices [-Email a,b]        实时读取发票并直接导出 Excel（不入库）
+  invoices [-Email a,b]        实时读取发票并下载 PDF，打包成 zip（不入库）
   next-run                     下一次定时采集时间
   artifacts [N]                最近 N 个失败现场文件
   logs [N]                     服务日志里的 devin / ERROR 行

@@ -177,6 +177,66 @@ def _current_plan_price(lines: list[str], plan: str) -> tuple[float, str] | None
     return None
 
 
+_RENEW_RE = re.compile(
+    r"(?:renews?|renewal(?:\s+date)?|next\s+(?:billing|payment|invoice)(?:\s+date)?|"
+    r"billing\s+(?:period|cycle)\s+(?:ends|end\s+date))\s*(?:on|date|at)?\s*[:\-]?\s*([^\n]{3,40})",
+    re.I,
+)
+# 已设置取消/到期的套餐没有 “Renews on”，页面会写 “Ends on / Expires on / Cancels on”
+_END_RE = re.compile(
+    r"\b(?:ends|expires|cancels|valid\s+until|active\s+until)\s*(?:on|at)?\s*[:\-]?\s*([^\n]{3,40})",
+    re.I,
+)
+_PERIOD_LABEL_RE = re.compile(r"billing\s+(?:period|cycle)|current\s+period", re.I)
+_RANGE_SPLIT_RE = re.compile(r"\s*[–—]\s*|\s+-\s+|\s+(?:to|through)\s+", re.I)
+
+
+def _range_dates(segment: str, now: datetime) -> tuple[str, str]:
+    """'Nov 13 – Dec 13, 2026' / 'Nov 13, 2026 to Dec 13, 2026' → (起, 止)；任一端失败返回空串。"""
+    parts = [p for p in _RANGE_SPLIT_RE.split(segment.strip(), maxsplit=1) if p.strip()]
+    if len(parts) != 2:
+        return "", ""
+    end = parse_date_text(parts[1], now=now)
+    if not end:
+        return "", ""
+    start_text = parts[0]
+    if not re.search(r"\d{4}", start_text):  # 起点常省略年份：沿用终点的年，跨年则减一
+        end_dt = datetime.strptime(end, "%Y-%m-%d")
+        probe = parse_date_text(f"{start_text} {end_dt.year}", now=now)
+        if probe and probe > end:
+            probe = parse_date_text(f"{start_text} {end_dt.year - 1}", now=now)
+        start = probe
+    else:
+        start = parse_date_text(start_text, now=now)
+    if not start or start >= end:
+        return "", ""
+    return start, end
+
+
+def parse_billing_period(text: str, *, now: datetime | None = None) -> dict[str, Any]:
+    """从页面文本找账期：优先 “Billing period A – B” 区间（起止都有），其次 “Renews on / Next billing date”，
+    最后才是 “Ends/Expires/Cancels on”（已取消的套餐）。只返回识别到的 ``renews_at`` / ``cycle_start``。"""
+    now = now or datetime.now(timezone.utc)
+    out: dict[str, Any] = {}
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for idx, line in enumerate(lines):
+        if not _PERIOD_LABEL_RE.search(line):
+            continue
+        # 标签和日期区间可能同一行，也可能在下一行
+        for chunk in (_PERIOD_LABEL_RE.split(line, maxsplit=1)[-1], *(lines[idx + 1: idx + 2])):
+            start, end = _range_dates(chunk.lstrip(" :\t"), now)
+            if start and end:
+                return {"cycle_start": start, "renews_at": end}
+    flat = "\n".join(lines)
+    for regex in (_RENEW_RE, _END_RE):
+        for m in regex.finditer(flat):
+            date = parse_date_text(m.group(1), now=now)
+            if date:
+                out["renews_at"] = date
+                return out
+    return out
+
+
 def parse_usage_text(text: str, *, now: datetime | None = None) -> dict[str, Any]:
     """解析页面可见文本，只返回识别到的字段。"""
     now = now or datetime.now(timezone.utc)
@@ -199,11 +259,7 @@ def parse_usage_text(text: str, *, now: datetime | None = None) -> dict[str, Any
         out["plan_price_usd"] = price_m[0]
         out["billing_period"] = price_m[1]
 
-    m = re.search(r"(?:renews?|renewal|next\s+billing(?:\s+date)?)\s*(?:on|date)?\s*[:\-]?\s*([^\n]{3,40})", flat, re.I)
-    if m:
-        date = parse_date_text(m.group(1), now=now)
-        if date:
-            out["renews_at"] = date
+    out.update(parse_billing_period(flat, now=now))
 
     for key, label_re in (("weekly", r"weekly(?:\s+quota|\s+usage|\s+limit)?"), ("daily", r"daily(?:\s+quota|\s+usage|\s+limit)?")):
         pct, reset_sec = _percent_near(flat, label_re)
@@ -312,7 +368,26 @@ def extract_from_api(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                 val = node.get(key)
                 if isinstance(val, str) and val.strip():
                     put("plan_name", val.strip())
+            if "invoice" in url or "invoice" in joined:
+                continue  # 发票对象里的 period_end 是历史账期，不是当前账期
+            for target, keys in (("renews_at", _PERIOD_END_KEYS), ("cycle_start", _PERIOD_START_KEYS)):
+                for key in keys:
+                    ts = _parse_time_value(node.get(key))
+                    if ts:
+                        put(target, datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"))
+                        break
     return out
+
+
+_PERIOD_END_KEYS = (
+    "currentPeriodEnd", "current_period_end", "nextBillingDate", "next_billing_date", "nextBillingAt",
+    "renewsAt", "renews_at", "renewalDate", "renewal_date", "billingCycleEnd", "billing_cycle_end",
+    "subscriptionEnd", "periodEnd", "period_end",
+)
+_PERIOD_START_KEYS = (
+    "currentPeriodStart", "current_period_start", "billingCycleStart", "billing_cycle_start",
+    "periodStart", "period_start",
+)
 
 
 def merge_results(api: dict[str, Any], text: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -322,6 +397,10 @@ def merge_results(api: dict[str, Any], text: dict[str, Any]) -> tuple[dict[str, 
     for key, val in api.items():
         if val is not None:
             merged[key] = val
+    # 账期日期以页面可见为准：API 时间戳是 UTC，转成日期可能与页面（本地日期）和发票差一天
+    for key in ("renews_at", "cycle_start"):
+        if text.get(key):
+            merged[key] = text[key]
     used_dom = any(key not in api for key in text)
     source = "+".join(x for x, flag in (("api", used_api), ("dom", used_dom)) if flag)
     return merged, source
@@ -477,6 +556,55 @@ def merge_invoices(
         for a in api_rows:
             merged.append({"number": "", "invoice_url": "", "pdf_url": "", **a})
     return merged
+
+
+_STRIPE_HOSTED_RE = re.compile(r"^https://invoice\.stripe\.com/i/(acct_[^/?#]+)/([^/?#]+)(\?[^#]*)?")
+
+
+def stripe_pdf_url(hosted_url: str) -> str:
+    """Stripe 托管发票页 → 直链 PDF（invoice.stripe.com/i/<acct>/<id> → pay.stripe.com/invoice/<acct>/<id>/pdf）。
+    不是 Stripe 托管页返回空串；是否真是 PDF 由调用方校验 ``%PDF`` 头。"""
+    m = _STRIPE_HOSTED_RE.match(hosted_url or "")
+    if not m:
+        return ""
+    return f"https://pay.stripe.com/invoice/{m.group(1)}/{m.group(2)}/pdf{m.group(3) or ''}"
+
+
+def cycle_from_invoices(
+    rows: list[dict[str, Any]],
+    *,
+    billing_period: str = "month",
+    plan_price: float | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """页面读不到账期时的兜底：续费发票日期 = 本账期起点，终点 = 起点 + 一个计费周期。
+
+    Devin 按订阅周期开票，所以最近一张“续费”发票的日期就是当前账期的起点。
+    有套餐价格时只看金额 ≥ 套餐价的已支付发票（排除按需充值的小额发票）。
+    推算出的终点已经过去（订阅可能已停）时不返回，宁缺毋错。
+    """
+    now = now or datetime.now(timezone.utc)
+    paid = [r for r in rows if (r.get("status") or "").lower() == "paid" and r.get("invoice_date")]
+    if plan_price:
+        big = [r for r in paid if (r.get("amount_usd") or 0) >= plan_price * 0.9]
+        paid = big or paid
+    if not paid:
+        return {}
+    start = max(r["invoice_date"] for r in paid)
+    end = cycle_start_from_end_forward(start, billing_period)
+    if not end or end < (now - timedelta(days=1)).strftime("%Y-%m-%d"):
+        return {}
+    return {"cycle_start": start, "renews_at": end}
+
+
+def cycle_start_from_end_forward(cycle_start: str, billing_period: str = "month") -> str:
+    """账期起点 + 一个计费周期 = 终点（cycle_start_from_end 的反向）。"""
+    try:
+        start = datetime.strptime(cycle_start, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return ""
+    months = 12 if (billing_period or "").lower() in ("year", "annual", "yearly") else 1
+    return _add_months(start, months).strftime("%Y-%m-%d")
 
 
 def missing_fields(data: dict[str, Any]) -> list[str]:

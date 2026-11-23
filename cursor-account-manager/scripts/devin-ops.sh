@@ -11,7 +11,7 @@
 #   probe <邮箱> [--headed] 单账号探针，打印解析结果；失败会落截图/页面文本
 #   notify-test [--send]   生成播报卡片自检（默认只打印）
 #   cycles [--email X]     查看已入库的账期
-#   invoices [--email X]…  实时读取发票并直接导出 Excel（不入库）
+#   invoices [--email X]…  实时读取发票并下载 PDF，打包成 zip（不入库）
 #   next-run               下一次定时采集时间
 #   artifacts [N]          列出最近 N 个失败现场文件（默认 10）
 #   logs [N]               查看服务日志最后 N 行（默认 100）
