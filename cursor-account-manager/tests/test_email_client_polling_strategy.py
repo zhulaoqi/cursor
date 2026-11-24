@@ -61,7 +61,15 @@ class GroupMailboxTests(unittest.TestCase):
             for key in ("IMAP_GROUP_MAILBOXES", "IMAP_GROUP_MAILBOX_ACCOUNTS")
         }
         os.environ["IMAP_GROUP_MAILBOXES"] = "eclicktech.com.cn=kinch.zhu@eclicktech.com.cn"
-        os.environ["IMAP_GROUP_MAILBOX_ACCOUNTS"] = "cursor119@eclicktech.com.cn,cursor132@eclicktech.com.cn"
+        os.environ["IMAP_GROUP_MAILBOX_ACCOUNTS"] = (
+            "cursor97@eclicktech.com.cn,cursor151@eclicktech.com.cn,"
+            "cursor144@eclicktech.com.cn,cursor162@eclicktech.com.cn,"
+            "cursor154@eclicktech.com.cn,cursor85@eclicktech.com.cn,"
+            "cursor78@eclicktech.com.cn,cursor59@eclicktech.com.cn,"
+            "cursor132@eclicktech.com.cn,cursor119@eclicktech.com.cn,"
+            "cursor102@eclicktech.com.cn,cursor98@eclicktech.com.cn,"
+            "cursor182@eclicktech.com.cn"
+        )
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -84,8 +92,16 @@ class GroupMailboxTests(unittest.TestCase):
             email_client.group_mailbox_for("cursor132@eclicktech.com.cn"),
             "kinch.zhu@eclicktech.com.cn",
         )
-        # 同后缀但还没改授权码的账号，继续登录自己的邮箱
-        self.assertIsNone(email_client.group_mailbox_for("cursor182@eclicktech.com.cn"))
+        self.assertEqual(
+            email_client.group_mailbox_for("cursor182@eclicktech.com.cn"),
+            "kinch.zhu@eclicktech.com.cn",
+        )
+        self.assertEqual(
+            email_client.group_mailbox_for("cursor97@eclicktech.com.cn"),
+            "kinch.zhu@eclicktech.com.cn",
+        )
+        # 同后缀但不在名单里的账号，继续登录自己的邮箱
+        self.assertIsNone(email_client.group_mailbox_for("cursor118@eclicktech.com.cn"))
         self.assertIsNone(email_client.group_mailbox_for("other@example.com"))
 
     def test_domain_wildcard_opts_in_the_whole_suffix(self):
