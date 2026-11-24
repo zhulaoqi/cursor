@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from dataclasses import asdict
@@ -12,7 +13,7 @@ from pathlib import Path
 import click
 
 from . import exporter, fetcher
-from .account_store import filter_accounts, load_accounts
+from .account_store import load_accounts
 from .config import SETTINGS
 from .logger import get, setup
 from .models import Account, AccountSnapshot, TokenAcquisitionError
@@ -36,15 +37,45 @@ def cli(verbose: bool) -> None:
     setup("DEBUG" if verbose else "INFO")
 
 
+def _try_load_csv() -> list[Account]:
+    try:
+        return load_accounts()
+    except (FileNotFoundError, ValueError):
+        return []
+
+
+def _account_from_db(email: str) -> Account | None:
+    """Web 账号库（tokens.db）里的账号。指定邮箱登录时以这里的授权码为准。"""
+    row = get_default_store().get_account(email.strip().lower())
+    if not row or not str(row.get("imap_password") or "").strip():
+        return None
+    return Account(
+        email=row["email"],
+        imap_password=row["imap_password"],
+        imap_host=row.get("imap_host") or SETTINGS.default_imap_host,
+        imap_port=int(row.get("imap_port") or SETTINGS.default_imap_port),
+        feishu_email=str(row.get("feishu_email") or ""),
+    )
+
+
 def _pick_accounts(all_flag: bool, email: tuple[str, ...]) -> list[Account]:
+    if email and not all_flag:
+        csv_by_email = {a.email.lower(): a for a in _try_load_csv()}
+        picked: list[Account] = []
+        missing: list[str] = []
+        for raw in email:
+            key = raw.strip().lower()
+            found = _account_from_db(key) or csv_by_email.get(key)
+            if found:
+                picked.append(found)
+            else:
+                missing.append(key)
+        if missing:
+            raise click.UsageError(f"账号库和 CSV 里都找不到: {missing}")
+        return picked
     accounts = load_accounts()
     if all_flag:
         return accounts
-    if email:
-        filtered = filter_accounts(accounts, email)
-        if not filtered:
-            raise click.UsageError(f"CSV 里找不到指定的 email: {list(email)}")
-        return filtered
     raise click.UsageError("必须指定 --all 或 --email")
 
 
@@ -400,10 +431,11 @@ def cmd_reset(email: tuple[str, ...], all_flag: bool, profile: bool) -> None:
 def cmd_test_imap(email: str, timeout: int) -> None:
     """仅测试 IMAP 连接 + 轮询验证码（不启动浏览器），用于排查邮箱问题。"""
     from . import email_client
-    accounts = load_accounts()
-    acc = next((a for a in accounts if a.email.lower() == email.lower()), None)
+    acc = _account_from_db(email)
+    if acc is None:
+        acc = next((a for a in _try_load_csv() if a.email.lower() == email.lower()), None)
     if not acc:
-        raise click.UsageError(f"CSV 里找不到 {email}")
+        raise click.UsageError(f"账号库和 CSV 里都找不到 {email}")
     click.echo(f"测试 {email} → IMAP {acc.imap_host}:{acc.imap_port}")
     try:
         code = email_client.fetch_verification_code(
@@ -414,6 +446,28 @@ def cmd_test_imap(email: str, timeout: int) -> None:
         click.echo(f"✓ 成功拿到验证码: {code}")
     except Exception as e:
         click.echo(f"✗ 失败: {type(e).__name__}: {e}")
+
+
+@cli.command("set-imap-password")
+@click.option("--email", "emails", multiple=True, required=True, help="要改授权码的账号，可重复")
+@click.option("--password", default="", help="新的 IMAP 授权码。省略则读环境变量 IMAP_PASSWORD，再不济交互输入")
+def cmd_set_imap_password(emails: tuple[str, ...], password: str) -> None:
+    """只更新账号的 IMAP 授权码，不登录、不刷新用量。"""
+    password = (password or os.environ.get("IMAP_PASSWORD") or "").strip()
+    if not password:
+        password = click.prompt("IMAP 授权码", hide_input=True).strip()
+    if not password:
+        raise click.UsageError("授权码不能为空")
+    store = get_default_store()
+    missing = []
+    for raw in emails:
+        email = raw.strip().lower()
+        if store.update_imap_password(email, password):
+            click.echo(f"已更新 {email} 的授权码")
+        else:
+            missing.append(email)
+    if missing:
+        raise click.ClickException("账号不在库里: " + ", ".join(missing))
 
 
 # ═══ web（二期 Web UI）═══════════════════════════════════════════

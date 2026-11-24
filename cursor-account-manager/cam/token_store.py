@@ -307,6 +307,16 @@ class TokenStore:
                 ),
             )
 
+    def update_imap_password(self, email: str, imap_password: str) -> bool:
+        """只改授权码，不动主机、端口、飞书邮箱和套餐字段，也不触发采集。"""
+        now = int(time.time())
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE accounts SET imap_password = ?, updated_at = ? WHERE lower(email) = ?",
+                (imap_password, now, email.strip().lower()),
+            )
+            return cur.rowcount > 0
+
     def update_account_plan(
         self,
         *,
