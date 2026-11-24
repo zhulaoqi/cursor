@@ -60,8 +60,8 @@ class GroupMailboxTests(unittest.TestCase):
             key: os.environ.get(key)
             for key in ("IMAP_GROUP_MAILBOXES", "IMAP_GROUP_MAILBOX_ACCOUNTS")
         }
-        os.environ.pop("IMAP_GROUP_MAILBOXES", None)
-        os.environ.pop("IMAP_GROUP_MAILBOX_ACCOUNTS", None)
+        os.environ["IMAP_GROUP_MAILBOXES"] = "eclicktech.com.cn=kinch.zhu@eclicktech.com.cn"
+        os.environ["IMAP_GROUP_MAILBOX_ACCOUNTS"] = "cursor119@eclicktech.com.cn,cursor132@eclicktech.com.cn"
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -69,6 +69,11 @@ class GroupMailboxTests(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+    def test_without_config_each_account_uses_own_mailbox(self):
+        os.environ["IMAP_GROUP_MAILBOXES"] = ""
+        os.environ["IMAP_GROUP_MAILBOX_ACCOUNTS"] = ""
+        self.assertIsNone(email_client.group_mailbox_for("cursor119@eclicktech.com.cn"))
 
     def test_only_listed_accounts_use_group_mailbox(self):
         self.assertEqual(

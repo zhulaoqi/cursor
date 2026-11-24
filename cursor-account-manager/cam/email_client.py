@@ -2,9 +2,9 @@
 
 默认每个账号用自己的邮箱 + IMAP 授权密码登录自己的收件箱。
 
-``@eclicktech.com.cn`` 做了邮箱组后，验证码都进组长邮箱（默认 kinch.zhu@eclicktech.com.cn）。
-这时用组长邮箱登录，再按邮件「收件人」判断是哪个账号在登录。
-先只对 ``IMAP_GROUP_MAILBOX_ACCOUNTS`` 里列出的账号生效，避免没改授权码的账号被定时任务一起带挂。
+邮箱组不写死在代码里，由 .env 决定：
+``IMAP_GROUP_MAILBOXES=域名=组长邮箱``，``IMAP_GROUP_MAILBOX_ACCOUNTS`` 列出改走组长邮箱的账号。
+两项都为空时，每个账号仍登录自己的邮箱。只对列出的账号生效，避免没改授权码的账号被定时任务一起带挂。
 """
 
 from __future__ import annotations
@@ -44,10 +44,6 @@ _STYLE_BLOCK_RE = re.compile(r"(?is)<(script|style)\b[^>]*>.*?</\1>")
 _TAG_RE = re.compile(r"(?s)<[^>]+>")
 _SIMPLE_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
-# 邮箱组：域名 → 真正收信的组长邮箱。验证码进这一个收件箱，靠收件人区分账号。
-_DEFAULT_GROUP_MAILBOXES = "eclicktech.com.cn=kinch.zhu@eclicktech.com.cn"
-# 先只切这两个账号做登录测试。全部授权码改完后，设成 *@eclicktech.com.cn。
-_DEFAULT_GROUP_ACCOUNTS = "cursor119@eclicktech.com.cn,cursor132@eclicktech.com.cn"
 # 飞书邮箱组一般保留原始收件人在 To；其余头是转发/网关改写时的兜底。
 _RECIPIENT_HEADERS = (
     "To", "Cc", "Delivered-To", "X-Original-To", "Envelope-To", "X-Envelope-To", "Resent-To",
@@ -164,7 +160,7 @@ def _message_date_ts(raw: bytes) -> float:
 
 def group_mailboxes() -> dict[str, str]:
     """``IMAP_GROUP_MAILBOXES=域名=组长邮箱``，多个用逗号分隔。"""
-    raw = os.environ.get("IMAP_GROUP_MAILBOXES", _DEFAULT_GROUP_MAILBOXES)
+    raw = os.environ.get("IMAP_GROUP_MAILBOXES", "")
     out: dict[str, str] = {}
     for item in raw.split(","):
         item = item.strip()
@@ -179,7 +175,7 @@ def group_mailboxes() -> dict[str, str]:
 
 def group_mailbox_accounts() -> set[str]:
     """哪些账号改走邮箱组。``*`` 表示全部已配置域名，``*@域名`` 表示该域名全部。"""
-    raw = os.environ.get("IMAP_GROUP_MAILBOX_ACCOUNTS", _DEFAULT_GROUP_ACCOUNTS)
+    raw = os.environ.get("IMAP_GROUP_MAILBOX_ACCOUNTS", "")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
