@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import re
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -792,7 +793,7 @@ def _pdf_name(inv: dict[str, Any], used: set[str]) -> str:
     return name
 
 
-def _scrape_invoices(page: Page, context: Any, email: str) -> list[dict[str, Any]]:
+def _scrape_invoices(page: Page, context: Any, email: str, workdir: Path | None = None) -> list[dict[str, Any]]:
     responses: list[Any] = []
 
     def on_response(resp: Any) -> None:
@@ -822,9 +823,10 @@ def _scrape_invoices(page: Page, context: Any, email: str) -> list[dict[str, Any
     links = _invoice_links(page, context, len(text_rows)) if text_rows else []
     invoices = merge_invoices(text_rows, api_rows, links)
 
-    # 发票交付物就是 PDF：逐张下载，保存到 <导出目录>/invoice-pdf/<账号>/，由导出任务统一打包
+    # 发票交付物就是 PDF：逐张下载到导出任务的临时工作目录 <workdir>/<账号>/，由导出任务统一打包并清理，
+    # 不在服务器上长期保存
     safe = re.sub(r"[^A-Za-z0-9._@-]+", "_", email)
-    folder = devin_settings().export_dir / "invoice-pdf" / safe
+    folder = (workdir or Path(tempfile.mkdtemp(prefix="devin-inv-"))) / safe
     used: set[str] = set()
     artifact_saved = False
     for inv in invoices:
@@ -851,13 +853,16 @@ def _scrape_invoices(page: Page, context: Any, email: str) -> list[dict[str, Any
     return invoices
 
 
-def collect_invoices(account: dict[str, Any]) -> InvoiceResult:
-    """登录并读取该账号的发票列表（阻塞）。异常都转成 InvoiceResult，不向外抛。"""
+def collect_invoices(account: dict[str, Any], workdir: Path | None = None) -> InvoiceResult:
+    """登录、读取该账号的发票列表并把每张 PDF 下载到 ``workdir/<账号>/``（阻塞）。
+    异常都转成 InvoiceResult，不向外抛。"""
     email = account["email"]
     started = time.time()
     state: dict[str, Any] = {"login_used": False}
     try:
-        invoices = _with_session(account, lambda page, context: _scrape_invoices(page, context, email), state)
+        invoices = _with_session(
+            account, lambda page, context: _scrape_invoices(page, context, email, workdir), state,
+        )
         return InvoiceResult(
             email=email, ok=True, invoices=invoices,
             login_used=state["login_used"], duration_ms=int((time.time() - started) * 1000),

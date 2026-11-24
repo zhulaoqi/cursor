@@ -18,7 +18,7 @@
   probe <邮箱> [-Headed] [-Save]  单账号探针；失败落截图/页面文本
   notify-test [-Send]          播报卡片自检
   cycles [-Email a]            查看已入库的账期
-  invoices [-Email a,b]        实时读取发票并下载 PDF，打包成 zip（不入库）
+  invoices [-Email a,b] [-Out 目录]  实时读取发票并下载 PDF，打包成 zip 存到目录（默认当前目录，不入库）
   next-run                     下一次定时采集时间
   artifacts [N]                最近 N 个失败现场文件
   logs [N]                     服务日志里的 devin / ERROR 行
@@ -28,6 +28,7 @@ param(
   [Parameter(Position = 0)][string]$Command = "help",
   [Parameter(Position = 1)][string]$Arg1 = "",
   [string[]]$Email,
+  [string]$Out = ".",
   [switch]$Overwrite, [switch]$Failed, [switch]$Notify, [switch]$Headed, [switch]$Save, [switch]$Send
 )
 $ErrorActionPreference = "Stop"
@@ -74,7 +75,7 @@ switch ($Command) {
   }
   "notify-test" { $a = @("devin-notify-test"); if ($Send) { $a += "--send" }; Cam @a }
   "cycles" { $a = @("devin-cycles"); foreach ($e in $Email) { $a += @("--email", $e) }; Cam @a }
-  "invoices" { $a = @("devin-invoices"); foreach ($e in $Email) { $a += @("--email", $e) }; Cam @a }
+  "invoices" { $a = @("devin-invoices", "--out", $Out); foreach ($e in $Email) { $a += @("--email", $e) }; Cam @a }
   "next-run" { Cam devin-next-run }
   "artifacts" {
     $n = if ($Arg1) { [int]$Arg1 } else { 10 }

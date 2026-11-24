@@ -1,9 +1,12 @@
-"""Devin 发票导出：登录各账号读取发票页 → 下载每张发票的 PDF → 打包成 zip（不入库）。
+"""Devin 发票导出：登录各账号读取发票页 → 下载每张发票的 PDF → 打包成 zip，一次性下载（不入库、不留存）。
 
-发票按需导出：每次导出都是实时从 app.devin.ai 读取，结果只落在导出目录：
-- ``devin-invoices-YYYYMMDD-HHMMSS.zip``：``<账号>/<日期>-<发票号>.pdf`` + ``清单.csv``（含没拿到 PDF 的原因）
-- ``invoice-pdf/<账号>/``：本次下载的 PDF 原文件（zip 的来源，同名会被下次导出覆盖）
+发票按需导出：每次导出都是实时从 app.devin.ai 读取，**不在服务器上保存历史**：
+- 下载的 PDF 先放在本次导出的临时工作目录，打包后立即删除；
+- zip 放在系统临时目录，只保留“最近一次导出”这一份待下载文件；
+- 页面点一次“下载”，文件流式返回后立即删除；没人下载 ``READY_TTL_SEC`` 秒后也会自动清掉；
+- 想再下一次就重新导出。
 
+zip 内容：``<账号>/<日期>-<发票号>.pdf`` + ``清单.csv``（含没拿到 PDF 的原因和读取失败的账号）。
 不写数据库。账期才入库（见 ``devin_store.devin_cycles``）。
 
 与每日采集共用进程内锁：导出期间不会同时跑采集，避免两个任务争用同一个 Chrome profile。
@@ -12,8 +15,11 @@
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import re
+import shutil
+import tempfile
 import threading
 import time
 import zipfile
@@ -32,14 +38,13 @@ from .logger import get
 log = get("devin_invoices")
 
 FILE_PREFIX = "devin-invoices-"
-# zip 是当前格式；xlsx 是早期版本导出的文件，仍允许列出/下载
-_FILE_RE = re.compile(r"^devin-invoices-[0-9]{8}-[0-9]{6}\.(?:zip|xlsx)$")
+READY_TTL_SEC = 1800          # 导出完成后 30 分钟没人下载就自动清掉
+_STALE_SEC = 2 * 3600         # 兜底清理：临时目录里超过 2 小时的残留（如下载中途断开）
 
 _progress_lock = threading.Lock()
 _progress: dict[str, Any] = {
     "running": False, "total": 0, "done": 0, "ok": 0, "failed": 0,
-    "current": [], "started_at": 0, "updated_at": 0, "last_file": "", "last_error": "",
-    "last_invoices": 0, "last_pdf_missing": 0,
+    "current": [], "started_at": 0, "updated_at": 0, "last_error": "",
 }
 
 
@@ -59,6 +64,7 @@ def _set(**kwargs: Any) -> None:
 @dataclass
 class InvoiceExportSummary:
     file: str = ""
+    zip_path: str = ""
     total: int = 0
     success: int = 0
     failed: int = 0
@@ -70,27 +76,103 @@ class InvoiceExportSummary:
     failures: list[dict[str, Any]] = field(default_factory=list)
 
 
-def is_valid_export_name(name: str) -> bool:
-    return bool(_FILE_RE.fullmatch(name or ""))
+# ─── 待下载文件（只保留最近一次导出）────────────────────────────────
+
+_ready_lock = threading.Lock()
+_ready: dict[str, Any] | None = None
 
 
-def list_exports(limit: int = 20) -> list[dict[str, Any]]:
-    base = devin_settings().export_dir
-    if not base.exists():
-        return []
-    files = [p for p in base.glob(f"{FILE_PREFIX}*") if p.is_file() and is_valid_export_name(p.name)]
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return [
-        {"name": p.name, "size": p.stat().st_size, "modified_at": int(p.stat().st_mtime)}
-        for p in files[: max(1, limit)]
-    ]
+def _work_root() -> Path:
+    root = Path(tempfile.gettempdir()) / "cam-devin-invoices"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
-def export_path(name: str) -> Path | None:
-    if not is_valid_export_name(name):
+def _drop_file(path: str | Path | None) -> None:
+    if path:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError as exc:
+            log.debug(f"删除临时文件失败 {path}: {exc}")
+
+
+def sweep_stale(max_age_sec: int = _STALE_SEC) -> None:
+    """清理临时目录里的陈旧残留（崩溃/下载中断留下的 zip 或工作目录）。当前待下载的文件不动。"""
+    root = Path(tempfile.gettempdir()) / "cam-devin-invoices"
+    if not root.exists():
+        return
+    with _ready_lock:
+        keep = _ready["path"] if _ready else ""
+    cutoff = time.time() - max_age_sec
+    for p in root.iterdir():
+        try:
+            if str(p) == keep or p.stat().st_mtime > cutoff:
+                continue
+            shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _set_ready(path: Path, summary: InvoiceExportSummary) -> None:
+    """登记新的待下载文件；上一份（没人下载的）直接作废并删除。"""
+    global _ready
+    with _ready_lock:
+        old = _ready["path"] if _ready else ""
+        _ready = {
+            "path": str(path), "name": path.name, "size": path.stat().st_size, "created_at": int(time.time()),
+            "invoices": summary.invoice_count, "pdf": summary.pdf_count, "pdf_missing": summary.pdf_missing,
+            "accounts": summary.total, "failed_accounts": summary.failed,
+        }
+    if old and old != str(path):
+        _drop_file(old)
+
+
+def _expire_ready_locked() -> str:
+    """调用方持有 _ready_lock；过期则清空并返回需要删除的文件路径。"""
+    global _ready
+    if _ready and time.time() - _ready["created_at"] > READY_TTL_SEC:
+        path = _ready["path"]
+        _ready = None
+        return path
+    return ""
+
+
+def get_ready() -> dict[str, Any] | None:
+    """页面展示用：有待下载的 zip 时返回摘要（不含服务器路径），否则 None。"""
+    with _ready_lock:
+        expired = _expire_ready_locked()
+        info = {k: v for k, v in _ready.items() if k != "path"} if _ready else None
+    _drop_file(expired)
+    return info
+
+
+def take_ready() -> tuple[Path, str] | None:
+    """取走待下载文件（取走即清空，**只能下载一次**）。返回 (路径, 文件名)；没有则 None。
+    调用方负责在响应发送完后删除该文件。"""
+    global _ready
+    with _ready_lock:
+        expired = _expire_ready_locked()
+        taken = _ready
+        _ready = None
+    _drop_file(expired)
+    if not taken:
         return None
-    path = devin_settings().export_dir / name
-    return path if path.is_file() else None
+    path = Path(taken["path"])
+    if not path.is_file():
+        return None
+    return path, taken["name"]
+
+
+def clear_ready() -> None:
+    """新导出开始时作废上一份没下载的文件。"""
+    taken = take_ready()
+    if taken:
+        _drop_file(taken[0])
+
+
+def discard_file(path: str | Path) -> None:
+    """下载响应发完后的清理钩子。"""
+    _drop_file(path)
 
 
 _SOURCE_LABELS = {"direct": "官方直链", "download": "发票页下载", "print": "发票页打印（非官方文件）"}
@@ -135,16 +217,26 @@ def run_invoice_export(
     emails: list[str] | None = None,
     store: DevinStore | None = None,
     fetcher: Callable[[dict[str, Any]], InvoiceResult] | None = None,
+    publish: bool = True,
 ) -> InvoiceExportSummary:
-    """读取启用账号（或指定账号）的发票并下载 PDF、打包 zip；返回汇总。"""
+    """读取启用账号（或指定账号）的发票并下载 PDF、打包 zip；返回汇总。
+
+    ``publish=True``（网页）：zip 登记为“待下载”，下载一次即删。
+    ``publish=False``（CLI）：只返回 ``summary.zip_path``，由调用方自己搬走/删除。
+    """
     store = store or get_default_devin_store()
-    fetcher = fetcher or collect_invoices
     cfg = devin_settings()
     summary = InvoiceExportSummary()
     if not _run_lock.acquire(blocking=False):
         summary.lock_busy = True
         return summary
+    workdir: Path | None = None
     try:
+        if publish:
+            clear_ready()
+        sweep_stale()
+        workdir = Path(tempfile.mkdtemp(prefix="run-", dir=_work_root()))
+        fetcher = fetcher or functools.partial(collect_invoices, workdir=workdir)
         wanted = {e.strip().lower() for e in emails or [] if e and e.strip()}
         accounts = store.list_accounts()
         if wanted:
@@ -196,10 +288,16 @@ def run_invoice_export(
             summary.pdf_missing = summary.invoice_count - summary.pdf_count
             summary.amount_total_usd = round(sum((r.get("amount_usd") or 0) for r in rows), 2)
             if targets:
-                cfg.export_dir.mkdir(parents=True, exist_ok=True)
-                path = cfg.export_dir / f"{FILE_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}.zip"
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                path = _work_root() / f"{FILE_PREFIX}{stamp}.zip"
+                n = 1
+                while path.exists():          # 同一秒内重名（如 CLI 并发）不互相覆盖
+                    n += 1
+                    path = _work_root() / f"{FILE_PREFIX}{stamp}-{n}.zip"
                 path.write_bytes(build_invoice_zip(rows, summary.failures))
-                summary.file = path.name
+                summary.file, summary.zip_path = path.name, str(path)
+                if publish:
+                    _set_ready(path, summary)
                 log.info(
                     f"Devin 发票导出完成 file={path.name} accounts={summary.total} ok={summary.success} "
                     f"failed={summary.failed} invoices={summary.invoice_count} pdf={summary.pdf_count} "
@@ -210,8 +308,9 @@ def run_invoice_export(
             log.exception("Devin 发票导出异常")
             raise
         finally:
-            _set(running=False, current=[], last_file=summary.file,
-                 last_invoices=summary.invoice_count, last_pdf_missing=summary.pdf_missing)
+            _set(running=False, current=[])
         return summary
     finally:
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)   # PDF 原文件不留存，已全部进了 zip
         _run_lock.release()

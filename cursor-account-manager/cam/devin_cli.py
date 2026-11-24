@@ -157,17 +157,25 @@ def register(cli: click.Group) -> None:
 
     @cli.command("devin-invoices")
     @click.option("--email", "emails", multiple=True, help="只导出指定账号（可重复）；缺省=全部启用账号")
-    def cmd_devin_invoices(emails: tuple[str, ...]) -> None:
-        """实时读取发票，下载每张发票的 PDF 并打包成 zip（不入库）。文件在 DEVIN_EXPORT_DIR。"""
+    @click.option("--out", "out_dir", type=click.Path(file_okay=False, path_type=Path), default=".",
+                  show_default=True, help="zip 保存到哪个目录（服务端不再自己留存导出文件）")
+    def cmd_devin_invoices(emails: tuple[str, ...], out_dir: Path) -> None:
+        """实时读取发票，下载每张发票的 PDF 并打包成 zip（不入库），保存到 --out 目录。"""
+        import shutil
+
         from .devin_invoices import run_invoice_export
 
-        summary = run_invoice_export(emails=[normalize_email(e) for e in emails] or None)
+        summary = run_invoice_export(emails=[normalize_email(e) for e in emails] or None, publish=False)
         if summary.lock_busy:
             click.echo("已有采集/导出任务在执行（未拿到锁），请稍后重试")
             sys.exit(2)
-        out = devin_settings().export_dir / summary.file if summary.file else None
+        out = None
+        if summary.zip_path:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out = out_dir / summary.file
+            shutil.move(summary.zip_path, out)
         _echo_json({
-            "file": str(out) if out else "", "accounts": summary.total, "success": summary.success,
+            "file": str(out.resolve()) if out else "", "accounts": summary.total, "success": summary.success,
             "failed": summary.failed, "invoices": summary.invoice_count,
             "pdf": summary.pdf_count, "pdf_missing": summary.pdf_missing,
             "amount_total_usd": summary.amount_total_usd,

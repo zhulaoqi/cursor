@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from .devin_config import devin_settings
@@ -26,10 +27,11 @@ from .devin_import import (
     parse_accounts_file,
 )
 from .devin_invoices import (
-    export_path,
+    discard_file,
     get_invoice_progress,
-    list_exports,
+    get_ready,
     run_invoice_export,
+    take_ready,
 )
 from .devin_runner import build_alert, get_progress, is_running, run_devin_collection, RunSummary
 from .devin_scheduler import get_devin_scheduler
@@ -415,19 +417,21 @@ async def start_invoice_export(req: InvoiceExportRequest):
 
 @router.get("/invoices/progress")
 async def invoice_progress():
-    return {"progress": get_invoice_progress(), "files": await asyncio.to_thread(list_exports, 20)}
+    """进度 + 待下载文件摘要（``ready``，没有则为 null）。不保存历史，只有最近一次导出的这一份。"""
+    return {"progress": get_invoice_progress(), "ready": await asyncio.to_thread(get_ready)}
 
 
-@router.get("/invoices/files/{name}")
-async def download_invoice_file(name: str):
-    path = export_path(name)
-    if path is None:
-        raise HTTPException(status_code=404, detail="导出文件不存在")
-    media = (
-        "application/zip" if path.suffix == ".zip"
-        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+@router.get("/invoices/download")
+async def download_invoice_zip():
+    """下载最近一次导出的 zip。**只能下载一次**：响应发完立即删除文件；要再下载请重新导出。"""
+    taken = await asyncio.to_thread(take_ready)
+    if taken is None:
+        raise HTTPException(status_code=404, detail="没有可下载的发票文件，请重新导出")
+    path, name = taken
+    return FileResponse(
+        path, filename=name, media_type="application/zip",
+        background=BackgroundTask(discard_file, path),
     )
-    return FileResponse(path, filename=path.name, media_type=media)
 
 
 # ─── 导出 ─────────────────────────────────────────────────────────

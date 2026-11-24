@@ -54,15 +54,19 @@
 
 **发票：实时读取，下载每张发票的 PDF，打包成 zip，不写数据库。**
 - 页面「账期与发票」→ 勾选账号后「导出所选账号发票」或「导出全部账号发票」，也可在账号详情抽屉里「导出发票」（单账号）；
-  CLI：`scripts/devin-ops.sh invoices [--email X]`（`.ps1`：`invoices -Email a,b`）。
+  CLI：`scripts/devin-ops.sh invoices [--email X] [--out 目录]`（`.ps1`：`invoices -Email a,b -Out 目录`）。
 - 流程：登录 → 打开 `/settings/invoices` → 解析表格（日期 / 状态 / 金额）→ 按“发票行”定位入口并取外链（Stripe 托管发票页）：
   行里有链接就直接读；窗口较窄时 “View invoice” 文字会收起、只剩绿色箭头，此时点击该箭头，捕获新开标签页（或当前页跳转）的地址
   → 逐张取 PDF，依次尝试：页面 API 给的 `invoice_pdf` 直链 → 由 Stripe 托管页地址推导的 PDF 直链 → 打开发票页点
   “下载发票”按钮（与 Cursor 侧同一套选择器，跳过“收据”）→ 最后才把发票页打印成 PDF（清单里标注“非官方文件”）。
-- 输出：`DEVIN_EXPORT_DIR`（默认 `data/exports/devin`）下 `devin-invoices-YYYYMMDD-HHMMSS.zip`：
-  `<邮箱>/<日期>-<发票号>.pdf` + `清单.csv`（账号 / 日期 / 状态 / 金额 / PDF 来源 / 没拿到 PDF 的原因 / 读取失败账号）。
-  PDF 原文件也留在 `invoice-pdf/<邮箱>/`。没拿到 PDF 的发票不会悄悄漏掉：清单里写明原因，页面完成提示里也会告警，
-  并在 `data/artifacts/devin` 留下发票页的截图和文本。
+- 输出：一个 zip，`<邮箱>/<日期>-<发票号>.pdf` + `清单.csv`（账号 / 日期 / 状态 / 金额 / PDF 来源 / 没拿到 PDF 的原因 / 读取失败账号）。
+  没拿到 PDF 的发票不会悄悄漏掉：清单里写明原因，页面也会告警，并在 `data/artifacts/devin` 留下发票页的截图和文本。
+- **不留存、一次性下载**：导出完成后页面只出现一个「下载 zip」按钮，点完即从服务器删除、提示消失；
+  想再下一次就重新导出。页面不保存导出历史列表。
+  - PDF 先放本次的临时工作目录，打包后立即删除；zip 放在系统临时目录（`<tmp>/cam-devin-invoices`），只保留最近一次、尚未下载的那份；
+  - 新导出开始时，上一份没下载的会作废；没人下载 30 分钟后自动清掉；服务重启后残留超过 2 小时的临时文件下次导出时清理。
+  - CLI 没有“页面”，所以 `invoices` 命令把 zip 存到 `--out` 目录（默认当前目录；`.ps1`：`-Out D:\invoices`），之后由你自己管理。
+- 早期版本曾把导出文件放在 `data/exports/devin`、PDF 放在 `invoice-pdf/`；不再使用，服务器上若还有这些目录可手动删除。
 - 金额以页面可见文本为准；API 只用来补充发票号、链接和 PDF 地址。
 - 导出与每日采集共用进程内锁，二者不会同时跑（同一账号共用一个 Chrome profile）。导出期间触发的定时采集会被跳过并提示 `lock_busy`。
 - 停用账号不会被读取。
@@ -140,5 +144,5 @@ Linux / macOS / CentOS：`scripts/devin-ops.sh <命令>`；Windows：`.\scripts\
 ## 8. 备份与清理
 
 - `backup-db` 使用 SQLite 在线备份（WAL 安全）。
-- 页面删除账号默认保留历史快照，需同时清除时调 `DELETE /api/devin/accounts/{email}?purge=true`；`devin_snapshots` 每次采集（含失败）一行；`devin_cycles` 每账期一行（量很小，无需清理）；`DEVIN_EXPORT_DIR` 里的发票 zip/PDF 不会自动清理，长期运行可按需清理 90 天前数据。
+- 页面删除账号默认保留历史快照，需同时清除时调 `DELETE /api/devin/accounts/{email}?purge=true`；`devin_snapshots` 每次采集（含失败）一行；`devin_cycles` 每账期一行（量很小，无需清理）；发票 zip 不落盘留存（一次性下载，见第 3 节），无需清理。
 - Chrome profile 位于 `CAM_CHROME_PROFILES_DIR`（目录名 `devin__*`），删除账号后可手动清理。

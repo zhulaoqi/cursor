@@ -53,7 +53,6 @@ class DevinSettings:
     sender_keywords: tuple[str, ...]
     code_timeout_sec: int
     artifacts_dir: Path
-    export_dir: Path
 
 
 def load_devin_settings() -> DevinSettings:
@@ -68,9 +67,6 @@ def load_devin_settings() -> DevinSettings:
         for x in _env_str("DEVIN_CODE_SENDER_KEYWORDS", "devin,cognition,windsurf").split(",")
         if x.strip()
     )
-    export_dir = Path(_env_str("DEVIN_EXPORT_DIR", "data/exports/devin"))
-    if not export_dir.is_absolute():
-        export_dir = PROJECT_ROOT / export_dir
     return DevinSettings(
         schedule_enable=_env_bool("DEVIN_SCHEDULE_ENABLE", True),
         daily_at=daily_at,
@@ -83,7 +79,6 @@ def load_devin_settings() -> DevinSettings:
         sender_keywords=keywords or ("devin", "cognition"),
         code_timeout_sec=_env_int("DEVIN_CODE_TIMEOUT_SEC", 180, minimum=30),
         artifacts_dir=artifacts,
-        export_dir=export_dir,
     )
 
 

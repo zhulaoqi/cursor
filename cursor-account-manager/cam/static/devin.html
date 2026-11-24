@@ -85,6 +85,9 @@
     .inv-item{min-height:32px;min-width:0}
     .inv-email{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .inv-empty{grid-column:1/-1;padding:8px 0}
+    .inv-ready{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 16px;border:1px solid #BBF7D0;background:#F0FDF4;border-radius:10px}
+    .inv-ready.warn{border-color:#FDE68A;background:#FFFBEB}
+    .inv-ready-text{display:flex;flex-direction:column;gap:3px;min-width:0}
 
     /* ── KPI ── */
     .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
@@ -115,6 +118,13 @@
     tbody td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
     tbody tr{transition:background-color .15s} tbody tr:hover{background:#F8FAFC}
     tbody tr:last-child td{border-bottom:0}
+    /* 账期表：每个账号一个 tbody（当前账期 + 可展开的历史账期），只有整张表最后一行不画底线 */
+    .cyc-table tbody tr:last-child td{border-bottom:1px solid var(--line-soft)}
+    .cyc-table tbody:last-child tr:last-child td{border-bottom:0}
+    .cyc-table tr.hist-row td{background:#FAFBFC;font-size:12px;padding-top:8px;padding-bottom:8px}
+    .cyc-table tr.hist-row td:first-child{padding-left:28px;color:var(--text-muted,#64748B)}
+    .hist-btn{display:inline-flex;align-items:center;gap:4px;min-height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap}
+    .hist-btn:hover{background:#F1F5F9} .hist-btn svg{transition:transform .15s} .hist-btn[aria-expanded="true"] svg{transform:rotate(180deg)}
     td.r,th.r{text-align:right}
     .email-cell{display:flex;flex-direction:column;gap:1px;min-width:220px}
     .email-cell .e{font-weight:600;word-break:break-all}
@@ -379,15 +389,23 @@
         <div class="bar" role="progressbar" :aria-valuenow="invProgress.done" aria-valuemin="0" :aria-valuemax="invProgress.total"><span :style="`width:${invProgress.total ? Math.round(invProgress.done / invProgress.total * 100) : 0}%`"></span></div>
         <span class="xs muted" x-show="invProgress.current && invProgress.current.length" x-text="'正在处理：' + (invProgress.current || []).join('、')"></span>
       </div>
-      <div class="table-wrap" style="border:1px solid var(--line-subtle)">
-        <table>
-          <thead><tr><th>导出文件</th><th>生成时间</th><th class="r">大小</th><th class="r">操作</th></tr></thead>
-          <tbody><template x-for="f in invFiles" :key="f.name"><tr>
-            <td class="mono" x-text="f.name"></td><td class="num xs" x-text="fmtTime(f.modified_at)"></td>
-            <td class="r num xs" x-text="(f.size / 1024).toFixed(1) + ' KB'"></td>
-            <td class="r"><a class="btn btn-sm" :href="'/api/devin/invoices/files/' + encodeURIComponent(f.name)">下载</a></td></tr></template></tbody>
-        </table>
-        <div class="empty" x-show="!invFiles.length" x-cloak><strong>还没有导出过发票</strong>勾选账号后点“导出所选账号发票”，或直接导出全部账号。</div>
+      <!-- 导出完成：一个下载按钮。下载完成后提示消失，服务器上的文件同时删除；要再下载就重新导出 -->
+      <div class="inv-ready fade-enter" :class="(invReady?.pdf_missing > 0 || invReady?.failed_accounts > 0) && 'warn'"
+           x-show="invReady && !invProgress.running" x-cloak role="status" aria-live="polite">
+        <div class="inv-ready-text">
+          <span class="strong" x-text="(invReady?.pdf_missing > 0 || invReady?.failed_accounts > 0) ? '发票已导出（部分未拿到）' : '发票已就绪'"></span>
+          <span class="xs">
+            共 <b class="num" x-text="invReady?.invoices"></b> 张发票，PDF <b class="num" x-text="invReady?.pdf"></b> 张
+            <template x-if="invReady?.pdf_missing > 0"><span>，<b class="warn-text" x-text="invReady?.pdf_missing + ' 张没拿到 PDF'"></b></span></template>
+            <template x-if="invReady?.failed_accounts > 0"><span>，<b class="warn-text" x-text="invReady?.failed_accounts + ' 个账号读取失败'"></b></span></template>
+            <template x-if="invReady?.pdf_missing > 0 || invReady?.failed_accounts > 0"><span>（原因见压缩包里的“清单.csv”）</span></template>
+          </span>
+          <span class="xs muted">下载后文件即从服务器删除，需要再次下载请重新导出。</span>
+        </div>
+        <button class="btn btn-primary" :disabled="invDownloading" @click="downloadInvoices()">
+          <span class="spin" x-show="invDownloading" aria-hidden="true"></span>
+          <svg x-show="!invDownloading" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span x-text="invDownloading ? '下载中…' : '下载 zip（' + ((invReady?.size || 0) / 1024).toFixed(0) + ' KB）'"></span></button>
       </div>
     </div>
 
@@ -395,39 +413,68 @@
       <div class="grow"><label class="sr-only" for="cq">搜索账期</label><input id="cq" class="input" type="search" placeholder="搜索邮箱" x-model.debounce.250ms="cq" /></div>
       <div class="seg" role="group" aria-label="账期筛选">
         <template x-for="f in cycleFilters" :key="f.key">
-          <button type="button" :aria-pressed="cycleFilter === f.key" @click="cycleFilter = f.key" x-text="f.label + ' (' + cycles.filter(c => f.key === 'all' || c.state === f.key).length + ')'"></button>
+          <button type="button" :aria-pressed="cycleFilter === f.key" @click="cycleFilter = f.key" x-text="f.label + ' (' + cycleGroups.filter(g => f.key === 'all' || g.current.state === f.key).length + ')'"></button>
         </template>
       </div>
       <div style="flex:1"></div>
-      <span class="muted xs">账期随每次成功采集自动入库；周期结束后最后一次采样即该账期最终用量。</span>
+      <span class="muted xs">每个账号默认只显示当前账期，点「历史账期」展开往期；周期结束后最后一次采样即该账期最终用量。</span>
       <button class="btn" @click="exportXlsx()" title="导出 Excel（含“账期”工作表）">导出 Excel</button>
     </div>
     <div class="card table-wrap">
-      <table>
-        <thead><tr><th>账号</th><th>账期</th><th>状态</th><th>套餐</th><th>周额度峰值</th><th class="r">按需已用峰值</th><th class="r">按需余额</th><th class="r">采样</th><th>最近采集</th></tr></thead>
-        <tbody>
-          <template x-for="c in visibleCycles" :key="c.email + c.cycle_end">
+      <table class="cyc-table">
+        <thead><tr><th>账号</th><th>账期</th><th>状态</th><th>套餐</th><th>周额度峰值</th><th class="r">按需已用峰值</th><th class="r">按需余额</th><th class="r">采样</th><th>最近采集</th><th>历史账期</th></tr></thead>
+        <!-- 每个账号一组：当前账期一行 + 历史账期（点按钮展开，同样的列对齐） -->
+        <template x-for="g in visibleGroups" :key="g.email">
+          <tbody>
             <tr>
-              <td class="strong" style="word-break:break-all" x-text="c.email"></td>
-              <td class="num xs" x-text="c.cycle_start + ' → ' + c.cycle_end"></td>
-              <td><span class="badge" :class="c.state === 'current' ? 'b-ok' : 'b-mute'" x-text="c.state === 'current' ? ('进行中 · ' + cycleLeftText(c.cycle_end)) : '已结束'"></span></td>
-              <td><span class="badge b-info" x-show="c.plan_name" x-text="c.plan_name"></span>
-                <span class="xs muted num" x-show="c.plan_price_usd != null" x-text="fmtUsd(c.plan_price_usd, 0) + '/' + (c.billing_period === 'year' ? '年' : '月')"></span></td>
+              <td class="strong" style="word-break:break-all" x-text="g.email"></td>
+              <td class="num xs" x-text="g.current.cycle_start + ' → ' + g.current.cycle_end"></td>
+              <td><span class="badge" :class="g.current.state === 'current' ? 'b-ok' : 'b-mute'" x-text="g.current.state === 'current' ? ('进行中 · ' + cycleLeftText(g.current.cycle_end)) : '已结束'"></span></td>
+              <td><span class="badge b-info" x-show="g.current.plan_name" x-text="g.current.plan_name"></span>
+                <span class="xs muted num" x-show="g.current.plan_price_usd != null" x-text="fmtUsd(g.current.plan_price_usd, 0) + '/' + (g.current.billing_period === 'year' ? '年' : '月')"></span></td>
               <td>
-                <template x-if="c.peak_weekly_used_pct != null"><div class="meter">
-                  <div class="meter-top num"><span x-text="fmtPct(c.peak_weekly_used_pct)"></span></div>
-                  <div class="bar" :class="levelClass(c.peak_weekly_used_pct)"><span :style="`width:${Math.min(100, c.peak_weekly_used_pct)}%`"></span></div></div></template>
-                <span class="muted" x-show="c.peak_weekly_used_pct == null">—</span>
+                <template x-if="g.current.peak_weekly_used_pct != null"><div class="meter">
+                  <div class="meter-top num"><span x-text="fmtPct(g.current.peak_weekly_used_pct)"></span></div>
+                  <div class="bar" :class="levelClass(g.current.peak_weekly_used_pct)"><span :style="`width:${Math.min(100, g.current.peak_weekly_used_pct)}%`"></span></div></div></template>
+                <span class="muted" x-show="g.current.peak_weekly_used_pct == null">—</span>
               </td>
-              <td class="r num" x-text="fmtUsd(c.peak_on_demand_used_usd)"></td>
-              <td class="r num" x-text="fmtUsd(c.on_demand_balance_usd)"></td>
-              <td class="r num" x-text="c.samples"></td>
-              <td class="num xs" x-text="fmtTime(c.last_seen_at)"></td>
+              <td class="r num" x-text="fmtUsd(g.current.peak_on_demand_used_usd)"></td>
+              <td class="r num" x-text="fmtUsd(g.current.on_demand_balance_usd)"></td>
+              <td class="r num" x-text="g.current.samples"></td>
+              <td class="num xs" x-text="fmtTime(g.current.last_seen_at)"></td>
+              <td>
+                <button type="button" class="hist-btn" x-show="g.history.length" :aria-expanded="!!cycleOpen[g.email]" @click="cycleOpen[g.email] = !cycleOpen[g.email]"
+                  :aria-label="(cycleOpen[g.email] ? '收起' : '展开') + ' ' + g.email + ' 的历史账期'">
+                  <span x-text="'历史账期 (' + g.history.length + ')'"></span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <span class="xs muted" x-show="!g.history.length" title="采集到的第一个账期；下个账期开始后，这里会出现往期记录">暂无</span>
+              </td>
             </tr>
-          </template>
-        </tbody>
+            <template x-for="h in g.history" :key="g.email + h.cycle_end">
+              <tr class="hist-row" x-show="cycleOpen[g.email]" x-cloak>
+                <td x-text="'↳ 历史账期'"></td>
+                <td class="num xs" x-text="h.cycle_start + ' → ' + h.cycle_end"></td>
+                <td><span class="badge" :class="h.state === 'current' ? 'b-ok' : 'b-mute'" x-text="h.state === 'current' ? ('进行中 · ' + cycleLeftText(h.cycle_end)) : '已结束'"></span></td>
+                <td><span class="badge b-info" x-show="h.plan_name" x-text="h.plan_name"></span>
+                  <span class="xs muted num" x-show="h.plan_price_usd != null" x-text="fmtUsd(h.plan_price_usd, 0) + '/' + (h.billing_period === 'year' ? '年' : '月')"></span></td>
+                <td>
+                  <template x-if="h.peak_weekly_used_pct != null"><div class="meter">
+                    <div class="meter-top num"><span x-text="fmtPct(h.peak_weekly_used_pct)"></span></div>
+                    <div class="bar" :class="levelClass(h.peak_weekly_used_pct)"><span :style="`width:${Math.min(100, h.peak_weekly_used_pct)}%`"></span></div></div></template>
+                  <span class="muted" x-show="h.peak_weekly_used_pct == null">—</span>
+                </td>
+                <td class="r num" x-text="fmtUsd(h.peak_on_demand_used_usd)"></td>
+                <td class="r num" x-text="fmtUsd(h.on_demand_balance_usd)"></td>
+                <td class="r num" x-text="h.samples"></td>
+                <td class="num xs" x-text="fmtTime(h.last_seen_at)"></td>
+                <td></td>
+              </tr>
+            </template>
+          </tbody>
+        </template>
       </table>
-      <div class="empty" x-show="!visibleCycles.length" x-cloak><strong>还没有账期数据</strong>采集成功并识别到续费日期后，会自动生成账期记录。</div>
+      <div class="empty" x-show="!visibleGroups.length" x-cloak><strong>还没有账期数据</strong>采集成功并识别到续费日期后，会自动生成账期记录。</div>
     </div>
   </section>
 
@@ -572,9 +619,9 @@ function devinApp() {
     dragOver: false, preview: [], warnings: [], overwrite: false, saving: false,
     one: { email: '', imap_password: '', owner_email: '', note: '' },
     runs: [], expandedRun: '',
-    cycles: [], cq: '', cycleFilter: 'all',
+    cycles: [], cq: '', cycleFilter: 'all', cycleOpen: {},
     cycleFilters: [{ key: 'all', label: '全部' }, { key: 'current', label: '进行中' }, { key: 'ended', label: '已结束' }],
-    invProgress: { running: false, total: 0, done: 0, ok: 0, failed: 0, current: [] }, invFiles: [], _invPoll: null,
+    invProgress: { running: false, total: 0, done: 0, ok: 0, failed: 0, current: [] }, invReady: null, invDownloading: false, _invPoll: null,
     invQ: '', invSelected: [],
     get invAccounts() { return this.accounts.filter(a => a.status === 'active'); },
     get invVisible() {
@@ -645,24 +692,58 @@ function devinApp() {
       }
     },
     async loadAccounts() { try { this.accounts = (await this.api('/api/devin/accounts')).accounts; } catch (e) { this.toast(e.message, 'err'); } },
-    async loadCycles() { try { this.cycles = (await this.api('/api/devin/cycles?limit=1000')).cycles; } catch (e) { this.toast(e.message, 'err'); } },
-    get visibleCycles() {
+    async loadCycles() { try { this.cycles = (await this.api('/api/devin/cycles?limit=5000')).cycles; } catch (e) { this.toast(e.message, 'err'); } },
+    // 按账号分组：账期按终点倒序，第一条是当前（最新）账期，其余是历史账期
+    get cycleGroups() {
+      const byEmail = new Map();
+      for (const c of this.cycles) { if (!byEmail.has(c.email)) byEmail.set(c.email, []); byEmail.get(c.email).push(c); }
+      return [...byEmail].map(([email, list]) => {
+        list.sort((a, b) => (b.cycle_end || '').localeCompare(a.cycle_end || ''));
+        return { email, current: list[0], history: list.slice(1) };
+      }).sort((a, b) => (b.current.cycle_end || '').localeCompare(a.current.cycle_end || '') || a.email.localeCompare(b.email));
+    },
+    get visibleGroups() {
       const kw = this.cq.trim().toLowerCase();
-      return this.cycles.filter(c => (this.cycleFilter === 'all' || c.state === this.cycleFilter) && (!kw || c.email.toLowerCase().includes(kw)));
+      return this.cycleGroups.filter(g => (this.cycleFilter === 'all' || g.current.state === this.cycleFilter) && (!kw || g.email.toLowerCase().includes(kw)));
     },
     async loadInvoices() {
       try {
         const d = await this.api('/api/devin/invoices/progress');
         const wasRunning = this.invProgress.running;
-        this.invProgress = d.progress; this.invFiles = d.files;
+        this.invProgress = d.progress; this.invReady = d.ready;
         if (d.progress.running) this.syncInvPolling();
         else if (wasRunning) {
-          const p = d.progress;
-          if (p.last_error) this.toast('发票导出失败：' + p.last_error, 'err');
-          else if (p.last_pdf_missing > 0) this.toast('导出完成，但有 ' + p.last_pdf_missing + ' 张发票没拿到 PDF，原因见压缩包里的“清单.csv”', 'err');
-          else this.toast('发票 PDF 导出完成，可在下方下载', 'ok');
+          if (d.progress.last_error) this.toast('发票导出失败：' + d.progress.last_error, 'err');
+          else if (d.ready && d.ready.pdf_missing > 0) this.toast('导出完成，但有 ' + d.ready.pdf_missing + ' 张发票没拿到 PDF，原因见压缩包里的“清单.csv”', 'err');
+          else if (d.ready) this.toast('发票已就绪，点“下载 zip”保存', 'ok');
         }
       } catch (e) { this.toast(e.message, 'err'); }
+    },
+    // 用 fetch 取回再保存：成功才让提示消失；出错（如已过期）只弹提示，不会把页面跳转成 JSON 错误页
+    async downloadInvoices() {
+      if (this.invDownloading) return;
+      this.invDownloading = true;
+      try {
+        const res = await fetch('/api/devin/invoices/download');
+        if (!res.ok) {
+          let msg = '下载失败';
+          try { const j = await res.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (_) {}
+          this.invReady = null;
+          throw new Error(msg);
+        }
+        const blob = await res.blob();
+        const name = (this.invReady && this.invReady.name) || 'devin-invoices.zip';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        this.invReady = null;            // 下载完成：提示消失，服务器上的文件已删除
+        this.toast('已下载 ' + name, 'ok');
+      } catch (e) {
+        this.toast(e.message || '下载失败', 'err');
+      } finally {
+        this.invDownloading = false;
+      }
     },
     syncInvPolling() {
       if (this._invPoll) return;
@@ -675,6 +756,7 @@ function devinApp() {
       try {
         await this.api('/api/devin/invoices/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }) });
         this.toast(emails.length === 1 ? '已开始导出 ' + emails[0] + ' 的发票' : emails.length ? '已开始导出 ' + emails.length + ' 个账号的发票' : '已开始导出全部账号发票', 'info');
+        this.invReady = null;   // 新导出开始，上一份未下载的文件已作废
         this.invProgress = { ...this.invProgress, running: true, done: 0, ok: 0, failed: 0 };
         if (this.view !== 'billing') this.go('billing');
         this.syncInvPolling();

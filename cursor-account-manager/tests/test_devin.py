@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import io
+import os
+import time
+import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 
-from cam import devin_api, devin_runner
+from cam import devin_api, devin_invoices, devin_runner
 from cam.devin_collector import CollectResult
 from cam.devin_errors import DevinError, classify_exception
 from cam.devin_import import DevinImportError, build_template_xlsx, parse_accounts_file
@@ -546,17 +550,17 @@ def test_build_invoice_zip_contains_pdfs_and_manifest(tmp_path):
     assert any("读取失败" in r[8] and r[0] == "b@x.com" for r in rows[1:])
 
 
-def test_run_invoice_export_writes_file_without_touching_db(store, tmp_path, monkeypatch):
-    monkeypatch.setenv("DEVIN_EXPORT_DIR", str(tmp_path / "exp"))
-    monkeypatch.setenv("DEVIN_CONCURRENCY", "2")
-    _add(store, "a@x.com", owner="o@x.com")
-    _add(store, "b@x.com")
-    store.set_status("b@x.com", "disabled")
-    _add(store, "c@x.com")
+@pytest.fixture
+def inv_tmp(tmp_path, monkeypatch):
+    """把系统临时目录指向 tmp_path，并清空模块里的“待下载”登记，避免用例之间互相影响。"""
+    import tempfile
 
-    pdf = tmp_path / "src.pdf"
-    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(devin_invoices, "_ready", None)
+    return tmp_path / "cam-devin-invoices"
 
+
+def _two_account_fetcher(pdf):
     def fetcher(account):
         if account["email"] == "c@x.com":
             return InvoiceResult(email="c@x.com", ok=False, error_code="code_timeout", error_message="no mail")
@@ -565,14 +569,81 @@ def test_run_invoice_export_writes_file_without_touching_db(store, tmp_path, mon
              "pdf_file": str(pdf), "pdf_source": "download"},
             {"invoice_date": "2026-10-13", "status": "Paid", "amount_usd": 200.0, "pdf_file": "", "pdf_error": "x"},
         ])
+    return fetcher
 
-    summary = run_invoice_export(store=store, fetcher=fetcher)
+
+def test_run_invoice_export_registers_one_time_zip_without_touching_db(store, tmp_path, inv_tmp, monkeypatch):
+    monkeypatch.setenv("DEVIN_CONCURRENCY", "2")
+    _add(store, "a@x.com", owner="o@x.com")
+    _add(store, "b@x.com")
+    store.set_status("b@x.com", "disabled")
+    _add(store, "c@x.com")
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    summary = run_invoice_export(store=store, fetcher=_two_account_fetcher(pdf))
     assert (summary.total, summary.success, summary.failed) == (2, 1, 1)   # 停用账号不读
     assert summary.invoice_count == 2 and summary.amount_total_usd == 413.2
     assert (summary.pdf_count, summary.pdf_missing) == (1, 1)
     assert summary.failures[0]["email"] == "c@x.com" and "验证码" in summary.failures[0]["label"]
-    assert summary.file.endswith(".zip") and (tmp_path / "exp" / summary.file).is_file()
+    assert summary.file.endswith(".zip") and Path(summary.zip_path).is_file()
+    assert Path(summary.zip_path).parent == inv_tmp                          # 在系统临时目录，不在数据目录
+    assert [p.name for p in inv_tmp.iterdir()] == [summary.file]             # 工作目录已删，只剩 zip
     assert store.list_snapshots("a@x.com") == []                            # 发票不入库
+
+    ready = devin_invoices.get_ready()
+    assert ready["name"] == summary.file and ready["pdf"] == 1 and ready["pdf_missing"] == 1
+    assert ready["failed_accounts"] == 1 and "path" not in ready              # 不泄露服务器路径
+    taken = devin_invoices.take_ready()
+    assert taken and taken[0] == Path(summary.zip_path)
+    assert devin_invoices.take_ready() is None and devin_invoices.get_ready() is None   # 只能取一次
+
+
+def test_run_invoice_export_publish_false_and_new_run_replaces_ready(store, tmp_path, inv_tmp):
+    _add(store, "a@x.com")
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    fetcher = _two_account_fetcher(pdf)
+
+    s0 = run_invoice_export(store=store, fetcher=fetcher, publish=False)      # CLI 用：不登记待下载
+    assert Path(s0.zip_path).is_file() and devin_invoices.get_ready() is None
+    Path(s0.zip_path).unlink()
+
+    s1 = run_invoice_export(store=store, fetcher=fetcher)
+    s2 = run_invoice_export(store=store, fetcher=fetcher)
+    assert [p.name for p in inv_tmp.iterdir()] == [s2.file]                    # 上一份未下载的被作废，只剩最新一份
+    assert devin_invoices.get_ready()["name"] == s2.file
+
+    s3 = run_invoice_export(store=store, fetcher=fetcher, publish=False)       # 同秒重名不覆盖待下载的那份
+    assert s3.zip_path != s2.zip_path and Path(s2.zip_path).is_file() and Path(s3.zip_path).is_file()
+
+
+def test_ready_file_expires_after_ttl(store, tmp_path, inv_tmp, monkeypatch):
+    _add(store, "a@x.com")
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    summary = run_invoice_export(store=store, fetcher=_two_account_fetcher(pdf))
+    monkeypatch.setattr(devin_invoices, "READY_TTL_SEC", -1)
+    assert devin_invoices.get_ready() is None
+    assert not Path(summary.zip_path).exists()                                # 过期即删文件
+    assert devin_invoices.take_ready() is None
+
+
+def test_sweep_stale_removes_old_leftovers_but_keeps_ready(store, tmp_path, inv_tmp):
+    _add(store, "a@x.com")
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    summary = run_invoice_export(store=store, fetcher=_two_account_fetcher(pdf))
+    old = inv_tmp / "old.zip"
+    old.write_bytes(b"x")
+    stale_dir = inv_tmp / "run-stale"
+    stale_dir.mkdir()
+    long_ago = time.time() - 5 * 3600
+    for p in (old, stale_dir, Path(summary.zip_path)):
+        os.utime(p, (long_ago, long_ago))
+    devin_invoices.sweep_stale()
+    assert not old.exists() and not stale_dir.exists()
+    assert Path(summary.zip_path).is_file()                                   # 待下载的那份不动
 
 
 def test_run_invoice_export_refuses_when_collection_running(store):
@@ -584,8 +655,7 @@ def test_run_invoice_export_refuses_when_collection_running(store):
         devin_runner._run_lock.release()
 
 
-def test_api_cycles_and_invoice_files(client, store, tmp_path, monkeypatch):
-    monkeypatch.setenv("DEVIN_EXPORT_DIR", str(tmp_path / "exp"))
+def test_api_cycles_and_export(client, store):
     _add(store, "a@x.com")
     end = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
     store.add_snapshot(email="a@x.com", ok=True, data={"plan_name": "Max", "renews_at": end, "weekly_used_pct": 30.0})
@@ -603,18 +673,30 @@ def test_api_cycles_and_invoice_files(client, store, tmp_path, monkeypatch):
     assert "缺失项" in headers
     assert sheet.cell(row=2, column=headers.index("缺失项") + 1).value == "按需用量"   # 只缺按需用量
 
-    # 发票：未知账号 404；文件下载只允许规范文件名
     assert client.post("/api/devin/invoices/export", json={"emails": ["nobody@x.com"]}).status_code == 404
-    exp = tmp_path / "exp"
-    exp.mkdir()
-    (exp / "devin-invoices-20261123-010203.zip").write_bytes(b"PK")
-    (exp / "secret.zip").write_bytes(b"x")
-    listed = client.get("/api/devin/invoices/progress").json()
-    assert [f["name"] for f in listed["files"]] == ["devin-invoices-20261123-010203.zip"]
-    res = client.get("/api/devin/invoices/files/devin-invoices-20261123-010203.zip")
+
+
+def test_api_invoice_download_is_one_time(client, store, tmp_path, inv_tmp):
+    _add(store, "a@x.com")
+    # 没有待下载文件：progress 里 ready 为空、不再有历史列表；下载 404
+    d = client.get("/api/devin/invoices/progress").json()
+    assert d["ready"] is None and "files" not in d
+    assert client.get("/api/devin/invoices/download").status_code == 404
+    assert client.get("/api/devin/invoices/files/x.zip").status_code in (404, 405)   # 旧的按文件名下载接口已移除
+
+    pdf = tmp_path / "src.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    summary = run_invoice_export(store=store, fetcher=_two_account_fetcher(pdf))
+    d = client.get("/api/devin/invoices/progress").json()
+    assert d["ready"]["name"] == summary.file and d["ready"]["pdf"] == 1
+
+    res = client.get("/api/devin/invoices/download")
     assert res.status_code == 200 and res.headers["content-type"] == "application/zip"
-    assert client.get("/api/devin/invoices/files/secret.zip").status_code == 404
-    assert client.get("/api/devin/invoices/files/..%2Fsecret.xlsx").status_code == 404
+    assert summary.file in res.headers["content-disposition"]
+    assert zipfile.ZipFile(io.BytesIO(res.content)).testzip() is None
+    assert not Path(summary.zip_path).exists()                                 # 发完即删，服务器不留文件
+    assert client.get("/api/devin/invoices/progress").json()["ready"] is None   # 提示消失
+    assert client.get("/api/devin/invoices/download").status_code == 404        # 二次下载需重新导出
 
 
 # ─── 额度解析 / 数据完整性 ───────────────────────────────────────
