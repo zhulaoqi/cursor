@@ -5,12 +5,12 @@
 # 由 deploy-to-windows.sh 远程调用，也可在 Windows 本地手动运行：
 #   powershell -ExecutionPolicy Bypass -File windows-setup.ps1 `
 #     -PackagePath "C:\path\to\cam-xxx.zip" `
-#     -DeployDir "C:\deploy\cursor-account-manager"
+#     -DeployDir "D:\deploy\cursor-account-manager"
 # =============================================================================
 
 param(
     [string]$PackagePath = "",
-    [string]$DeployDir   = "C:\deploy\cursor-account-manager",
+    [string]$DeployDir   = "D:\deploy\cursor-account-manager",
     [switch]$SkipChrome  = $false,   # 保留参数兼容性，实际不再安装 Chrome
     [switch]$StartServer = $false
 )
@@ -30,10 +30,125 @@ function Log-Warn  { param($msg) Write-Host "[WARN]  $msg" -ForegroundColor Yell
 function Log-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red; exit 1 }
 function Log-Step  { param($msg) Write-Host "`n========== $msg ==========" -ForegroundColor Magenta }
 
+function Remove-PathRobust {
+    param(
+        [string]$Path,
+        [int]$Retry = 3
+    )
+    if (-not (Test-Path $Path)) { return }
+
+    for ($i = 1; $i -le $Retry; $i++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path $Path)) { return }
+        } catch {
+            # 目录已不存在时视为成功，避免无意义 WARN
+            if (-not (Test-Path $Path)) { return }
+            $errMsg = [string]$_.Exception.Message
+            if ($errMsg -match "(?i)cannot find the file specified") { return }
+            Log-Warn "删除目录失败（第 $i/$Retry 次）: $Path -> $($_.Exception.Message)"
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    # 兜底：使用 cmd 的 rmdir，处理部分 Win32 遍历异常
+    cmd /d /c "rmdir /s /q ""$Path""" 2>$null | Out-Null
+    if (Test-Path $Path) {
+        Log-Error "删除目录失败（重试 + rmdir 兜底后仍存在）: $Path"
+    }
+}
+
+function Copy-DirRobust {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [int]$Retry = 2
+    )
+    if (-not (Test-Path $Source)) { return }
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    }
+
+    for ($i = 1; $i -le $Retry; $i++) {
+        robocopy $Source $Destination /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        $rc = $LASTEXITCODE
+        if ($rc -le 7) { return }
+        Log-Warn "目录复制失败（第 $i/$Retry 次，robocopy exit=$rc）：$Source -> $Destination"
+        Start-Sleep -Seconds 1
+    }
+    Log-Error "目录复制失败（重试后仍失败）：$Source -> $Destination"
+}
+
 # ---------- 刷新 PATH ----------
 function Refresh-Path {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path","User")
+}
+
+# ---------- 依赖自检 ----------
+function Test-CamDependencies {
+    param(
+        [string]$PythonExe,
+        [string]$BrowsersDir
+    )
+    Log-Step "依赖自检"
+
+    if (-not (Test-Path $PythonExe)) {
+        Log-Error "依赖自检失败：Python 不存在 -> $PythonExe"
+    }
+
+    # 核心 Python 依赖导入检查（避免运行期才报 ModuleNotFoundError）
+    $checkScript = @"
+import importlib, sys
+mods = ["click", "requests", "dotenv", "patchright", "fastapi", "uvicorn", "pymysql", "cryptography", "openpyxl", "fitz", "PIL"]
+missing = []
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception:
+        missing.append(m)
+if missing:
+    print("MISSING:" + ",".join(missing))
+    sys.exit(2)
+print("OK")
+"@
+    $checkFile = Join-Path $env:TEMP "cam_dep_check.py"
+    [System.IO.File]::WriteAllText($checkFile, $checkScript, [System.Text.Encoding]::UTF8)
+    $pyOut = & $PythonExe $checkFile 2>&1
+    $pyEc = $LASTEXITCODE
+    Remove-Item $checkFile -Force -ErrorAction SilentlyContinue
+    if ($pyEc -ne 0) {
+        Log-Error "依赖自检失败：Python 包缺失或损坏 -> $pyOut"
+    }
+    Log-OK "Python 包导入检查通过"
+
+    # Patchright 浏览器可执行文件检查（统一共享目录）
+    if (-not (Test-Path $BrowsersDir)) {
+        Log-Error "依赖自检失败：浏览器目录不存在 -> $BrowsersDir"
+    }
+    $pwCheckScript = @"
+import os, sys
+from patchright.sync_api import sync_playwright
+try:
+    with sync_playwright() as p:
+        exe = p.chromium.executable_path
+    if not exe or not os.path.exists(exe):
+        print("MISSING_EXECUTABLE:" + str(exe))
+        sys.exit(3)
+    print("EXECUTABLE_PATH:" + exe)
+except Exception as e:
+    print("CHECK_FAILED:" + str(e))
+    sys.exit(4)
+"@
+    $pwCheckFile = Join-Path $env:TEMP "cam_pw_check.py"
+    [System.IO.File]::WriteAllText($pwCheckFile, $pwCheckScript, [System.Text.Encoding]::UTF8)
+    $pwOut = cmd /d /c "set PLAYWRIGHT_BROWSERS_PATH=$BrowsersDir && `"$PythonExe`" `"$pwCheckFile`"" 2>&1
+    $pwEc = $LASTEXITCODE
+    Remove-Item $pwCheckFile -Force -ErrorAction SilentlyContinue
+    if ($pwEc -ne 0) {
+        Log-Error "依赖自检失败：Patchright 浏览器不可用 -> $pwOut"
+    }
+    Log-OK "Patchright 浏览器可执行文件检查通过: $pwOut"
 }
 
 # ---------- winget 安装（幂等）----------
@@ -118,31 +233,37 @@ if (-not (Test-Path $deployParent)) {
     New-Item -ItemType Directory -Path $deployParent -Force | Out-Null
 }
 
+$backup = $null
 if ($PackagePath -and (Test-Path $PackagePath)) {
-    Log-Info "解压 $PackagePath → $deployParent ..."
-    $backup = $null
+    Log-Info "解压并覆盖代码（保留 data/.env）: $PackagePath"
     if (Test-Path $DeployDir) {
-        Log-Info "备份旧 .env 和 data/ ..."
-        $backup = "$deployParent\.cam_backup_$(Get-Date -Format yyyyMMdd_HHmmss)"
+        Log-Info "备份旧 .env ..."
+        do {
+            $backup = "$deployParent\.cam_backup_$(Get-Date -Format yyyyMMdd_HHmmss_fff)_$([System.Guid]::NewGuid().ToString('N').Substring(0,6))"
+        } while (Test-Path $backup)
         New-Item -ItemType Directory -Path $backup -Force | Out-Null
-        if (Test-Path "$DeployDir\.env") { Copy-Item "$DeployDir\.env" $backup }
-        if (Test-Path "$DeployDir\data") { Copy-Item "$DeployDir\data" $backup -Recurse }
-        Remove-Item $DeployDir -Recurse -Force
+        if (Test-Path "$DeployDir\.env") { Copy-Item "$DeployDir\.env" $backup -Force }
+    } else {
+        New-Item -ItemType Directory -Path $DeployDir -Force | Out-Null
     }
-    Expand-Archive -Path $PackagePath -DestinationPath $deployParent -Force
-    $extracted   = Join-Path $deployParent "cursor-account-manager"
-    $extractNorm = [System.IO.Path]::GetFullPath($extracted)
-    $deployNorm  = [System.IO.Path]::GetFullPath($DeployDir)
-    if ((Test-Path $extracted) -and ($extractNorm -ne $deployNorm)) {
-        Rename-Item $extracted (Split-Path $deployNorm -Leaf) -Force
+
+    $extractTmp = Join-Path $deployParent ".cam_extract_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+    New-Item -ItemType Directory -Path $extractTmp -Force | Out-Null
+    Expand-Archive -Path $PackagePath -DestinationPath $extractTmp -Force
+
+    $srcDir = Join-Path $extractTmp "cursor-account-manager"
+    if (-not (Test-Path $srcDir)) { $srcDir = $extractTmp }
+
+    # 仅覆盖代码，保留 data/.env（避免不必要删除导致告警与状态抖动）
+    robocopy $srcDir $DeployDir /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD data /XF .env | Out-Null
+    $rc = $LASTEXITCODE
+    if ($rc -gt 7) {
+        Remove-PathRobust -Path $extractTmp
+        Log-Error "代码覆盖失败（robocopy exit=$rc）"
     }
+    Remove-PathRobust -Path $extractTmp
+
     Log-OK "代码解压到: $DeployDir"
-    if ($backup -and (Test-Path $backup)) {
-        # data/ 原样还原（数据库 / token 缓存不能丢）
-        if (Test-Path "$backup\data") { Copy-Item "$backup\data" $DeployDir -Recurse -Force }
-        Log-OK "已还原 data/"
-        # .env 走合并逻辑（见 Step 4），不直接覆盖
-    }
 } else {
     if (-not (Test-Path $DeployDir)) { Log-Error "未提供代码包且目标目录不存在: $DeployDir" }
     Log-Warn "未提供代码包，使用已有目录: $DeployDir"
@@ -156,7 +277,7 @@ Log-Step "Step 4: 生成 .env 配置文件"
 # =====================================================================
 # 合并策略：
 #   系统配置项（并发数、超时、headless 等）→ 始终使用新模板默认值，确保每次部署都能生效
-#   用户密钥类配置（PROXY / CAPSOLVER_API_KEY / TWOCAPTCHA_API_KEY）→ 从旧 .env 中读取并保留
+#   用户密钥类配置（PROXY / CAPSOLVER_API_KEY / TWOCAPTCHA_API_KEY / BI / ALERT）→ 从旧 .env 中读取并保留
 #   用户自定义路径 / IMAP 等 → 从旧 .env 中读取并保留
 # 这样新增或修改系统配置（如 BROWSER_LOGIN_CONCURRENCY）自动生效，密钥不会丢失。
 # ─────────────────────────────────────────────────────────────────────
@@ -171,7 +292,65 @@ $userKeys = @(
     "TWOCAPTCHA_API_KEY",
     "DEFAULT_IMAP_HOST",
     "DEFAULT_IMAP_PORT",
-    "IMAP_SEARCH_FOLDERS"
+    "IMAP_SEARCH_FOLDERS",
+    "IMAP_GROUP_MAILBOXES",
+    "IMAP_GROUP_MAILBOX_ACCOUNTS",
+    "BI_SYNC_ENABLE",
+    "BI_SYNC_DB_URL",
+    "BI_SYNC_DB_USERNAME",
+    "BI_SYNC_DB_PASSWORD",
+    "BI_SYNC_BIZ_TZ",
+    "BI_SYNC_CRON",
+    "BI_SYNC_RETRY_TIMES",
+    "BI_SYNC_ACCOUNT_TIMEOUT_SEC",
+    "BI_SYNC_DB_QUERY_TIMEOUT_SEC",
+    "BI_SYNC_BATCH_SIZE",
+    "BI_SYNC_LOCK_FILE",
+    "LEDGER_DB_HOST",
+    "LEDGER_DB_PORT",
+    "LEDGER_DB_USER",
+    "LEDGER_DB_PASSWORD",
+    "LEDGER_DB_NAME",
+    "LEDGER_DB_POOL_MAX_CONNECTIONS",
+    "LEDGER_DB_POOL_MIN_CACHED",
+    "LEDGER_DB_POOL_MAX_CACHED",
+    "LEDGER_DB_CONNECT_TIMEOUT_SEC",
+    "LEDGER_DB_READ_TIMEOUT_SEC",
+    "LEDGER_DB_WRITE_TIMEOUT_SEC",
+    "LEDGER_DB_CONNECT_RETRY_TIMES",
+    "LEDGER_DB_CONNECT_RETRY_BACKOFF_SEC",
+    "USAGE_SNAPSHOT_ENABLE",
+    "USAGE_PERIODIC_INTERVAL_HOURS",
+    "USAGE_BOOTSTRAP_STALE_HOURS",
+    "USAGE_SNAPSHOT_CONCURRENCY",
+    "USAGE_PERIODIC_RETRY_MINUTES",
+    "USAGE_PERIODIC_MAX_ATTEMPTS_PER_SLOT",
+    "USAGE_PRE_RESET_SCAN_INTERVAL_MIN",
+    "USAGE_PRE_RESET_WINDOW_START_MIN",
+    "USAGE_PRE_RESET_TARGET_OFFSET_MIN",
+    "USAGE_PRE_RESET_WINDOW_END_MIN",
+    "USAGE_LOW_THRESHOLD_PCT",
+    "USAGE_CYCLE_CONTINUITY_TOLERANCE_HOURS",
+    "USAGE_PERIODIC_LOCK_FILE",
+    "USAGE_PRE_RESET_LOCK_FILE",
+    "USAGE_ACCOUNT_LOCK_DIR",
+    "USAGE_ACCOUNT_LOCK_TIMEOUT_SEC",
+    "USAGE_AUTH_BREAKER_MIN_SAMPLES",
+    "USAGE_AUTH_BREAKER_FAILURE_RATIO",
+    "USAGE_AUTH_BREAKER_COOLDOWN_MIN",
+    "USAGE_AUTH_BREAKER_WINDOW_SIZE",
+    "USAGE_AUTH_BREAKER_WINDOW_MIN",
+    "USAGE_AUTH_QUARANTINE_FAILURES",
+    "DEVIN_SCHEDULE_ENABLE",
+    "DEVIN_DAILY_AT",
+    "DEVIN_CONCURRENCY",
+    "DEVIN_CODE_SENDER_KEYWORDS",
+    "DEVIN_PROXY",
+    "ALERT_BOT_ENABLE",
+    "ALERT_BOT_PROVIDER",
+    "ALERT_BOT_CLIENT_ID",
+    "ALERT_BOT_SECRET",
+    "ALERT_TO_EMAILS"
 )
 $userVals = @{}
 if ($backupEnv -and (Test-Path $backupEnv)) {
@@ -193,6 +372,11 @@ function Get-UserVal($key, $default) {
     return $default
 }
 
+if (-not (Test-Path "D:\")) {
+    Log-Error "未检测到 D 盘。Chrome profiles 必须放在 D:\cam-data\chrome-profiles，禁止再写 C 盘。"
+}
+$chromeProfilesDir = "D:\cam-data\chrome-profiles"
+
 $proxyLine     = if ($userVals["PROXY"]) { "PROXY=$($userVals['PROXY'])" } else { "# PROXY=http://user:pass@host:port" }
 $capsolverLine = if ($userVals["CAPSOLVER_API_KEY"]) { "CAPSOLVER_API_KEY=$($userVals['CAPSOLVER_API_KEY'])" } else { "# CAPSOLVER_API_KEY=" }
 $twocapLine    = if ($userVals["TWOCAPTCHA_API_KEY"]) { "TWOCAPTCHA_API_KEY=$($userVals['TWOCAPTCHA_API_KEY'])" } else { "# TWOCAPTCHA_API_KEY=" }
@@ -202,6 +386,9 @@ $envContent = @(
     "DEFAULT_IMAP_HOST=$(Get-UserVal 'DEFAULT_IMAP_HOST' 'imap.feishu.cn')",
     "DEFAULT_IMAP_PORT=$(Get-UserVal 'DEFAULT_IMAP_PORT' '993')",
     "IMAP_SEARCH_FOLDERS=$(Get-UserVal 'IMAP_SEARCH_FOLDERS' 'INBOX,Junk,Spam')",
+    "# 邮箱组：验证码进组长邮箱，按收件人区分账号。授权码仍存在每个账号上。全部改完后把账号名单改成 *@eclicktech.com.cn",
+    "IMAP_GROUP_MAILBOXES=$(Get-UserVal 'IMAP_GROUP_MAILBOXES' 'eclicktech.com.cn=kinch.zhu@eclicktech.com.cn')",
+    "IMAP_GROUP_MAILBOX_ACCOUNTS=$(Get-UserVal 'IMAP_GROUP_MAILBOX_ACCOUNTS' 'cursor119@eclicktech.com.cn,cursor132@eclicktech.com.cn')",
     "",
     "# ─── 代理（保留上次部署的值，如需修改请直接编辑此文件）───",
     $proxyLine,
@@ -217,15 +404,57 @@ $envContent = @(
     "BILLING_LEDGER_CONCURRENCY=$(Get-UserVal 'BILLING_LEDGER_CONCURRENCY' '3')",
     "BILLING_LEDGER_RETRY_TIMES=$(Get-UserVal 'BILLING_LEDGER_RETRY_TIMES' '2')",
     "BILLING_LEDGER_RETRY_BACKOFF_SEC=$(Get-UserVal 'BILLING_LEDGER_RETRY_BACKOFF_SEC' '3')",
+    "BILLING_LEDGER_REFRESH_ENABLE=$(Get-UserVal 'BILLING_LEDGER_REFRESH_ENABLE' 'true')",
+    "BILLING_LEDGER_REFRESH_CRON=$(Get-UserVal 'BILLING_LEDGER_REFRESH_CRON' '0 5 * * *')",
+    "BILLING_LEDGER_REFRESH_LOCK_FILE=$(Get-UserVal 'BILLING_LEDGER_REFRESH_LOCK_FILE' '/tmp/cam_billing_ledger_refresh.lock')",
+    "",
+    "# ─── 账期数据库与用量监控（密码仅保留旧 .env，首次部署需手工填写）───",
+    "LEDGER_DB_HOST=$(Get-UserVal 'LEDGER_DB_HOST' '172.30.11.103')",
+    "LEDGER_DB_PORT=$(Get-UserVal 'LEDGER_DB_PORT' '3306')",
+    "LEDGER_DB_USER=$(Get-UserVal 'LEDGER_DB_USER' 'aicoding_admin')",
+    "LEDGER_DB_PASSWORD=$(Get-UserVal 'LEDGER_DB_PASSWORD' '')",
+    "LEDGER_DB_NAME=$(Get-UserVal 'LEDGER_DB_NAME' 'aicoding')",
+    "LEDGER_DB_POOL_MAX_CONNECTIONS=$(Get-UserVal 'LEDGER_DB_POOL_MAX_CONNECTIONS' '8')",
+    "LEDGER_DB_POOL_MIN_CACHED=$(Get-UserVal 'LEDGER_DB_POOL_MIN_CACHED' '1')",
+    "LEDGER_DB_POOL_MAX_CACHED=$(Get-UserVal 'LEDGER_DB_POOL_MAX_CACHED' '4')",
+    "LEDGER_DB_CONNECT_TIMEOUT_SEC=$(Get-UserVal 'LEDGER_DB_CONNECT_TIMEOUT_SEC' '10')",
+    "LEDGER_DB_READ_TIMEOUT_SEC=$(Get-UserVal 'LEDGER_DB_READ_TIMEOUT_SEC' '30')",
+    "LEDGER_DB_WRITE_TIMEOUT_SEC=$(Get-UserVal 'LEDGER_DB_WRITE_TIMEOUT_SEC' '30')",
+    "LEDGER_DB_CONNECT_RETRY_TIMES=$(Get-UserVal 'LEDGER_DB_CONNECT_RETRY_TIMES' '3')",
+    "LEDGER_DB_CONNECT_RETRY_BACKOFF_SEC=$(Get-UserVal 'LEDGER_DB_CONNECT_RETRY_BACKOFF_SEC' '2')",
+    # 默认开启；若旧 .env 未配置该键，首次部署也要启动用量调度（需同步配置 LEDGER_DB_PASSWORD）
+    "USAGE_SNAPSHOT_ENABLE=$(Get-UserVal 'USAGE_SNAPSHOT_ENABLE' 'true')",
+    "USAGE_PERIODIC_INTERVAL_HOURS=$(Get-UserVal 'USAGE_PERIODIC_INTERVAL_HOURS' '24')",
+    "USAGE_BOOTSTRAP_STALE_HOURS=$(Get-UserVal 'USAGE_BOOTSTRAP_STALE_HOURS' '36')",
+    "USAGE_SNAPSHOT_CONCURRENCY=$(Get-UserVal 'USAGE_SNAPSHOT_CONCURRENCY' '3')",
+    "USAGE_PERIODIC_RETRY_MINUTES=$(Get-UserVal 'USAGE_PERIODIC_RETRY_MINUTES' '30')",
+    "USAGE_PERIODIC_MAX_ATTEMPTS_PER_SLOT=$(Get-UserVal 'USAGE_PERIODIC_MAX_ATTEMPTS_PER_SLOT' '3')",
+    "USAGE_PRE_RESET_SCAN_INTERVAL_MIN=$(Get-UserVal 'USAGE_PRE_RESET_SCAN_INTERVAL_MIN' '15')",
+    "USAGE_PRE_RESET_WINDOW_START_MIN=$(Get-UserVal 'USAGE_PRE_RESET_WINDOW_START_MIN' '360')",
+    "USAGE_PRE_RESET_TARGET_OFFSET_MIN=$(Get-UserVal 'USAGE_PRE_RESET_TARGET_OFFSET_MIN' '180')",
+    "USAGE_PRE_RESET_WINDOW_END_MIN=$(Get-UserVal 'USAGE_PRE_RESET_WINDOW_END_MIN' '30')",
+    "USAGE_LOW_THRESHOLD_PCT=$(Get-UserVal 'USAGE_LOW_THRESHOLD_PCT' '30')",
+    "USAGE_CYCLE_CONTINUITY_TOLERANCE_HOURS=$(Get-UserVal 'USAGE_CYCLE_CONTINUITY_TOLERANCE_HOURS' '48')",
+    "USAGE_PERIODIC_LOCK_FILE=$(Get-UserVal 'USAGE_PERIODIC_LOCK_FILE' 'data/cam_usage_periodic.lock')",
+    "USAGE_PRE_RESET_LOCK_FILE=$(Get-UserVal 'USAGE_PRE_RESET_LOCK_FILE' 'data/cam_usage_pre_reset.lock')",
+    "USAGE_ACCOUNT_LOCK_DIR=$(Get-UserVal 'USAGE_ACCOUNT_LOCK_DIR' 'data/usage-account-locks')",
+    "USAGE_ACCOUNT_LOCK_TIMEOUT_SEC=$(Get-UserVal 'USAGE_ACCOUNT_LOCK_TIMEOUT_SEC' '5')",
+    "USAGE_AUTH_BREAKER_MIN_SAMPLES=$(Get-UserVal 'USAGE_AUTH_BREAKER_MIN_SAMPLES' '20')",
+    "USAGE_AUTH_BREAKER_FAILURE_RATIO=$(Get-UserVal 'USAGE_AUTH_BREAKER_FAILURE_RATIO' '0.50')",
+    "USAGE_AUTH_BREAKER_COOLDOWN_MIN=$(Get-UserVal 'USAGE_AUTH_BREAKER_COOLDOWN_MIN' '30')",
+    "USAGE_AUTH_BREAKER_WINDOW_SIZE=$(Get-UserVal 'USAGE_AUTH_BREAKER_WINDOW_SIZE' '50')",
+    "USAGE_AUTH_BREAKER_WINDOW_MIN=$(Get-UserVal 'USAGE_AUTH_BREAKER_WINDOW_MIN' '10')",
+    "USAGE_AUTH_QUARANTINE_FAILURES=$(Get-UserVal 'USAGE_AUTH_QUARANTINE_FAILURES' '3')",
     "",
     "# ─── Turnstile 兜底求解器 ───",
     $capsolverLine,
     $twocapLine,
     "",
     "# ─── 数据路径 ───",
-    "ACCOUNTS_CSV=data/accounts.csv",
-    "TOKENS_DB=data/tokens.db",
+    "ACCOUNTS_CSV=D:\cam-data\accounts.csv",
+    "TOKENS_DB=D:\cam-data\tokens.db",
     "EXPORTS_DIR=data/exports",
+    "CAM_CHROME_PROFILES_DIR=$chromeProfilesDir",
     "",
     "# ─── 浏览器行为 ───",
     "HEADLESS=false",
@@ -250,6 +479,12 @@ $envContent = @(
     "SPENDING_REFRESH_LOCK_FILE=/tmp/cam_spending_refresh.lock",
     "SPENDING_REFRESH_ALERT_ENABLE=true",
     "SPENDING_REFRESH_CONCURRENCY=$(Get-UserVal 'SPENDING_REFRESH_CONCURRENCY' '4')",
+    "",
+    "# ─── Devin 平台（每日凌晨登录采集套餐/用量，飞书播报）───",
+    "DEVIN_SCHEDULE_ENABLE=$(Get-UserVal 'DEVIN_SCHEDULE_ENABLE' 'true')",
+    "DEVIN_DAILY_AT=$(Get-UserVal 'DEVIN_DAILY_AT' '02:30')",
+    "DEVIN_CONCURRENCY=$(Get-UserVal 'DEVIN_CONCURRENCY' '3')",
+    "DEVIN_CODE_SENDER_KEYWORDS=$(Get-UserVal 'DEVIN_CODE_SENDER_KEYWORDS' 'devin,cognition,windsurf')",
     "",
     "# ─── 告警机器人（邮件接收人逗号分隔） ───",
     "ALERT_BOT_ENABLE=true",
@@ -283,6 +518,9 @@ if (-not (Test-Path $venvPython)) {
 # =====================================================================
 Log-Step "Step 6: 安装 Python 依赖"
 # =====================================================================
+$pwBrowsersDir = "$DeployDir\data\ms-playwright"
+if (-not (Test-Path $pwBrowsersDir)) { New-Item -ItemType Directory -Path $pwBrowsersDir -Force | Out-Null }
+
 Log-Info "升级 pip ..."
 & $venvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Host
 
@@ -293,12 +531,13 @@ $ec = $LASTEXITCODE; $ErrorActionPreference = $prev
 if ($ec -ne 0) { Log-Error "pip install 失败，退出码: $ec" }
 Log-OK "Python 依赖安装完成"
 
-Log-Info "安装 Patchright Chromium（账单 PDF 下载依赖）..."
+Log-Info "安装 Patchright Chromium（账单 PDF 下载依赖）到共享目录: $pwBrowsersDir ..."
 $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-& $venvPython -m patchright install chromium 2>&1 | Out-Host
+cmd /d /c "set PLAYWRIGHT_BROWSERS_PATH=$pwBrowsersDir && `"$venvPython`" -m patchright install chromium" 2>&1 | Out-Host
 $ec = $LASTEXITCODE; $ErrorActionPreference = $prev
 if ($ec -ne 0) { Log-Error "patchright install chromium 失败，退出码: $ec" }
-Log-OK "Patchright Chromium 已安装"
+Log-OK "Patchright Chromium 已安装（PLAYWRIGHT_BROWSERS_PATH=$pwBrowsersDir）"
+Test-CamDependencies -PythonExe $venvPython -BrowsersDir $pwBrowsersDir
 
 # =====================================================================
 Log-Step "Step 7: 检查系统 Google Chrome"
@@ -338,6 +577,11 @@ foreach ($dir in @("data", "data\exports", "data\exports\accounts", "data\browse
     $p = "$DeployDir\$dir"
     if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
 }
+foreach ($dir in @("D:\cam-data", $chromeProfilesDir)) {
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+}
+Log-OK "账号库目录: D:\cam-data"
+Log-OK "Chrome profiles 目录: $chromeProfilesDir"
 Log-OK "data 目录就绪"
 
 # =====================================================================
@@ -351,6 +595,7 @@ $startBat = "$DeployDir\start-web.bat"
     'if not exist "data\logs" mkdir data\logs',
     'set PYTHONUTF8=1',
     'set PYTHONIOENCODING=utf-8',
+    'set PLAYWRIGHT_BROWSERS_PATH=%~dp0data\ms-playwright',
     'rem ── 日志轮转：保留最近 3 次，每次重启从空文件开始 ──',
     'if exist "data\logs\cam.log.2" del /f /q "data\logs\cam.log.2"',
     'if exist "data\logs\cam.log.1" rename "data\logs\cam.log.1" "cam.log.2"',
@@ -418,7 +663,7 @@ Write-Host ""
 Write-Host "  部署目录 : $DeployDir" -ForegroundColor White
 Write-Host "  配置文件 : $DeployDir\.env" -ForegroundColor Yellow
 Write-Host ""
-  Write-Host "  启动方式：有痕模式（Task Scheduler: CamWebService，需用户已登录）" -ForegroundColor Cyan
+  Write-Host "  启动方式：kinch 账号会话模式（Task Scheduler: CamWebService，有痕浏览器）" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  访问地址：" -ForegroundColor White
 Write-Host "    内网   → http://${localIP}:8765" -ForegroundColor Green
@@ -434,6 +679,7 @@ if ($StartServer) {
 
     $svcPython = "$DeployDir\.venv\Scripts\python.exe"
     $taskName  = "CamWebService"
+    Test-CamDependencies -PythonExe $svcPython -BrowsersDir $pwBrowsersDir
 
     # 停止并删除旧任务 / 旧进程
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -454,25 +700,30 @@ if ($StartServer) {
     if (Test-Path $svcLog)                { Rename-Item $svcLog "cam.log.1" -Force -ErrorAction SilentlyContinue }
     Log-OK "日志轮转完成（旧日志 → cam.log.1 / cam.log.2）"
 
-    # 注册任务：InteractiveToken 模式，挂到已登录用户桌面会话。
-    # S4U/后台服务会话看不到 Chrome 窗口，不适合排查 Cloudflare。
+    # 注册任务：业务账号会话模式（有痕浏览器）
+    # - 绑定当前登录账号（kinch）
+    # - 触发器使用 AtLogOn（账号登录即自动拉起）
+    # - 登录阶段强制有痕，便于通过 Turnstile 且可人工观察
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $cmdArg      = "/c set PYTHONUNBUFFERED=1& set PYTHONUTF8=1& set HEADLESS=false& `"$svcPython`" -X utf8 -m cam web > `"$svcLog`" 2>&1"
+    $cmdArg      = "/d /c ""set PYTHONUNBUFFERED=1 && set PYTHONUTF8=1 && set PLAYWRIGHT_BROWSERS_PATH=$pwBrowsersDir && set HEADLESS=false && set BROWSER_LOGIN_FORCE_HEADED=true && `"$svcPython`" -X utf8 -m cam web >> `"$svcLog`" 2>&1"""
     $action      = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $cmdArg -WorkingDirectory $DeployDir
-    $trigger     = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+    $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
     $principal   = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
     $settings    = New-ScheduledTaskSettingsSet `
         -ExecutionTimeLimit 0 `
+        -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
         -MultipleInstances IgnoreNew `
-        -RestartCount 5 `
-        -RestartInterval (New-TimeSpan -Minutes 1)   # 崩溃后 1 分钟内最多重启 5 次
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        -RestartCount 30 `
+        -RestartInterval (New-TimeSpan -Minutes 1)   # 崩溃后 1 分钟重试，最多 30 次
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggerLogon `
         -Principal $principal -Settings $settings -Force | Out-Null
-    Log-OK "任务已注册: $taskName（有痕模式：用户登录后启动 + 崩溃自动重启 × 5）"
+    Log-OK "任务已注册: $taskName（$currentUser + Interactive + AtLogOn + 自动重启）"
 
     # 启动任务
     Start-ScheduledTask -TaskName $taskName
-    Start-Sleep 5
+    Start-Sleep 8
 
     # 确认
     $alive = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*-m cam web*" }
@@ -480,7 +731,20 @@ if ($StartServer) {
         Log-OK "服务已启动 PID=$(($alive | Select-Object -First 1).ProcessId)"
     } else {
         $taskState = (Get-ScheduledTask -TaskName $taskName).State
-        $lastRun   = (Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult
-        Log-Error "服务启动失败，Task 状态: $taskState，LastTaskResult: $lastRun（0 表示成功，其他为错误码）"
+        $taskInfo  = Get-ScheduledTaskInfo -TaskName $taskName
+        $lastRun   = $taskInfo.LastTaskResult
+        $lastTaskRunTime = $taskInfo.LastRunTime
+        $lastTaskRunTimeStr = if ($lastTaskRunTime -and $lastTaskRunTime.Year -gt 1900) { $lastTaskRunTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
+        if ($taskState -eq "Ready" -and [int]$lastRun -eq 267011) {
+            Log-Warn "任务处于 Ready 且 LastTaskResult=267011（0x41303，尚未进入该用户交互会话执行）。"
+            Log-Warn "这在 kinch + Interactive 模式下是预期状态：请使用 kinch 登录桌面后自动触发，或手动执行 schtasks /run /TN $taskName"
+            return
+        }
+        if (Test-Path $svcLog) {
+            Write-Host "---- 最近日志（cam.log 尾部） ----" -ForegroundColor DarkYellow
+            Get-Content $svcLog -Tail 80 | ForEach-Object { Write-Host $_ }
+            Write-Host "---------------------------------" -ForegroundColor DarkYellow
+        }
+        Log-Error "服务启动失败，Task 状态: $taskState，LastTaskResult: $lastRun，LastRunTime: $lastTaskRunTimeStr。请检查任务配置与日志（$svcLog）"
     }
 }

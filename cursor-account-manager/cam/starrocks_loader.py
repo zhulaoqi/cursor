@@ -31,13 +31,11 @@ _RETRYABLE_DB_MESSAGE_KEYWORDS = (
 _T = TypeVar("_T")
 log = get("starrocks")
 
-# ── BI 双写备用库（硬编码，停用双跑时改 False 或删除本段与 DualStarRocksLoader）──
-BI_SYNC_DUAL_WRITE = True
-BI_SYNC_BACKUP_JDBC_URL = (
-    "jdbc:mysql://fe-c-211cbbee7a09d77e-internal.starrocks.aliyuncs.com:9030/dataeye_customer"
-)
-BI_SYNC_BACKUP_USERNAME = "pro"
-BI_SYNC_BACKUP_PASSWORD = "***"
+# ── BI 双写备用库（默认关闭；如需恢复，需显式配置备用库连接）──
+BI_SYNC_DUAL_WRITE = False
+BI_SYNC_BACKUP_JDBC_URL = ""
+BI_SYNC_BACKUP_USERNAME = ""
+BI_SYNC_BACKUP_PASSWORD = ""
 
 
 def _to_decimal(value: object) -> Optional[Decimal]:
