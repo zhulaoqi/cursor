@@ -386,7 +386,7 @@ $envContent = @(
     "IMAP_SEARCH_FOLDERS=$(Get-UserVal 'IMAP_SEARCH_FOLDERS' 'INBOX,Junk,Spam')",
     "# 邮箱组：每次部署都按这里的名单覆盖，不保留旧 .env。授权码仍存在每个账号上。全部改完后把账号名单改成 *@eclicktech.com.cn",
     "IMAP_GROUP_MAILBOXES=eclicktech.com.cn=kinch.zhu@eclicktech.com.cn",
-    "IMAP_GROUP_MAILBOX_ACCOUNTS=cursor97@eclicktech.com.cn,cursor151@eclicktech.com.cn,cursor144@eclicktech.com.cn,cursor162@eclicktech.com.cn,cursor154@eclicktech.com.cn,cursor85@eclicktech.com.cn,cursor78@eclicktech.com.cn,cursor59@eclicktech.com.cn,cursor132@eclicktech.com.cn,cursor119@eclicktech.com.cn,cursor102@eclicktech.com.cn,cursor98@eclicktech.com.cn,cursor182@eclicktech.com.cn",
+    "IMAP_GROUP_MAILBOX_ACCOUNTS=cursor97@eclicktech.com.cn,cursor151@eclicktech.com.cn,cursor144@eclicktech.com.cn,cursor162@eclicktech.com.cn,cursor154@eclicktech.com.cn,cursor85@eclicktech.com.cn,cursor78@eclicktech.com.cn,cursor59@eclicktech.com.cn,cursor132@eclicktech.com.cn,cursor119@eclicktech.com.cn,cursor102@eclicktech.com.cn,cursor98@eclicktech.com.cn,cursor182@eclicktech.com.cn,cursor56@eclicktech.com.cn,cursor57@eclicktech.com.cn,cursor61@eclicktech.com.cn,cursor62@eclicktech.com.cn,cursor63@eclicktech.com.cn",
     "",
     "# ─── 代理（保留上次部署的值，如需修改请直接编辑此文件）───",
     $proxyLine,

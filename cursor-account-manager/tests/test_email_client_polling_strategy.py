@@ -68,7 +68,9 @@ class GroupMailboxTests(unittest.TestCase):
             "cursor78@eclicktech.com.cn,cursor59@eclicktech.com.cn,"
             "cursor132@eclicktech.com.cn,cursor119@eclicktech.com.cn,"
             "cursor102@eclicktech.com.cn,cursor98@eclicktech.com.cn,"
-            "cursor182@eclicktech.com.cn"
+            "cursor182@eclicktech.com.cn,cursor56@eclicktech.com.cn,"
+            "cursor57@eclicktech.com.cn,cursor61@eclicktech.com.cn,"
+            "cursor62@eclicktech.com.cn,cursor63@eclicktech.com.cn"
         )
 
     def tearDown(self):
@@ -98,6 +100,10 @@ class GroupMailboxTests(unittest.TestCase):
         )
         self.assertEqual(
             email_client.group_mailbox_for("cursor97@eclicktech.com.cn"),
+            "kinch.zhu@eclicktech.com.cn",
+        )
+        self.assertEqual(
+            email_client.group_mailbox_for("cursor56@eclicktech.com.cn"),
             "kinch.zhu@eclicktech.com.cn",
         )
         # 同后缀但不在名单里的账号，继续登录自己的邮箱
