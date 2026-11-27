@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import unittest
 
-from cam.models import Account, TokenAcquisitionError, TokenExpiredError
+from cam.models import Account, AuthCircuitOpenError, TokenAcquisitionError, TokenExpiredError
 from cam.usage_snapshot_collector import UsageSnapshotCollector
 from cam.usage_snapshot_models import (
     AuthOutcome,
@@ -41,14 +41,27 @@ class _AllowPolicy:
 class _Manager:
     """返回固定令牌或抛出预设异常。"""
 
-    def __init__(self, token="token", error=None):
+    def __init__(self, token="token", error=None, relogin_token="new-token", relogin_error=None):
         self.token = token
         self.error = error
+        self.relogin_token = relogin_token
+        self.relogin_error = relogin_error
+        self.expired: list[str] = []
+        self.relogin_calls = 0
 
     def get_valid_token(self, _account, *, auth_policy):
         if self.error is not None:
             raise self.error
         return self.token
+
+    def mark_access_token_expired(self, email):
+        self.expired.append(email)
+
+    def force_relogin(self, account, *, auth_policy):
+        self.relogin_calls += 1
+        if self.relogin_error is not None:
+            raise self.relogin_error
+        return self.relogin_token
 
 
 class _Client:
@@ -124,10 +137,11 @@ class UsageSnapshotCollectorTests(unittest.TestCase):
         self.assertEqual(result.auth_outcome, AuthOutcome.AUTH_FAILURE)
         self.assertEqual(result.error_type, "TokenAcquisitionError")
 
-    def test_api_auth_failure_is_reported_and_client_is_closed(self):
+    def test_api_auth_failure_relogins_once_then_reports_failure(self):
         client = _Client(usage=TokenExpiredError("401"))
+        manager = _Manager()
         collector = UsageSnapshotCollector(
-            manager=_Manager(),
+            manager=manager,
             client_factory=lambda _token: client,
         )
 
@@ -135,12 +149,50 @@ class UsageSnapshotCollectorTests(unittest.TestCase):
 
         self.assertEqual(result.auth_outcome, AuthOutcome.AUTH_FAILURE)
         self.assertEqual(result.error_type, "TokenExpiredError")
+        self.assertEqual(manager.expired, ["user@example.com"])
+        self.assertEqual(manager.relogin_calls, 1)
+        self.assertTrue(client.closed)
+
+    def test_explicit_login_expiry_retries_with_replaced_token(self):
+        stale = _Client(usage=TokenExpiredError('401 {"code":"unauthenticated"}'))
+        fresh = _Client()
+        manager = _Manager(relogin_token="fresh-token")
+        clients = {"token": stale, "fresh-token": fresh}
+        collector = UsageSnapshotCollector(
+            manager=manager,
+            client_factory=lambda token: clients[token],
+        )
+
+        result = _collect(collector)
+
+        self.assertEqual(result.status, CollectionStatus.SUCCESS)
+        self.assertEqual(result.auth_outcome, AuthOutcome.SUCCESS)
+        self.assertEqual(manager.expired, ["user@example.com"])
+        self.assertEqual(manager.relogin_calls, 1)
+        self.assertTrue(stale.closed)
+        self.assertTrue(fresh.closed)
+
+    def test_relogin_blocked_by_circuit_still_drops_expired_token(self):
+        client = _Client(usage=TokenExpiredError("401"))
+        manager = _Manager(relogin_error=AuthCircuitOpenError("熔断"))
+        collector = UsageSnapshotCollector(
+            manager=manager,
+            client_factory=lambda _token: client,
+        )
+
+        result = _collect(collector)
+
+        self.assertEqual(result.status, CollectionStatus.AUTH_CIRCUIT_OPEN)
+        self.assertEqual(result.auth_outcome, AuthOutcome.SKIPPED)
+        self.assertEqual(manager.expired, ["user@example.com"])
+        self.assertEqual(manager.relogin_calls, 1)
         self.assertTrue(client.closed)
 
     def test_api_error_is_non_auth_failure_and_client_is_closed(self):
         client = _Client(plan=ConnectionError("接口不可用"))
+        manager = _Manager()
         collector = UsageSnapshotCollector(
-            manager=_Manager(),
+            manager=manager,
             client_factory=lambda _token: client,
         )
 
@@ -149,6 +201,8 @@ class UsageSnapshotCollectorTests(unittest.TestCase):
         self.assertEqual(result.status, CollectionStatus.FAILED)
         self.assertEqual(result.auth_outcome, AuthOutcome.NON_AUTH_FAILURE)
         self.assertEqual(result.error_type, "ConnectionError")
+        self.assertEqual(manager.expired, [])
+        self.assertEqual(manager.relogin_calls, 0)
         self.assertTrue(client.closed)
 
     def test_page_fallback_supplies_plan_name_when_apis_lack_one(self):
